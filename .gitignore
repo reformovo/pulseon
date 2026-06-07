@@ -5,6 +5,12 @@ build/
 dist/
 wheels/
 *.egg-info
+python/pulseon/*.so
+target/
+.pytest_cache/
 
 # Virtual environments
-.venv
+.venv/
+
+# IDE and editor files
+.omo/

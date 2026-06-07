@@ -1,7 +1,38 @@
+[build-system]
+requires = ["maturin>=1.13.3,<2.0"]
+build-backend = "maturin"
+
 [project]
 name = "pulseon"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dynamic = ["version"]
+
+[dependency-groups]
+dev = ["maturin"]
+testing-extra = [
+    { include-group = "dev" },
+    "pytest",
+]
+linting = [
+    { include-group = "dev" },
+    "pyright",
+]
+
+[tool.uv]
+# Rebuild package when any rust files change
+cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
+# Uncomment to build rust code in development mode
+config-settings = { build-args = '--profile=dev' }
+
+[tool.maturin]
+python-source = "python"
+module-name = "pulseon._pulseon"
+
+[tool.pyright]
+include = ["python"]
+reportUnnecessaryTypeIgnoreComment = true
