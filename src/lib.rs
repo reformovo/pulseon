@@ -1,12 +1,27 @@
+// PulseOn — training metrics tracking with AI Native auto-research support.
+// Architecture ref: docs/native-architecture.md
+//
+// Module layout (§6.1):
+//   model/    — logical data model (pure types, no I/O)
+//   catalog/  — CatalogLayer trait + DuckLake/SQLite impl
+//   storage/  — StorageLayer trait + local/S3 impls
+//   compute/  — ComputeLayer trait + QueryInterface + DuckDB impl
+//   engine/   — orchestration: write path, flush, client lifecycle
+//   sdk/      — PyO3 bindings (pyo3 dependency isolated here)
+
+mod model;
+mod catalog;
+mod storage;
+mod compute;
+mod engine;
+mod sdk;
+
 use pyo3::prelude::*;
 
-#[pyfunction]
-fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-    Ok((a + b).to_string())
-}
-
 #[pymodule]
-fn _pulseon(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
+fn _pulseon(_m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Classes and functions will be registered in later phases.
+    // Phase 5: Client, Run
+    // Phase 8: Agent, tool definitions
     Ok(())
 }
