@@ -1,41 +1,44 @@
 # PulseOn 实现路线图
 
 > 基于 `docs/native-architecture.md` v2.1 提取的实现工作项。
-> 当前状态：scaffold 阶段（仅 placeholder `sum_as_string` pyo3 函数 + 最小 Cargo.toml）。
+> 当前状态：Phase 0 完成（脚手架搭建，31 个 Rust 源文件，13 个依赖，cargo check + maturin develop + pytest 全部通过）。
 
 ---
 
-## Phase 0：项目脚手架
+## Phase 0：项目脚手架 ✅
 
 > 依赖：无
 > 架构参考：§6 Rust Crate/模块结构, §6.3 Cargo.toml
+> 实现文档：`docs/impl-phase-0-scaffold.md`
+> Commit：`c4b473d`
 
-- [ ] 更新 `Cargo.toml`：添加全部依赖
-  - `pyo3`（已有，添加 `extension-module` feature）
-  - `pyo3-arrow = "0.17"`
-  - `duckdb = { version = "~1.10504.0", features = ["bundled"] }`
-  - `arrow = "58"`
-  - `tokio = { version = "1", features = ["full"] }`
+- [x] 更新 `Cargo.toml`：添加全部依赖（最新版本，经 @oracle 审查）
+  - `pyo3 = { version = "0.29", features = ["extension-module"] }`
+  - `pyo3-arrow = "0.19"`
+  - `duckdb = { version = "~1.10504.0", features = ["bundled", "loadable-extension"] }`
+  - `tokio = { version = "1.52", features = ["full"] }`
   - `async-trait = "0.1"`
-  - `thiserror = "2"`, `anyhow = "1"`
-  - `serde = { version = "1", features = ["derive"] }`, `serde_json = "1"`
-  - `tracing = "0.1"`, `tracing-subscriber = "0.3"`
-  - `uuid = { version = "1", features = ["v4"] }`
+  - `thiserror = "2"`（`anyhow` 延迟到 Phase 4）
+  - `serde = { version = "1.0", features = ["derive"] }`, `serde_json = "1.0"`
+  - `tracing = "0.1"`, `tracing-subscriber = { version = "0.3", features = ["env-filter"] }`
+  - `uuid = { version = "1.0", features = ["v4"] }`
   - `chrono = { version = "0.4", features = ["serde"] }`
   - `[features] default = ["native"]`
   - `[profile.release] strip = true`
-- [ ] 创建模块目录结构（§6.1）
-  - `src/model/` — `mod.rs`, `types.rs`, `run.rs`, `metric.rs`, `event.rs`, `summary.rs`, `config.rs`, `tag.rs`, `artifact.rs`
-  - `src/catalog/` — `mod.rs`, `trait.rs`, `ducklake_impl.rs`, `cloud_impl.rs`, `types.rs`
-  - `src/storage/` — `mod.rs`, `trait.rs`, `local.rs`, `s3.rs`, `ducklake_bridge.rs`
-  - `src/compute/` — `mod.rs`, `trait.rs`, `duckdb_impl.rs`, `cloud_impl.rs`, `query_interface.rs`
-  - `src/engine/` — `mod.rs`, `client.rs`, `write.rs`, `flush.rs`, `error.rs`
-  - `src/sdk/` — `mod.rs`, `client.rs`, `run.rs`, `config.rs`, `query.rs`, `error.rs`
-- [ ] 替换 `src/lib.rs` 中的 placeholder `sum_as_string`，改为 `#[pymodule] fn _pulseon` 入口
-- [ ] 删除 `tests/test_sum.py`，替换为 `tests/test_init.py`（验证 `pulseon.init()` 可导入）
-- [ ] 验证 `maturin develop` 编译通过
+  - 注：`arrow` dep 未添加（duckdb-rs 内部 re-export，避免版本冲突）
+- [x] 创建模块目录结构（§6.1，31 个 .rs 文件）
+  - `src/model/` — `mod.rs` + 8 leaf（types, run, metric, event, summary, config, tag, artifact）
+  - `src/catalog/` — `mod.rs`（含 CatalogError）+ 4 leaf（trait_def, ducklake_impl, cloud_impl, types）
+  - `src/storage/` — `mod.rs` + 4 leaf（trait_def, local, s3, ducklake_bridge）
+  - `src/compute/` — `mod.rs` + 4 leaf（trait_def, duckdb_impl, cloud_impl, query_interface）
+  - `src/engine/` — `mod.rs`（含 EngineError）+ 3 leaf（client, write, flush）
+  - `src/sdk/` — `mod.rs`（含 SdkError）+ 4 leaf（client, run, config, query）
+  - 注：`trait_def.rs` 而非 `trait.rs`（Rust 保留关键字）；`error.rs` 合并入 `mod.rs`（@oracle simplify 建议）
+- [x] 替换 `src/lib.rs`：移除 `sum_as_string`，改为模块声明 + 空 `#[pymodule]`
+- [x] 删除 `tests/test_sum.py`，创建 `tests/test_init.py`（验证 `import pulseon`）
+- [x] 验证 `cargo check`（0 warnings）+ `maturin develop` + `pytest`（1 passed）
 
-**验收**：`maturin develop && python -c "import pulseon"` 成功，无 placeholder 代码残留。
+**验收**：✅ `cargo check` 0 warnings, `maturin develop` 构建成功, `pytest` 1 passed, 无 placeholder 代码残留。
 
 ---
 
