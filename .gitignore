@@ -17,3 +17,6 @@ target/
 
 # Deepwork progress files (local session state)
 .slim/deepwork/
+
+# Agent CLI files
+.agents/
