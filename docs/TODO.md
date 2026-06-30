@@ -46,7 +46,7 @@ resume conflict, and aggregate values over the effective series.
 - [ ] Preserve endpoints during downsampling.
 - [ ] Integrate the DuckDB LTTB plugin rather than implementing downsampling in
   PulseOn.
-- [ ] Implement summary query for multi-run comparison.
+- [x] Implement summary query for multi-run comparison.
 
 Acceptance: tests cover range query, last-write-wins query output,
 downsampled output length, endpoint preservation, and summary comparison.

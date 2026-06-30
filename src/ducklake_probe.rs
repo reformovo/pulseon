@@ -312,6 +312,56 @@ mod tests {
     }
 
     #[test]
+    fn query_metric_summaries_returns_multi_run_comparison() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run_a = store.create_run(&project_id, "a", Some(RunId::from_string("run-a")))?;
+        let run_b = store.create_run(&project_id, "b", Some(RunId::from_string("run-b")))?;
+        let metric_key = MetricKey::from_string("train/loss");
+        store.log_metric_at_step(&run_a.run_id, &metric_key, Step::new(0), 0.5)?;
+        store.log_metric_at_step(&run_a.run_id, &metric_key, Step::new(1), 0.25)?;
+        store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(0), 0.4)?;
+        store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(1), 0.2)?;
+        store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(2), 0.1)?;
+
+        // When
+        let summaries = store
+            .query_metric_summaries(&[run_b.run_id.clone(), run_a.run_id.clone()], &metric_key)?;
+
+        // Then
+        let values: Vec<(&str, u64, i64, f64, f64, f64)> = summaries
+            .iter()
+            .map(|summary| {
+                (
+                    summary.run_id.as_str(),
+                    summary.effective_count,
+                    summary.last_step.value(),
+                    summary.last_value_f64,
+                    summary.min_value_f64,
+                    summary.max_value_f64,
+                )
+            })
+            .collect();
+        assert_eq!(
+            values,
+            vec![
+                ("run-b", 3, 2, 0.1, 0.1, 0.4),
+                ("run-a", 2, 1, 0.25, 0.25, 0.5),
+            ],
+        );
+        Ok(())
+    }
+
+    #[test]
     fn repair_metric_aggregate_refreshes_stale_old_step_overwrite() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = TestDataset::new()?;

@@ -229,6 +229,49 @@ impl<'connection> NativeWriteStore<'connection> {
         Ok(stored.into_metric_aggregate())
     }
 
+    pub fn query_metric_summaries(
+        &self,
+        run_ids: &[RunId],
+        metric_key: &MetricKey,
+    ) -> Result<Vec<MetricAggregate>, EngineError> {
+        if run_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let requested_rows = (0..run_ids.len())
+            .map(|ordinal| format!("(?, {ordinal})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "WITH requested(run_id, ordinal) AS (VALUES {requested_rows})
+             SELECT summary.run_id, summary.metric_key, summary.effective_count,
+                    summary.last_step, summary.last_value_f64, summary.min_value_f64,
+                    summary.max_value_f64
+             FROM dl.metric_aggregates AS summary
+             JOIN requested ON summary.run_id = requested.run_id
+             WHERE summary.metric_key = ?
+             ORDER BY requested.ordinal"
+        );
+
+        let mut params: Vec<&str> = Vec::with_capacity(run_ids.len() + 1);
+        params.extend(run_ids.iter().map(RunId::as_str));
+        params.push(metric_key.as_str());
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(duckdb::params_from_iter(params), |row| {
+            Ok(StoredMetricAggregate {
+                run_id: row.get(0)?,
+                metric_key: row.get(1)?,
+                effective_count: row.get(2)?,
+                last_step: row.get(3)?,
+                last_value_f64: row.get(4)?,
+                min_value_f64: row.get(5)?,
+                max_value_f64: row.get(6)?,
+            })
+        })?;
+
+        rows.map(|row| Ok(row?.into_metric_aggregate())).collect()
+    }
+
     pub fn repair_metric_aggregate(
         &self,
         run_id: &RunId,
