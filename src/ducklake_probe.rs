@@ -280,6 +280,42 @@ mod tests {
     }
 
     #[test]
+    fn query_metric_downsamples_long_series_with_duckdb_lttb() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute_batch(
+            "CREATE MACRO lttb(x, y, n) AS [
+                 list({x: x, y: y} ORDER BY x)[1],
+                 list({x: x, y: y} ORDER BY x)[len(list({x: x, y: y} ORDER BY x))]];
+             INSERT INTO dl.projects VALUES ('project-1', 'local training', now());
+             INSERT INTO dl.runs VALUES
+                 ('run-1', 'project-1', 'metrics', 'running', now(), now(), NULL);
+             INSERT INTO dl.metric_points VALUES
+                 ('run-1', 'train/loss', 0, now(), 0.5, now()),
+                 ('run-1', 'train/loss', 1, now(), 0.25, now()),
+                 ('run-1', 'train/loss', 2, now(), 0.125, now()),
+                 ('run-1', 'train/loss', 3, now(), 0.0625, now());",
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let run_id = RunId::from_string("run-1");
+        let metric_key = MetricKey::from_string("train/loss");
+
+        // When
+        let points = store.query_metric(&run_id, &metric_key, None, None, Some(2))?;
+
+        // Then
+        let values: Vec<(i64, f64)> = points
+            .iter()
+            .map(|point| (point.step.value(), point.value_f64))
+            .collect();
+        assert_eq!(values, vec![(0, 0.5), (3, 0.0625)]);
+        Ok(())
+    }
+
+    #[test]
     fn metric_aggregate_tracks_effective_series_values() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = TestDataset::new()?;

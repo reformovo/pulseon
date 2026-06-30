@@ -147,6 +147,28 @@ impl<'connection> NativeWriteStore<'connection> {
         end_step: Option<Step>,
         max_points: Option<usize>,
     ) -> Result<Vec<MetricPoint>, EngineError> {
+        let Some(max_points) = max_points else {
+            return self.query_metric_full(run_id, metric_key, start_step, end_step);
+        };
+
+        let row_count = self.count_metric_effective(run_id, metric_key, start_step, end_step)?;
+        if row_count <= max_points as u64 {
+            return self.query_metric_full(run_id, metric_key, start_step, end_step);
+        }
+
+        let max_points_i64 = i64::try_from(max_points)
+            .map_err(|_| EngineError::MetricQueryMaxPointsTooLarge { max_points })?;
+        self.ensure_lttb_extension_loaded()?;
+        self.query_metric_downsampled(run_id, metric_key, start_step, end_step, max_points_i64)
+    }
+
+    fn query_metric_full(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        start_step: Option<Step>,
+        end_step: Option<Step>,
+    ) -> Result<Vec<MetricPoint>, EngineError> {
         let start_step = start_step.map(Step::value);
         let end_step = end_step.map(Step::value);
         let mut statement = self.connection.prepare(
@@ -175,30 +197,91 @@ impl<'connection> NativeWriteStore<'connection> {
                 end_step,
                 end_step,
             ),
-            |row| {
-                Ok(StoredMetricPoint {
-                    run_id: row.get(0)?,
-                    metric_key: row.get(1)?,
-                    step: row.get(2)?,
-                    timestamp_millis: row.get(3)?,
-                    value_f64: row.get(4)?,
-                    ingested_at_millis: row.get(5)?,
-                })
-            },
+            stored_metric_point_from_row,
         )?;
         let points: Vec<MetricPoint> = rows
             .map(|row| row?.into_metric_point())
             .collect::<Result<_, _>>()?;
-        if let Some(max_points) = max_points
-            && points.len() > max_points
-        {
-            return Err(EngineError::MetricQueryRequiresDownsampling {
-                actual_points: points.len(),
-                max_points,
-            });
-        }
 
         Ok(points)
+    }
+
+    fn query_metric_downsampled(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        start_step: Option<Step>,
+        end_step: Option<Step>,
+        max_points: i64,
+    ) -> Result<Vec<MetricPoint>, EngineError> {
+        let start_step = start_step.map(Step::value);
+        let end_step = end_step.map(Step::value);
+        let mut statement = self.connection.prepare(
+            "WITH effective AS (
+                 SELECT run_id, metric_key, step, timestamp, value_f64, ingested_at
+                 FROM (
+                     SELECT *, row_number() OVER
+                                (PARTITION BY run_id, metric_key, step
+                                 ORDER BY ingested_at DESC, rowid DESC) AS write_rank
+                     FROM dl.metric_points
+                     WHERE run_id = ? AND metric_key = ?
+                 )
+                 WHERE write_rank = 1
+                   AND (? IS NULL OR step >= ?)
+                   AND (? IS NULL OR step <= ?)
+             ),
+             sampled AS (
+                 SELECT unnest(lttb(step, value_f64, ?)) AS point
+                 FROM effective
+             )
+             SELECT effective.run_id, effective.metric_key, effective.step,
+                    epoch_ms(effective.timestamp), effective.value_f64,
+                    epoch_ms(effective.ingested_at)
+             FROM sampled
+             JOIN effective ON effective.step = sampled.point.x ORDER BY effective.step",
+        )?;
+        let rows = statement.query_map(
+            (
+                run_id.as_str(),
+                metric_key.as_str(),
+                start_step,
+                start_step,
+                end_step,
+                end_step,
+                max_points,
+            ),
+            stored_metric_point_from_row,
+        )?;
+
+        rows.map(|row| row?.into_metric_point()).collect()
+    }
+
+    fn count_metric_effective(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        start_step: Option<Step>,
+        end_step: Option<Step>,
+    ) -> Result<u64, EngineError> {
+        let start_step = start_step.map(Step::value);
+        let end_step = end_step.map(Step::value);
+        let count = self.connection.query_row(
+            "SELECT count(DISTINCT step)
+             FROM dl.metric_points
+             WHERE run_id = ? AND metric_key = ?
+               AND (? IS NULL OR step >= ?)
+               AND (? IS NULL OR step <= ?)",
+            (
+                run_id.as_str(),
+                metric_key.as_str(),
+                start_step,
+                start_step,
+                end_step,
+                end_step,
+            ),
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 
     pub fn metric_aggregate(
@@ -280,6 +363,32 @@ impl<'connection> NativeWriteStore<'connection> {
         self.refresh_metric_aggregate(run_id, metric_key)
     }
 
+    fn ensure_lttb_extension_loaded(&self) -> Result<(), EngineError> {
+        if self.lttb_function_available() {
+            return Ok(());
+        }
+
+        match self.connection.execute_batch("LOAD lttb;") {
+            Ok(()) if self.lttb_function_available() => Ok(()),
+            Ok(()) => Err(EngineError::LttbExtensionUnavailable {
+                message: "LOAD lttb did not register lttb".to_owned(),
+            }),
+            Err(source) => Err(EngineError::LttbExtensionUnavailable {
+                message: source.to_string(),
+            }),
+        }
+    }
+
+    fn lttb_function_available(&self) -> bool {
+        self.connection
+            .query_row(
+                "SELECT count(*) FROM (SELECT lttb(1::BIGINT, 1::DOUBLE, 1::BIGINT))",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .is_ok()
+    }
+
     fn run_exists(&self, run_id: &RunId) -> Result<bool, EngineError> {
         let count: i64 = self.connection.query_row(
             "SELECT count(*) FROM dl.runs WHERE run_id = ?",
@@ -338,4 +447,15 @@ impl<'connection> NativeWriteStore<'connection> {
         )?;
         Ok(())
     }
+}
+
+fn stored_metric_point_from_row(row: &duckdb::Row<'_>) -> duckdb::Result<StoredMetricPoint> {
+    Ok(StoredMetricPoint {
+        run_id: row.get(0)?,
+        metric_key: row.get(1)?,
+        step: row.get(2)?,
+        timestamp_millis: row.get(3)?,
+        value_f64: row.get(4)?,
+        ingested_at_millis: row.get(5)?,
+    })
 }

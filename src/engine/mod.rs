@@ -23,11 +23,10 @@ pub enum EngineError {
     RunAlreadyExists { run_id: String },
     #[error("run not found: {run_id}")]
     RunNotFound { run_id: String },
-    #[error("metric query returned {actual_points} points, exceeding max_points {max_points}")]
-    MetricQueryRequiresDownsampling {
-        actual_points: usize,
-        max_points: usize,
-    },
+    #[error("metric query max_points is too large for DuckDB LTTB: {max_points}")]
+    MetricQueryMaxPointsTooLarge { max_points: usize },
+    #[error("DuckDB LTTB extension is unavailable: {message}")]
+    LttbExtensionUnavailable { message: String },
     #[error("invalid stored run status: {status}")]
     InvalidRunStatus { status: String },
     #[error("invalid stored timestamp for {field}: {millis}")]

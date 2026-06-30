@@ -42,9 +42,9 @@ resume conflict, and aggregate values over the effective series.
 - [x] Implement `query_metric(run_id, metric_key, start_step, end_step,
   max_points)`.
 - [x] Return unchanged series when row count is at or below `max_points`.
-- [ ] Enforce strict `max_points` for long series.
-- [ ] Preserve endpoints during downsampling.
-- [ ] Integrate the DuckDB LTTB plugin rather than implementing downsampling in
+- [x] Enforce strict `max_points` for long series.
+- [x] Preserve endpoints during downsampling.
+- [x] Integrate the DuckDB LTTB plugin rather than implementing downsampling in
   PulseOn.
 - [x] Implement summary query for multi-run comparison.
 
