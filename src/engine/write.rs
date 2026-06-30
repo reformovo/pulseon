@@ -1,8 +1,8 @@
+use crate::engine::EngineError;
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
 use crate::engine::write_rows::{
-    status_as_str, StoredMetricAggregate, StoredMetricPoint, StoredRun,
+    StoredMetricAggregate, StoredMetricPoint, StoredRun, status_as_str,
 };
-use crate::engine::EngineError;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::ProjectId;

@@ -1,5 +1,5 @@
-use crate::engine::time::timestamp_from_millis;
 use crate::engine::EngineError;
+use crate::engine::time::timestamp_from_millis;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::ProjectId;

@@ -3,7 +3,7 @@ mod tests {
     use std::error::Error;
 
     use crate::ducklake_test_support::{
-        attach_ducklake, create_minimal_v1_tables, seed_minimal_v1_data, TestDataset,
+        TestDataset, attach_ducklake, create_minimal_v1_tables, seed_minimal_v1_data,
     };
     use crate::model::metric::{MetricKey, Step};
     use crate::model::run::RunId;
