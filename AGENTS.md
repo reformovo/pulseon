@@ -3,12 +3,12 @@
 - Python package backed by Rust/PyO3, built with `maturin`.
 - Rust crate: edition 2024, `cdylib`, source under `src/`.
 - Python package source: `python/pulseon/`; tests under `tests/`.
-- Architecture reference: `docs/native-architecture.md`; roadmap: `docs/TODO.md`.
+- Architecture reference: `docs/v1-native-architecture.md`; roadmap: `docs/TODO.md`.
 
 ## Must Always
 
 - Declare the files you will edit before changing code. Keep normal tasks to <=5 files and <=200 changed lines unless the user expands scope.
-- Preserve the catalog / storage / compute / engine / sdk boundaries described in `docs/native-architecture.md`.
+- Preserve the v1 native boundaries described in `docs/v1-native-architecture.md`.
 - Keep Python code typed; update `python/pulseon/_pulseon.pyi` when exposing new Python API from Rust.
 - Add or update tests for new behavior. Rust logic should have Rust tests where possible; Python-facing behavior should have `pytest` coverage.
 - Run the relevant verification commands after edits and report any command you could not run.
@@ -26,7 +26,7 @@
 
 - Ask first before adding runtime dependencies, changing the public Python API shape, altering package metadata, or changing CI/release behavior.
 - Prefer small roadmap-aligned phases from `docs/TODO.md`; one feature/fix should be independently reviewable.
-- Treat DuckLake as a Native implementation detail behind traits, not as the product protocol.
+- Treat DuckLake as a required v1 Native dependency, but keep the Parquet schema as the product compatibility boundary.
 
 ## Commands
 
