@@ -3,7 +3,9 @@
 
 pub mod client;
 pub mod flush;
+mod time;
 pub mod write;
+mod write_rows;
 
 // Unified error type for engine operations.
 // Merged from engine/error.rs per oracle review (simplify: extract to
