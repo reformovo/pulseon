@@ -193,6 +193,14 @@ impl<'connection> NativeWriteStore<'connection> {
         Ok(stored.into_metric_aggregate())
     }
 
+    pub fn repair_metric_aggregate(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+    ) -> Result<(), EngineError> {
+        self.refresh_metric_aggregate(run_id, metric_key)
+    }
+
     fn run_exists(&self, run_id: &RunId) -> Result<bool, EngineError> {
         let count: i64 = self.connection.query_row(
             "SELECT count(*) FROM dl.runs WHERE run_id = ?",

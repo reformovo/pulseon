@@ -32,7 +32,7 @@ project/run, insert metric points, and read them back.
 - [x] Implement logical last-write-wins query semantics.
 - [x] Design materialized-view-like aggregate state for metric discovery and
   summaries: effective count, last, min, max.
-- [ ] Allow async repair of stale aggregates after old-step overwrites.
+- [x] Allow async repair of stale aggregates after old-step overwrites.
 
 Acceptance: tests cover automatic step, explicit step, duplicate overwrite,
 resume conflict, and aggregate values over the effective series.

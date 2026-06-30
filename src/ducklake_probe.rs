@@ -240,4 +240,40 @@ mod tests {
         assert_eq!(aggregate.max_value_f64, 0.375);
         Ok(())
     }
+
+    #[test]
+    fn repair_metric_aggregate_refreshes_stale_old_step_overwrite() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
+        let metric_key = MetricKey::from_string("train/loss");
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.5)?;
+        connection.execute(
+            "INSERT INTO dl.metric_points VALUES
+                 ('run-1', 'train/loss', 0, now(), 0.125, now())",
+            [],
+        )?;
+        let stale = store.metric_aggregate(&run.run_id, &metric_key)?;
+
+        // When
+        store.repair_metric_aggregate(&run.run_id, &metric_key)?;
+        let repaired = store.metric_aggregate(&run.run_id, &metric_key)?;
+
+        // Then
+        assert_eq!(stale.min_value_f64, 0.25);
+        assert_eq!(repaired.effective_count, 2);
+        assert_eq!(repaired.min_value_f64, 0.125);
+        assert_eq!(repaired.max_value_f64, 0.5);
+        Ok(())
+    }
 }
