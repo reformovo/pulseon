@@ -93,6 +93,16 @@ impl<'connection> NativeWriteStore<'connection> {
         value_f64: f64,
     ) -> Result<MetricPoint, EngineError> {
         let step = self.next_metric_step(run_id, metric_key)?;
+        self.log_metric_at_step(run_id, metric_key, step, value_f64)
+    }
+
+    pub fn log_metric_at_step(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        step: Step,
+        value_f64: f64,
+    ) -> Result<MetricPoint, EngineError> {
         let timestamp = current_timestamp("timestamp")?;
         let ingested_at = current_timestamp("ingested_at")?;
         self.connection.execute(
@@ -117,6 +127,40 @@ impl<'connection> NativeWriteStore<'connection> {
             value_f64,
             ingested_at,
         })
+    }
+
+    pub fn query_metric_effective(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+    ) -> Result<Vec<MetricPoint>, EngineError> {
+        let mut statement = self.connection.prepare(
+            "SELECT run_id, metric_key, step, epoch_ms(timestamp), value_f64, epoch_ms(ingested_at)
+             FROM (
+                 SELECT *,
+                        row_number() OVER (
+                            PARTITION BY run_id, metric_key, step
+                            ORDER BY ingested_at DESC, rowid DESC
+                        ) AS write_rank
+                 FROM dl.metric_points
+                 WHERE run_id = ?
+                   AND metric_key = ?
+             )
+             WHERE write_rank = 1
+             ORDER BY step",
+        )?;
+        let rows = statement.query_map((run_id.as_str(), metric_key.as_str()), |row| {
+            Ok(StoredMetricPoint {
+                run_id: row.get(0)?,
+                metric_key: row.get(1)?,
+                step: row.get(2)?,
+                timestamp_millis: row.get(3)?,
+                value_f64: row.get(4)?,
+                ingested_at_millis: row.get(5)?,
+            })
+        })?;
+
+        rows.map(|row| row?.into_metric_point()).collect()
     }
 
     fn run_exists(&self, run_id: &RunId) -> Result<bool, EngineError> {
@@ -153,6 +197,28 @@ struct StoredRun {
     created_at_millis: i64,
     started_at_millis: i64,
     finished_at_millis: Option<i64>,
+}
+
+struct StoredMetricPoint {
+    run_id: String,
+    metric_key: String,
+    step: i64,
+    timestamp_millis: i64,
+    value_f64: f64,
+    ingested_at_millis: i64,
+}
+
+impl StoredMetricPoint {
+    fn into_metric_point(self) -> Result<MetricPoint, EngineError> {
+        Ok(MetricPoint {
+            run_id: RunId::from_string(self.run_id),
+            metric_key: MetricKey::from_string(self.metric_key),
+            step: Step::new(self.step),
+            timestamp: timestamp_from_millis("timestamp", self.timestamp_millis)?,
+            value_f64: self.value_f64,
+            ingested_at: timestamp_from_millis("ingested_at", self.ingested_at_millis)?,
+        })
+    }
 }
 
 impl StoredRun {

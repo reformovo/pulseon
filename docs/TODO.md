@@ -29,7 +29,7 @@ project/run, insert metric points, and read them back.
 - [x] Require explicit resume when `run_id` already exists.
 - [x] Implement `log_metric` with automatic per `(run_id, metric_key)` step.
 - [x] Store metric points with `ingested_at`.
-- [ ] Implement logical last-write-wins query semantics.
+- [x] Implement logical last-write-wins query semantics.
 - [ ] Design materialized-view-like aggregate state for metric discovery and
   summaries: effective count, last, min, max.
 - [ ] Allow async repair of stale aggregates after old-step overwrites.

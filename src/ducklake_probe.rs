@@ -5,7 +5,7 @@ mod tests {
     use crate::ducklake_test_support::{
         attach_ducklake, create_minimal_v1_tables, seed_minimal_v1_data, TestDataset,
     };
-    use crate::model::metric::MetricKey;
+    use crate::model::metric::{MetricKey, Step};
     use crate::model::run::RunId;
     use crate::model::types::ProjectId;
 
@@ -175,6 +175,37 @@ mod tests {
             |row| row.get(0),
         )?;
         assert!(stored_ingest_is_after_timestamp);
+        Ok(())
+    }
+
+    #[test]
+    fn query_metric_uses_last_write_wins_for_duplicate_steps() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
+        let metric_key = MetricKey::from_string("train/loss");
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.125)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.0625)?;
+
+        // When
+        let effective = store.query_metric_effective(&run.run_id, &metric_key)?;
+
+        // Then
+        let values: Vec<(i64, f64)> = effective
+            .iter()
+            .map(|point| (point.step.value(), point.value_f64))
+            .collect();
+        assert_eq!(values, vec![(0, 0.125), (1, 0.0625)]);
         Ok(())
     }
 }
