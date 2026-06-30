@@ -13,6 +13,8 @@ mod catalog;
 mod compute;
 #[cfg(test)]
 mod ducklake_probe;
+#[cfg(test)]
+mod ducklake_test_support;
 pub mod engine;
 pub mod model;
 mod sdk;
