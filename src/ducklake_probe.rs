@@ -210,6 +210,76 @@ mod tests {
     }
 
     #[test]
+    fn query_metric_filters_effective_series_by_step_range() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
+        let metric_key = MetricKey::from_string("train/loss");
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.5)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.25)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.125)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(2), 0.0625)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(3), 0.03125)?;
+
+        // When
+        let points = store.query_metric(
+            &run.run_id,
+            &metric_key,
+            Some(Step::new(1)),
+            Some(Step::new(2)),
+            None,
+        )?;
+
+        // Then
+        let values: Vec<(i64, f64)> = points
+            .iter()
+            .map(|point| (point.step.value(), point.value_f64))
+            .collect();
+        assert_eq!(values, vec![(1, 0.125), (2, 0.0625)]);
+        Ok(())
+    }
+
+    #[test]
+    fn query_metric_returns_short_series_unchanged_under_max_points() -> Result<(), Box<dyn Error>>
+    {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
+        let metric_key = MetricKey::from_string("train/loss");
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.125)?;
+
+        // When
+        let points = store.query_metric(&run.run_id, &metric_key, None, None, Some(2))?;
+
+        // Then
+        let values: Vec<(i64, f64)> = points
+            .iter()
+            .map(|point| (point.step.value(), point.value_f64))
+            .collect();
+        assert_eq!(values, vec![(0, 0.25), (1, 0.125)]);
+        Ok(())
+    }
+
+    #[test]
     fn metric_aggregate_tracks_effective_series_values() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = TestDataset::new()?;

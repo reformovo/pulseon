@@ -39,9 +39,9 @@ resume conflict, and aggregate values over the effective series.
 
 ## Phase 3: Query + Downsampling
 
-- [ ] Implement `query_metric(run_id, metric_key, start_step, end_step,
+- [x] Implement `query_metric(run_id, metric_key, start_step, end_step,
   max_points)`.
-- [ ] Return unchanged series when row count is at or below `max_points`.
+- [x] Return unchanged series when row count is at or below `max_points`.
 - [ ] Enforce strict `max_points` for long series.
 - [ ] Preserve endpoints during downsampling.
 - [ ] Integrate the DuckDB LTTB plugin rather than implementing downsampling in

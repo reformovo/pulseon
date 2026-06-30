@@ -136,6 +136,19 @@ impl<'connection> NativeWriteStore<'connection> {
         run_id: &RunId,
         metric_key: &MetricKey,
     ) -> Result<Vec<MetricPoint>, EngineError> {
+        self.query_metric(run_id, metric_key, None, None, None)
+    }
+
+    pub fn query_metric(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        start_step: Option<Step>,
+        end_step: Option<Step>,
+        max_points: Option<usize>,
+    ) -> Result<Vec<MetricPoint>, EngineError> {
+        let start_step = start_step.map(Step::value);
+        let end_step = end_step.map(Step::value);
         let mut statement = self.connection.prepare(
             "SELECT run_id, metric_key, step, epoch_ms(timestamp), value_f64, epoch_ms(ingested_at)
              FROM (
@@ -149,20 +162,43 @@ impl<'connection> NativeWriteStore<'connection> {
                    AND metric_key = ?
              )
              WHERE write_rank = 1
+               AND (? IS NULL OR step >= ?)
+               AND (? IS NULL OR step <= ?)
              ORDER BY step",
         )?;
-        let rows = statement.query_map((run_id.as_str(), metric_key.as_str()), |row| {
-            Ok(StoredMetricPoint {
-                run_id: row.get(0)?,
-                metric_key: row.get(1)?,
-                step: row.get(2)?,
-                timestamp_millis: row.get(3)?,
-                value_f64: row.get(4)?,
-                ingested_at_millis: row.get(5)?,
-            })
-        })?;
+        let rows = statement.query_map(
+            (
+                run_id.as_str(),
+                metric_key.as_str(),
+                start_step,
+                start_step,
+                end_step,
+                end_step,
+            ),
+            |row| {
+                Ok(StoredMetricPoint {
+                    run_id: row.get(0)?,
+                    metric_key: row.get(1)?,
+                    step: row.get(2)?,
+                    timestamp_millis: row.get(3)?,
+                    value_f64: row.get(4)?,
+                    ingested_at_millis: row.get(5)?,
+                })
+            },
+        )?;
+        let points: Vec<MetricPoint> = rows
+            .map(|row| row?.into_metric_point())
+            .collect::<Result<_, _>>()?;
+        if let Some(max_points) = max_points
+            && points.len() > max_points
+        {
+            return Err(EngineError::MetricQueryRequiresDownsampling {
+                actual_points: points.len(),
+                max_points,
+            });
+        }
 
-        rows.map(|row| row?.into_metric_point()).collect()
+        Ok(points)
     }
 
     pub fn metric_aggregate(
