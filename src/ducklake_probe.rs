@@ -29,7 +29,7 @@ mod tests {
     }
 
     #[test]
-    fn ducklake_creates_minimal_v1_tables() -> Result<(), Box<dyn Error>> {
+    fn ducklake_round_trips_minimal_v1_data() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = TestDataset::new()?;
         let connection = duckdb::Connection::open_in_memory()?;
@@ -49,6 +49,17 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(table_count, 4);
+        seed_minimal_v1_data(&connection)?;
+
+        let metric_total: f64 = connection.query_row(
+            "SELECT sum(value_f64)
+             FROM dl.metric_points
+             WHERE run_id = 'run-1'
+               AND metric_key = 'train/loss'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(metric_total, 0.375);
         Ok(())
     }
 
@@ -98,6 +109,20 @@ mod tests {
                  min_value_f64 DOUBLE NOT NULL,
                  max_value_f64 DOUBLE NOT NULL
              );",
+        )
+    }
+
+    fn seed_minimal_v1_data(connection: &duckdb::Connection) -> duckdb::Result<()> {
+        connection.execute_batch(
+            "INSERT INTO dl.projects VALUES
+                 ('project-1', 'local training', now());
+             INSERT INTO dl.runs VALUES
+                 ('run-1', 'project-1', 'baseline', 'running', now(), now(), NULL);
+             INSERT INTO dl.metric_points VALUES
+                 ('run-1', 'train/loss', 0, now(), 0.25, now()),
+                 ('run-1', 'train/loss', 1, now(), 0.125, now());
+             INSERT INTO dl.metric_aggregates VALUES
+                 ('run-1', 'train/loss', 2, 1, 0.125, 0.125, 0.25);",
         )
     }
 }
