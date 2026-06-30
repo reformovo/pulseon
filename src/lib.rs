@@ -9,12 +9,14 @@
 //   engine/   — orchestration: write path, flush, client lifecycle
 //   sdk/      — PyO3 bindings (pyo3 dependency isolated here)
 
-pub mod model;
 mod catalog;
-mod storage;
 mod compute;
+#[cfg(test)]
+mod ducklake_probe;
 mod engine;
+pub mod model;
 mod sdk;
+mod storage;
 
 use pyo3::prelude::*;
 

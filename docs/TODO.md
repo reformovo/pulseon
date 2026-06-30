@@ -14,7 +14,7 @@
 
 - [x] Define minimal Rust types: `Project`, `Run`, `RunStatus`,
   `MetricPoint`, `MetricAggregate`, query parameter structs, and IDs.
-- [ ] Attach DuckLake in tests and create the minimal v1 tables.
+- [x] Attach DuckLake in tests and create the minimal v1 tables.
 - [ ] Verify the model against real insert/query behavior instead of pure types
   only.
 - [ ] Do not add workspace, config, tags, artifacts, events, Cloud skeletons, or

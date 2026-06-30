@@ -14,8 +14,7 @@ pyo3-arrow = "0.19"
 
 # DuckDB (embedded) — version encoding 1.MAJOR_MINOR_PATCH.x → DuckDB v1.5.4
 # "bundled": compile DuckDB C++ from source (maturin wheel distribution)
-# "loadable-extension": enable runtime LOAD for ducklake/lttb/httpfs extensions
-duckdb = { version = "~1.10504.0", features = ["bundled", "loadable-extension"] }
+duckdb = { version = "~1.10504.0", features = ["bundled"] }
 
 # Async runtime
 tokio = { version = "1.52", features = ["full"] }
