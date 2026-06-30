@@ -17,7 +17,7 @@
 - [x] Attach DuckLake in tests and create the minimal v1 tables.
 - [x] Verify the model against real insert/query behavior instead of pure types
   only.
-- [ ] Do not add workspace, config, tags, artifacts, events, Cloud skeletons, or
+- [x] Do not add workspace, config, tags, artifacts, events, Cloud skeletons, or
   public storage abstractions.
 
 Acceptance: Rust tests can initialize a temporary DuckLake dataset, create a
