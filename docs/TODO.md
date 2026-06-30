@@ -26,7 +26,7 @@ project/run, insert metric points, and read them back.
 ## Phase 2: Write Path + Aggregates
 
 - [x] Implement run creation with generated or user-supplied `run_id`.
-- [ ] Require explicit resume when `run_id` already exists.
+- [x] Require explicit resume when `run_id` already exists.
 - [ ] Implement `log_metric` with automatic per `(run_id, metric_key)` step.
 - [ ] Store metric points with `ingested_at`.
 - [ ] Implement logical last-write-wins query semantics.

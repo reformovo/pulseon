@@ -17,4 +17,12 @@ pub enum EngineError {
     Catalog(#[from] crate::catalog::CatalogError),
     #[error("duckdb error: {0}")]
     DuckDb(#[from] duckdb::Error),
+    #[error("run already exists: {run_id}")]
+    RunAlreadyExists { run_id: String },
+    #[error("run not found: {run_id}")]
+    RunNotFound { run_id: String },
+    #[error("invalid stored run status: {status}")]
+    InvalidRunStatus { status: String },
+    #[error("invalid stored timestamp for {field}: {millis}")]
+    InvalidTimestamp { field: &'static str, millis: i64 },
 }

@@ -97,6 +97,38 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn create_run_requires_explicit_resume_for_existing_run_id() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run_id = RunId::from_string("run-user-1");
+        let created = store.create_run(&project_id, "first", Some(run_id.clone()))?;
+
+        // When
+        let duplicate = store.create_run(&project_id, "second", Some(run_id.clone()));
+        let resumed = store.resume_run(&run_id)?;
+
+        // Then
+        assert!(matches!(
+            duplicate,
+            Err(crate::engine::EngineError::RunAlreadyExists { .. })
+        ));
+        assert_eq!(resumed, created);
+        let run_count: i64 =
+            connection.query_row("SELECT count(*) FROM dl.runs", [], |row| row.get(0))?;
+        assert_eq!(run_count, 1);
+        Ok(())
+    }
+
     fn attach_ducklake(
         connection: &duckdb::Connection,
         dataset: &TestDataset,
