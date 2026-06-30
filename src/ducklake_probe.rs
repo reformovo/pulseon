@@ -3,7 +3,7 @@ mod tests {
     use std::error::Error;
 
     use crate::ducklake_test_support::{
-        TestDataset, attach_ducklake, create_minimal_v1_tables, seed_minimal_v1_data,
+        attach_ducklake, create_minimal_v1_tables, seed_minimal_v1_data, TestDataset,
     };
     use crate::model::metric::{MetricKey, Step};
     use crate::model::run::RunId;
@@ -206,6 +206,38 @@ mod tests {
             .map(|point| (point.step.value(), point.value_f64))
             .collect();
         assert_eq!(values, vec![(0, 0.125), (1, 0.0625)]);
+        Ok(())
+    }
+
+    #[test]
+    fn metric_aggregate_tracks_effective_series_values() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
+        let metric_key = MetricKey::from_string("train/loss");
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.5)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.125)?;
+        store.log_metric_at_step(&run.run_id, &metric_key, Step::new(2), 0.375)?;
+
+        // When
+        let aggregate = store.metric_aggregate(&run.run_id, &metric_key)?;
+
+        // Then
+        assert_eq!(aggregate.effective_count, 3);
+        assert_eq!(aggregate.last_step, Step::new(2));
+        assert_eq!(aggregate.last_value_f64, 0.375);
+        assert_eq!(aggregate.min_value_f64, 0.125);
+        assert_eq!(aggregate.max_value_f64, 0.375);
         Ok(())
     }
 }

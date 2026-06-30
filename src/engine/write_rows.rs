@@ -1,6 +1,6 @@
 use crate::engine::time::timestamp_from_millis;
 use crate::engine::EngineError;
-use crate::model::metric::{MetricKey, MetricPoint, Step};
+use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::ProjectId;
 
@@ -38,6 +38,30 @@ pub struct StoredMetricPoint {
     pub timestamp_millis: i64,
     pub value_f64: f64,
     pub ingested_at_millis: i64,
+}
+
+pub struct StoredMetricAggregate {
+    pub run_id: String,
+    pub metric_key: String,
+    pub effective_count: u64,
+    pub last_step: i64,
+    pub last_value_f64: f64,
+    pub min_value_f64: f64,
+    pub max_value_f64: f64,
+}
+
+impl StoredMetricAggregate {
+    pub fn into_metric_aggregate(self) -> MetricAggregate {
+        MetricAggregate {
+            run_id: RunId::from_string(self.run_id),
+            metric_key: MetricKey::from_string(self.metric_key),
+            effective_count: self.effective_count,
+            last_step: Step::new(self.last_step),
+            last_value_f64: self.last_value_f64,
+            min_value_f64: self.min_value_f64,
+            max_value_f64: self.max_value_f64,
+        }
+    }
 }
 
 impl StoredMetricPoint {
