@@ -7,11 +7,23 @@
       "skillPath": "skills/engineering/grill-with-docs/SKILL.md",
       "computedHash": "e7ef25bbee50cda2eb7b3a8ef541db0a0396dad7d369f7d14fb610671dd1864b"
     },
+    "python-best-practices": {
+      "source": "reformovo/skills",
+      "sourceType": "github",
+      "skillPath": "skills/python-best-practices/SKILL.md",
+      "computedHash": "a17528efeb522ae42fd150743aea3ef22fed50bbd953f2fd3b9f85973443290e"
+    },
     "reform": {
       "source": "reformovo/skills",
       "sourceType": "github",
       "skillPath": "skills/reform/SKILL.md",
       "computedHash": "758d1c77be086cf4b89ada26a822096b1c455bf2b7f3ad93be2bc905430bdfec"
+    },
+    "rust-best-practices": {
+      "source": "reformovo/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-best-practices/SKILL.md",
+      "computedHash": "804d7895f27d329eb6a1ef231a45865a9c9b90e42e8face94ee1c997239aca2b"
     }
   }
 }
