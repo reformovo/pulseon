@@ -93,8 +93,8 @@ impl<'connection> NativeWriteStore<'connection> {
         value_f64: f64,
     ) -> Result<MetricPoint, EngineError> {
         let step = self.next_metric_step(run_id, metric_key)?;
-        let timestamp_millis = Utc::now().timestamp_millis();
-        let timestamp = timestamp_from_millis("timestamp", timestamp_millis)?;
+        let timestamp = current_timestamp("timestamp")?;
+        let ingested_at = current_timestamp("ingested_at")?;
         self.connection.execute(
             "INSERT INTO dl.metric_points
                  (run_id, metric_key, step, timestamp, value_f64, ingested_at)
@@ -105,7 +105,7 @@ impl<'connection> NativeWriteStore<'connection> {
                 step.value(),
                 timestamp_as_rfc3339(timestamp),
                 value_f64,
-                timestamp_as_rfc3339(timestamp),
+                timestamp_as_rfc3339(ingested_at),
             ),
         )?;
 
@@ -115,7 +115,7 @@ impl<'connection> NativeWriteStore<'connection> {
             step,
             timestamp,
             value_f64,
-            ingested_at: timestamp,
+            ingested_at,
         })
     }
 
@@ -193,6 +193,10 @@ fn run_status_from_str(status: &str) -> Result<RunStatus, EngineError> {
 
 fn timestamp_as_rfc3339(timestamp: DateTime<Utc>) -> String {
     timestamp.to_rfc3339()
+}
+
+fn current_timestamp(field: &'static str) -> Result<DateTime<Utc>, EngineError> {
+    timestamp_from_millis(field, Utc::now().timestamp_millis())
 }
 
 fn timestamp_from_millis(field: &'static str, millis: i64) -> Result<DateTime<Utc>, EngineError> {

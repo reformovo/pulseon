@@ -143,4 +143,38 @@ mod tests {
         assert_eq!(stored, vec![(0, 0.25, true), (1, 0.125, true)]);
         Ok(())
     }
+
+    #[test]
+    fn log_metric_stores_ingested_at_for_metric_points() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
+        let metric_key = MetricKey::from_string("train/loss");
+
+        // When
+        let point = store.log_metric(&run.run_id, &metric_key, 0.25)?;
+
+        // Then
+        assert!(point.ingested_at >= point.timestamp);
+        let stored_ingest_is_after_timestamp: bool = connection.query_row(
+            "SELECT ingested_at >= timestamp
+             FROM dl.metric_points
+             WHERE run_id = 'run-1'
+               AND metric_key = 'train/loss'
+               AND step = 0",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(stored_ingest_is_after_timestamp);
+        Ok(())
+    }
 }
