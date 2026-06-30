@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::engine::EngineError;
+use crate::model::metric::{MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::ProjectId;
 
@@ -85,6 +86,39 @@ impl<'connection> NativeWriteStore<'connection> {
         stored.into_run()
     }
 
+    pub fn log_metric(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        value_f64: f64,
+    ) -> Result<MetricPoint, EngineError> {
+        let step = self.next_metric_step(run_id, metric_key)?;
+        let timestamp_millis = Utc::now().timestamp_millis();
+        let timestamp = timestamp_from_millis("timestamp", timestamp_millis)?;
+        self.connection.execute(
+            "INSERT INTO dl.metric_points
+                 (run_id, metric_key, step, timestamp, value_f64, ingested_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                run_id.as_str(),
+                metric_key.as_str(),
+                step.value(),
+                timestamp_as_rfc3339(timestamp),
+                value_f64,
+                timestamp_as_rfc3339(timestamp),
+            ),
+        )?;
+
+        Ok(MetricPoint {
+            run_id: run_id.clone(),
+            metric_key: metric_key.clone(),
+            step,
+            timestamp,
+            value_f64,
+            ingested_at: timestamp,
+        })
+    }
+
     fn run_exists(&self, run_id: &RunId) -> Result<bool, EngineError> {
         let count: i64 = self.connection.query_row(
             "SELECT count(*) FROM dl.runs WHERE run_id = ?",
@@ -92,6 +126,22 @@ impl<'connection> NativeWriteStore<'connection> {
             |row| row.get(0),
         )?;
         Ok(count > 0)
+    }
+
+    fn next_metric_step(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+    ) -> Result<Step, EngineError> {
+        let next: i64 = self.connection.query_row(
+            "SELECT coalesce(max(step) + 1, 0)
+             FROM dl.metric_points
+             WHERE run_id = ?
+               AND metric_key = ?",
+            (run_id.as_str(), metric_key.as_str()),
+            |row| row.get(0),
+        )?;
+        Ok(Step::new(next))
     }
 }
 

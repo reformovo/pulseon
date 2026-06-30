@@ -3,6 +3,7 @@ mod tests {
     use std::error::Error;
     use std::path::PathBuf;
 
+    use crate::model::metric::MetricKey;
     use crate::model::run::RunId;
     use crate::model::types::ProjectId;
 
@@ -126,6 +127,43 @@ mod tests {
         let run_count: i64 =
             connection.query_row("SELECT count(*) FROM dl.runs", [], |row| row.get(0))?;
         assert_eq!(run_count, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn log_metric_assigns_next_step_per_run_and_metric_key() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+        let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
+        let metric_key = MetricKey::from_string("train/loss");
+
+        // When
+        let first = store.log_metric(&run.run_id, &metric_key, 0.25)?;
+        let second = store.log_metric(&run.run_id, &metric_key, 0.125)?;
+
+        // Then
+        assert_eq!(first.step.value(), 0);
+        assert_eq!(second.step.value(), 1);
+        let stored: Vec<(i64, f64, bool)> = connection
+            .prepare(
+                "SELECT step, value_f64, ingested_at IS NOT NULL
+                 FROM dl.metric_points
+                 WHERE run_id = 'run-1'
+                   AND metric_key = 'train/loss'
+                 ORDER BY step",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<Result<_, _>>()?;
+        assert_eq!(stored, vec![(0, 0.25, true), (1, 0.125, true)]);
         Ok(())
     }
 
