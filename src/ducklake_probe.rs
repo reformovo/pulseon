@@ -3,6 +3,9 @@ mod tests {
     use std::error::Error;
     use std::path::PathBuf;
 
+    use crate::model::run::RunId;
+    use crate::model::types::ProjectId;
+
     struct TestDataset {
         root: PathBuf,
         catalog_path: PathBuf,
@@ -60,6 +63,37 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(metric_total, 0.375);
+        Ok(())
+    }
+
+    #[test]
+    fn create_run_persists_generated_and_user_supplied_ids() -> Result<(), Box<dyn Error>> {
+        // Given
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        connection.execute(
+            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
+            [],
+        )?;
+        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let project_id = ProjectId::from_string("project-1");
+
+        // When
+        let generated = store.create_run(&project_id, "generated", None)?;
+        let supplied = store.create_run(
+            &project_id,
+            "supplied",
+            Some(RunId::from_string("run-user-1")),
+        )?;
+
+        // Then
+        assert_ne!(generated.run_id, supplied.run_id);
+        assert_eq!(supplied.run_id.as_str(), "run-user-1");
+        let run_count: i64 =
+            connection.query_row("SELECT count(*) FROM dl.runs", [], |row| row.get(0))?;
+        assert_eq!(run_count, 2);
         Ok(())
     }
 
