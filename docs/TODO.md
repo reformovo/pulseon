@@ -12,7 +12,7 @@
 
 ## Phase 1: Native Data Model + DuckLake Probe
 
-- [ ] Define minimal Rust types: `Project`, `Run`, `RunStatus`,
+- [x] Define minimal Rust types: `Project`, `Run`, `RunStatus`,
   `MetricPoint`, `MetricAggregate`, query parameter structs, and IDs.
 - [ ] Attach DuckLake in tests and create the minimal v1 tables.
 - [ ] Verify the model against real insert/query behavior instead of pure types

@@ -9,7 +9,7 @@
 //   engine/   — orchestration: write path, flush, client lifecycle
 //   sdk/      — PyO3 bindings (pyo3 dependency isolated here)
 
-mod model;
+pub mod model;
 mod catalog;
 mod storage;
 mod compute;
