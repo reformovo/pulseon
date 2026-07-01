@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Mutex, MutexGuard};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use crate::engine::EngineError;
 use crate::engine::write::NativeWriteStore;
@@ -25,10 +26,11 @@ impl MetricReporter {
         let (sender, receiver) = mpsc::sync_channel(capacity);
         let diagnostics = Arc::new(MetricReporterDiagnosticsInner::default());
         let worker_diagnostics = Arc::clone(&diagnostics);
+        let failure_diagnostics = Arc::clone(&diagnostics);
         let worker = std::thread::spawn(move || {
-            let result = metric_worker(connection, receiver);
+            let result = metric_worker(connection, receiver, worker_diagnostics);
             if result.is_err() {
-                worker_diagnostics.increment_failed();
+                failure_diagnostics.increment_failed();
             }
         });
 
@@ -61,15 +63,33 @@ impl MetricReporter {
                 return;
             }
         };
+        self.inner.diagnostics.increment_pending();
         match sender.try_send(report) {
             Ok(()) => self.inner.diagnostics.increment_accepted(),
-            Err(TrySendError::Full(_)) => self.inner.diagnostics.increment_dropped(),
-            Err(TrySendError::Disconnected(_)) => self.inner.diagnostics.increment_failed(),
+            Err(TrySendError::Full(_)) => {
+                self.inner.diagnostics.decrement_pending();
+                self.inner.diagnostics.increment_dropped();
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.inner.diagnostics.decrement_pending();
+                self.inner.diagnostics.increment_failed();
+            }
         }
     }
 
     pub fn diagnostics(&self) -> MetricReporterDiagnostics {
         self.inner.diagnostics.snapshot()
+    }
+
+    pub fn drain_for(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while self.inner.diagnostics.pending_reports() > 0 {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        true
     }
 
     #[cfg(test)]
@@ -121,6 +141,7 @@ struct MetricReporterDiagnosticsInner {
     accepted_reports: AtomicU64,
     dropped_reports: AtomicU64,
     failed_reports: AtomicU64,
+    pending_reports: AtomicU64,
 }
 
 impl MetricReporterDiagnosticsInner {
@@ -134,6 +155,18 @@ impl MetricReporterDiagnosticsInner {
 
     fn increment_failed(&self) {
         self.failed_reports.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn increment_pending(&self) {
+        self.pending_reports.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn decrement_pending(&self) {
+        self.pending_reports.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    fn pending_reports(&self) -> u64 {
+        self.pending_reports.load(Ordering::Relaxed)
     }
 
     fn snapshot(&self) -> MetricReporterDiagnostics {
@@ -160,21 +193,32 @@ fn take_mutex_value<T>(mutex: &Mutex<Option<T>>) -> Option<T> {
 fn metric_worker(
     connection: Arc<Mutex<duckdb::Connection>>,
     receiver: mpsc::Receiver<MetricReport>,
+    diagnostics: Arc<MetricReporterDiagnosticsInner>,
 ) -> Result<(), EngineError> {
     for report in receiver {
-        let connection = connection
-            .lock()
-            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
-        let store = NativeWriteStore::new(&connection);
-        let result = match report.step {
-            Some(step) => {
-                store.log_metric_at_step(&report.run_id, &report.metric_key, step, report.value_f64)
-            }
-            None => store.log_metric(&report.run_id, &report.metric_key, report.value_f64),
-        };
+        let result = write_metric_report(&connection, &report);
+        diagnostics.decrement_pending();
         result?;
     }
     Ok(())
+}
+
+fn write_metric_report(
+    connection: &Arc<Mutex<duckdb::Connection>>,
+    report: &MetricReport,
+) -> Result<(), EngineError> {
+    let connection = connection
+        .lock()
+        .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+    let store = NativeWriteStore::new(&connection);
+    match report.step {
+        Some(step) => store
+            .log_metric_at_step(&report.run_id, &report.metric_key, step, report.value_f64)
+            .map(|_| ()),
+        None => store
+            .log_metric(&report.run_id, &report.metric_key, report.value_f64)
+            .map(|_| ()),
+    }
 }
 
 #[cfg(test)]
@@ -201,5 +245,18 @@ mod tests {
         let diagnostics = reporter.diagnostics();
         assert_eq!(diagnostics.accepted_reports, 1);
         assert_eq!(diagnostics.dropped_reports, 1);
+    }
+
+    #[test]
+    fn drain_for_returns_false_when_pending_report_is_not_written() {
+        let reporter = MetricReporter::blocked_for_test(1);
+        reporter.report_metric(
+            RunId::from_string("run-1"),
+            MetricKey::from_string("train/loss"),
+            None,
+            0.25,
+        );
+
+        assert!(!reporter.drain_for(Duration::from_millis(1)));
     }
 }

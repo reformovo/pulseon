@@ -77,7 +77,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
 - [x] Make orphan `running` runs detectable from Python.
 - [x] Implement run finalization APIs for `finished` and `failed` lifecycle
   transitions.
-- [ ] Define bounded drain behavior for run finalization and client shutdown.
+- [x] Define bounded drain behavior for run finalization and client shutdown.
 - [ ] Expose an explicit client shutdown path, preferably context-manager
   friendly.
 - [ ] Expose metric discovery as data-returning APIs over aggregate/index state.

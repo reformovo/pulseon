@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use crate::engine::EngineError;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
@@ -8,6 +9,8 @@ use crate::engine::write::NativeWriteStore;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
+
+const FINALIZATION_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub struct NativeClient {
     _root_path: PathBuf,
@@ -260,6 +263,7 @@ impl NativeClient {
     }
 
     fn finalize_run(&self, run_id: &RunId, target_status: RunStatus) -> Result<Run, EngineError> {
+        let _drained = self.reporter.drain_for(FINALIZATION_DRAIN_TIMEOUT);
         let finished_at = current_timestamp("finished_at")?;
         let connection = self.connection()?;
         let updated = connection.execute(

@@ -54,7 +54,11 @@ Metric reporting is part of the training hot path and must be non-blocking.
 storage flush, aggregate repair, query index maintenance, downsampling work, or
 future upload/export work. When reporting cannot keep up, v1 prefers observable
 metric loss or delayed visibility over blocking the training step. Run
-finalization may perform a bounded drain, but it must not hang indefinitely.
+finalization attempts a best-effort native writer drain for up to 500 ms before
+recording the terminal run status. It must not hang indefinitely; if the drain
+does not complete in time, finalization continues and diagnostics remain the
+place to inspect delayed or failed metric reports. The explicit client shutdown
+path uses the same bounded-drain rule.
 
 ## Storage
 DuckLake is required in native v1 to avoid custom staging, flush, and compaction
