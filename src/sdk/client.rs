@@ -32,6 +32,14 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
+    pub fn get_project(&self, project_id: &str) -> PyResult<PyProject> {
+        let project_id = ProjectId::from_string(project_id);
+        self._inner
+            .get_project(&project_id)
+            .map(PyProject::from)
+            .map_err(runtime_error)
+    }
+
     #[pyo3(signature = (project_id, name, run_id=None))]
     pub fn create_run(
         &self,
@@ -43,6 +51,14 @@ impl PyClient {
         let run_id = run_id.map(RunId::from_string);
         self._inner
             .create_run(&project_id, name, run_id)
+            .map(|run| PyRun::from(self._inner.run_handle(run)))
+            .map_err(runtime_error)
+    }
+
+    pub fn get_run(&self, run_id: &str) -> PyResult<PyRun> {
+        let run_id = RunId::from_string(run_id);
+        self._inner
+            .get_run(&run_id)
             .map(|run| PyRun::from(self._inner.run_handle(run)))
             .map_err(runtime_error)
     }

@@ -63,6 +63,41 @@ impl NativeClient {
         })
     }
 
+    pub fn get_project(&self, project_id: &ProjectId) -> Result<Project, EngineError> {
+        let connection = self.connection()?;
+        let result = connection.query_row(
+            "SELECT project_id, name, epoch_ms(created_at)
+             FROM dl.projects
+             WHERE project_id = ?",
+            [project_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        );
+        let (project_id, name, created_at_millis) = match result {
+            Ok(stored) => stored,
+            Err(duckdb::Error::QueryReturnedNoRows) => {
+                return Err(EngineError::ProjectNotFound {
+                    project_id: project_id.as_str().to_owned(),
+                });
+            }
+            Err(source) => return Err(source.into()),
+        };
+
+        Ok(Project {
+            project_id: ProjectId::from_string(project_id),
+            name,
+            created_at: crate::engine::time::timestamp_from_millis(
+                "created_at",
+                created_at_millis,
+            )?,
+        })
+    }
+
     pub fn create_run(
         &self,
         project_id: &ProjectId,
@@ -77,6 +112,11 @@ impl NativeClient {
 
         let connection = self.connection()?;
         NativeWriteStore::new(&connection).create_run(project_id, name, run_id)
+    }
+
+    pub fn get_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
+        let connection = self.connection()?;
+        NativeWriteStore::new(&connection).resume_run(run_id)
     }
 
     pub fn run_handle(&self, run: Run) -> NativeRun {
@@ -262,6 +302,31 @@ mod tests {
         assert_eq!(project.project_id.as_str(), "project-python");
         assert_eq!(run_handle.run_id.as_str(), "run-python");
         assert_eq!(run_handle.project_id, project.project_id);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn get_project_and_run_select_existing_records() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+
+        let created_project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-existing")),
+        )?;
+        let created_run = client.create_run(
+            &created_project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-existing")),
+        )?;
+
+        let selected_project = client.get_project(&created_project.project_id)?;
+        let selected_run = client.get_run(&created_run.run_id)?;
+
+        assert_eq!(selected_project, created_project);
+        assert_eq!(selected_run, created_run);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }

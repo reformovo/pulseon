@@ -35,6 +35,29 @@ def test_client_creates_project_and_run(tmp_path: pathlib.Path) -> None:
     assert run.status == "running"
 
 
+def test_client_selects_existing_project_and_run(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    del client
+
+    reopened_client = pulseon.init(root_path)
+    selected_project = reopened_client.get_project(project.project_id)
+    selected_run = reopened_client.get_run(run.run_id)
+
+    assert isinstance(selected_project, pulseon.Project)
+    assert selected_project.project_id == project.project_id
+    assert selected_project.name == "local training"
+    assert isinstance(selected_run, pulseon.Run)
+    assert selected_run.run_id == run.run_id
+    assert selected_run.project_id == selected_project.project_id
+    assert selected_run.name == "baseline"
+    assert selected_run.status == "running"
+
+
 def test_run_log_accepts_value_and_explicit_step(tmp_path: pathlib.Path) -> None:
     import pulseon
 
