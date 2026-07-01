@@ -24,12 +24,31 @@ use pyo3::prelude::*;
 
 #[pymodule]
 fn _pulseon(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let py = m.py();
     m.add_class::<sdk::client::PyClient>()?;
     m.add_class::<sdk::client::PyDiagnostics>()?;
     m.add_class::<sdk::client::PyMetricPoint>()?;
     m.add_class::<sdk::client::PyMetricSummary>()?;
     m.add_class::<sdk::client::PyProject>()?;
     m.add_class::<sdk::client::PyRun>()?;
+    m.add("PulseOnError", py.get_type::<sdk::client::PulseOnError>())?;
+    m.add(
+        "DuplicateRunError",
+        py.get_type::<sdk::client::DuplicateRunError>(),
+    )?;
+    m.add(
+        "MissingProjectError",
+        py.get_type::<sdk::client::MissingProjectError>(),
+    )?;
+    m.add(
+        "MissingRunError",
+        py.get_type::<sdk::client::MissingRunError>(),
+    )?;
+    m.add(
+        "DuckLakeUnavailableError",
+        py.get_type::<sdk::client::DuckLakeUnavailableError>(),
+    )?;
+    m.add("QueryError", py.get_type::<sdk::client::QueryError>())?;
     m.add_function(wrap_pyfunction!(sdk::client::init, m)?)?;
     Ok(())
 }

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use pyo3::create_exception;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyTuple};
@@ -9,6 +10,43 @@ use crate::engine::reporting::MetricReporterDiagnostics;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
+
+create_exception!(
+    pulseon._pulseon,
+    PulseOnError,
+    PyRuntimeError,
+    "Base class for PulseOn SDK errors."
+);
+create_exception!(
+    pulseon._pulseon,
+    DuplicateRunError,
+    PulseOnError,
+    "A run with the requested run_id already exists."
+);
+create_exception!(
+    pulseon._pulseon,
+    MissingProjectError,
+    PulseOnError,
+    "The requested project does not exist."
+);
+create_exception!(
+    pulseon._pulseon,
+    MissingRunError,
+    PulseOnError,
+    "The requested run does not exist."
+);
+create_exception!(
+    pulseon._pulseon,
+    DuckLakeUnavailableError,
+    PulseOnError,
+    "DuckLake could not be loaded or used."
+);
+create_exception!(
+    pulseon._pulseon,
+    QueryError,
+    PulseOnError,
+    "A metric query failed."
+);
 
 #[pyclass(name = "Client", module = "pulseon._pulseon", unsendable)]
 pub struct PyClient {
@@ -368,7 +406,25 @@ pub fn init(path: PathBuf) -> PyResult<PyClient> {
 }
 
 fn runtime_error(error: crate::engine::EngineError) -> PyErr {
-    PyRuntimeError::new_err(error.to_string())
+    let message = error.to_string();
+    match error {
+        crate::engine::EngineError::RunAlreadyExists { .. } => DuplicateRunError::new_err(message),
+        crate::engine::EngineError::ProjectNotFound { .. } => MissingProjectError::new_err(message),
+        crate::engine::EngineError::RunNotFound { .. } => MissingRunError::new_err(message),
+        crate::engine::EngineError::LttbExtensionUnavailable { .. }
+        | crate::engine::EngineError::MetricQueryMaxPointsTooLarge { .. } => {
+            QueryError::new_err(message)
+        }
+        crate::engine::EngineError::DuckDb(source) if is_ducklake_error(&source) => {
+            DuckLakeUnavailableError::new_err(message)
+        }
+        crate::engine::EngineError::DuckDb(_) => QueryError::new_err(message),
+        _ => PulseOnError::new_err(message),
+    }
+}
+
+fn is_ducklake_error(error: &duckdb::Error) -> bool {
+    error.to_string().to_lowercase().contains("ducklake")
 }
 
 fn status_as_string(status: RunStatus) -> String {

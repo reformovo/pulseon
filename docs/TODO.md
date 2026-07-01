@@ -91,7 +91,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
   do not add built-in plotting dependencies or rendering APIs.
 - [x] Add Python-facing tests for query range filters, downsampling limits,
   endpoint preservation, and summary comparison.
-- [ ] Define Python-facing error classes for actionable SDK failures such as
+- [x] Define Python-facing error classes for actionable SDK failures such as
   duplicate run, missing project/run, DuckLake unavailable, and query failure.
 
 Acceptance: a restarted Python process can select existing local data, detect
