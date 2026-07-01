@@ -78,7 +78,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
 - [x] Implement run finalization APIs for `finished` and `failed` lifecycle
   transitions.
 - [x] Define bounded drain behavior for run finalization and client shutdown.
-- [ ] Expose an explicit client shutdown path, preferably context-manager
+- [x] Expose an explicit client shutdown path, preferably context-manager
   friendly.
 - [ ] Expose metric discovery as data-returning APIs over aggregate/index state.
 - [ ] Clarify diagnostics semantics: accepted reports mean accepted into the

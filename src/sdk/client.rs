@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;
+use pyo3::types::{PyAny, PyTuple};
 
 use crate::engine::client::{NativeClient, NativeRun};
 use crate::engine::reporting::MetricReporterDiagnostics;
@@ -110,6 +110,24 @@ impl PyClient {
             .fail_run(&run_id)
             .map(|run| PyRun::from(self._inner.run_handle(run)))
             .map_err(runtime_error)
+    }
+
+    pub fn shutdown(&self) -> bool {
+        self._inner.shutdown()
+    }
+
+    pub fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    pub fn __exit__(
+        &self,
+        _exc_type: &Bound<'_, PyAny>,
+        _exc_value: &Bound<'_, PyAny>,
+        _traceback: &Bound<'_, PyAny>,
+    ) -> bool {
+        self.shutdown();
+        false
     }
 
     pub fn diagnostics(&self) -> PyDiagnostics {

@@ -10,7 +10,7 @@ use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 
-const FINALIZATION_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
+const REPORTER_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub struct NativeClient {
     _root_path: PathBuf,
@@ -209,6 +209,10 @@ impl NativeClient {
         self.finalize_run(run_id, RunStatus::Failed)
     }
 
+    pub fn shutdown(&self) -> bool {
+        self.reporter.shutdown_for(REPORTER_DRAIN_TIMEOUT)
+    }
+
     pub fn run_handle(&self, run: Run) -> NativeRun {
         NativeRun {
             run_id: run.run_id,
@@ -263,7 +267,7 @@ impl NativeClient {
     }
 
     fn finalize_run(&self, run_id: &RunId, target_status: RunStatus) -> Result<Run, EngineError> {
-        let _drained = self.reporter.drain_for(FINALIZATION_DRAIN_TIMEOUT);
+        let _drained = self.reporter.drain_for(REPORTER_DRAIN_TIMEOUT);
         let finished_at = current_timestamp("finished_at")?;
         let connection = self.connection()?;
         let updated = connection.execute(

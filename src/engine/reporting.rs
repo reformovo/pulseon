@@ -92,6 +92,19 @@ impl MetricReporter {
         true
     }
 
+    pub fn shutdown_for(&self, timeout: Duration) -> bool {
+        let drained = self.drain_for(timeout);
+        if let Some(sender) = take_mutex_value(&self.inner.sender) {
+            drop(sender);
+        }
+        if let Some(worker) = take_mutex_value(&self.inner.worker)
+            && drained
+        {
+            let _ = worker.join();
+        }
+        drained
+    }
+
     #[cfg(test)]
     fn blocked_for_test(capacity: usize) -> Self {
         let (sender, receiver) = mpsc::sync_channel(capacity);
@@ -258,5 +271,20 @@ mod tests {
         );
 
         assert!(!reporter.drain_for(Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn shutdown_for_closes_report_sender() {
+        let reporter = MetricReporter::blocked_for_test(1);
+
+        assert!(reporter.shutdown_for(Duration::from_millis(1)));
+        reporter.report_metric(
+            RunId::from_string("run-1"),
+            MetricKey::from_string("train/loss"),
+            None,
+            0.25,
+        );
+
+        assert_eq!(reporter.diagnostics().failed_reports, 1);
     }
 }
