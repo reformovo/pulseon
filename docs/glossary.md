@@ -9,8 +9,12 @@ part of the v1 architecture contract.
 - **Metric key**: User-facing metric name; path escaping is implementation detail.
 - **Metric series**: All points for one `(run_id, metric_key)` pair.
 - **Metric point**: One numeric observation in a metric series.
+- **Metric reporting**: The hot-path handoff from training code to PulseOn.
+  Reporting must not block training progress.
 - **Run summary**: Derived per-run values for run lists and comparisons.
 - **Metric aggregate**: Materialized-view-like index/state from metric writes.
+- **Reporting diagnostics**: Observable state for dropped, delayed, or failed
+  metric reports.
 
 ## Storage Terms
 - **PulseOn logical schema**: Product-owned project, run, metric, point, and

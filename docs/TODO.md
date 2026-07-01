@@ -56,11 +56,16 @@ downsampled output length, endpoint preservation, and summary comparison.
 - [ ] Expose `pulseon.init(path)`.
 - [ ] Expose project/run creation.
 - [ ] Expose `run.log(key, value)` and `run.log(key, step, value)`.
+- [ ] Keep ordinary `run.log(...)` calls training-loop non-blocking with
+  bounded native buffering.
+- [ ] Surface dropped or failed metric reports through diagnostics without
+  raising by default from hot-path logging.
 - [ ] Expose metric query and summary query as data-returning APIs only.
 - [ ] Update `python/pulseon/_pulseon.pyi`.
 
 Acceptance: pytest covers the native loop from Python without plotting
-dependencies.
+dependencies. Rust or Python tests simulate a slow or blocked writer and verify
+ordinary `run.log(...)` calls do not wait indefinitely.
 
 ## Deferred
 

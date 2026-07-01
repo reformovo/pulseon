@@ -49,6 +49,13 @@ metric_key)` series. Existing `run_id` values require explicit resume.
 Metric discovery and summaries are materialized-view-like aggregate state over
 the effective series: count/last/min/max, with async repair allowed.
 
+Metric reporting is part of the training hot path and must be non-blocking.
+`run.log(...)` may buffer metric points, but it must not wait for durable
+storage flush, aggregate repair, query index maintenance, downsampling work, or
+future upload/export work. When reporting cannot keep up, v1 prefers observable
+metric loss or delayed visibility over blocking the training step. Run
+finalization may perform a bounded drain, but it must not hang indefinitely.
+
 ## Storage
 DuckLake is required in native v1 to avoid custom staging, flush, and compaction
 before validation.
@@ -66,6 +73,9 @@ Both query paths matter for v1: long single-series chart queries with range
 Initial API shape: `run.log(key, value)`, `run.log(key, step, value)`,
 `query_metric(..., max_points=None)`, and summary query. `max_points` is strict;
 short series stay unchanged and downsampling preserves endpoints via DuckDB LTTB.
+Ordinary hot-path `run.log(...)` calls do not raise by default for transient
+storage or backpressure failures; those failures must be surfaced through
+diagnostics.
 
 Initial scale targets: around 10,000 runs, up to 1,000,000 distinct metric
 keys, very long metric series with downsampled plotting, and TB-scale local
