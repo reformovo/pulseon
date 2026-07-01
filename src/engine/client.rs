@@ -150,6 +150,54 @@ impl NativeClient {
             .collect::<Result<Vec<_>, _>>()
     }
 
+    pub fn list_orphan_runs(
+        &self,
+        project_id: Option<&ProjectId>,
+    ) -> Result<Vec<Run>, EngineError> {
+        if let Some(project_id) = project_id
+            && !self.project_exists(project_id)?
+        {
+            return Err(EngineError::ProjectNotFound {
+                project_id: project_id.as_str().to_owned(),
+            });
+        }
+
+        let run_ids = {
+            let connection = self.connection()?;
+            match project_id {
+                Some(project_id) => {
+                    let mut statement = connection.prepare(
+                        "SELECT run_id
+                         FROM dl.runs
+                         WHERE project_id = ?
+                           AND status = 'running'
+                         ORDER BY created_at, run_id",
+                    )?;
+                    let rows = statement.query_map([project_id.as_str()], |row| {
+                        Ok(RunId::from_string(row.get::<_, String>(0)?))
+                    })?;
+                    rows.collect::<Result<Vec<_>, _>>()?
+                }
+                None => {
+                    let mut statement = connection.prepare(
+                        "SELECT run_id
+                         FROM dl.runs
+                         WHERE status = 'running'
+                         ORDER BY created_at, run_id",
+                    )?;
+                    let rows = statement
+                        .query_map([], |row| Ok(RunId::from_string(row.get::<_, String>(0)?)))?;
+                    rows.collect::<Result<Vec<_>, _>>()?
+                }
+            }
+        };
+
+        run_ids
+            .iter()
+            .map(|run_id| self.get_run(run_id))
+            .collect::<Result<Vec<_>, _>>()
+    }
+
     pub fn run_handle(&self, run: Run) -> NativeRun {
         NativeRun {
             run_id: run.run_id,

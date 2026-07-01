@@ -83,6 +83,19 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
+    #[pyo3(signature = (project_id=None))]
+    pub fn list_orphan_runs(&self, project_id: Option<String>) -> PyResult<Vec<PyRun>> {
+        let project_id = project_id.map(ProjectId::from_string);
+        self._inner
+            .list_orphan_runs(project_id.as_ref())
+            .map(|runs| {
+                runs.into_iter()
+                    .map(|run| PyRun::from(self._inner.run_handle(run)))
+                    .collect()
+            })
+            .map_err(runtime_error)
+    }
+
     pub fn diagnostics(&self) -> PyDiagnostics {
         PyDiagnostics::from(self._inner.diagnostics())
     }

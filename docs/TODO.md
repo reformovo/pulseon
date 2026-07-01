@@ -74,7 +74,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
   recreate run handles from saved IDs.
 - [x] Expose run listing by project so multi-run comparison does not require
   callers to persist run IDs outside PulseOn.
-- [ ] Make orphan `running` runs detectable from Python.
+- [x] Make orphan `running` runs detectable from Python.
 - [ ] Implement run finalization APIs for `finished` and `failed` lifecycle
   transitions.
 - [ ] Define bounded drain behavior for run finalization and client shutdown.

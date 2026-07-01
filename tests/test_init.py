@@ -113,6 +113,33 @@ def test_client_lists_project_runs_for_summary_queries(
     assert [summary.last_value_f64 for summary in summaries] == [0.25, 0.125]
 
 
+def test_client_detects_orphan_running_runs(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    first_project = client.create_project("local training", project_id="project-1")
+    second_project = client.create_project("sweep", project_id="project-2")
+    first_run = client.create_run(first_project.project_id, "baseline", run_id="run-1")
+    second_run = client.create_run(second_project.project_id, "candidate", run_id="run-2")
+    first_run_id = first_run.run_id
+    second_run_id = second_run.run_id
+    del first_run
+    del second_run
+    del client
+
+    reopened_client = pulseon.init(root_path)
+    all_orphans = reopened_client.list_orphan_runs()
+    project_orphans = reopened_client.list_orphan_runs(first_project.project_id)
+
+    assert [run.run_id for run in all_orphans] == [
+        first_run_id,
+        second_run_id,
+    ]
+    assert [run.status for run in all_orphans] == ["running", "running"]
+    assert [run.run_id for run in project_orphans] == [first_run_id]
+
+
 def test_run_log_accepts_value_and_explicit_step(tmp_path: pathlib.Path) -> None:
     import pulseon
 
