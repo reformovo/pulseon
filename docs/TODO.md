@@ -53,7 +53,7 @@ downsampled output length, endpoint preservation, and summary comparison.
 
 ## Phase 4: Python SDK
 
-- [ ] Expose `pulseon.init(path)`.
+- [x] Expose `pulseon.init(path)`.
 - [ ] Expose project/run creation.
 - [ ] Expose `run.log(key, value)` and `run.log(key, step, value)`.
 - [ ] Keep ordinary `run.log(...)` calls training-loop non-blocking with

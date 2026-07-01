@@ -1,9 +1,16 @@
-# PulseOn — training metrics tracking with AI Native auto-research support.
-#
-# This is a thin Python wrapper over the Rust core (pulseon._pulseon).
-# User-facing API will be added in Phase 5:
-#   init(path, ...) -> Client
-#   Client.create_run(project, name, ...) -> Run
-#   Run.log_metric(name, step, value)
+"""PulseOn Python API."""
 
-__all__ = []
+from __future__ import annotations
+
+import os
+
+from pulseon import _pulseon
+
+Client = _pulseon.Client
+
+
+def init(path: str | os.PathLike[str]) -> Client:
+    return _pulseon.init(path)
+
+
+__all__ = ["Client", "init"]

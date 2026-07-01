@@ -1,1 +1,5 @@
-# PulseOn type stubs — will be populated in Phase 5.
+import os
+
+class Client: ...
+
+def init(path: str | os.PathLike[str]) -> Client: ...

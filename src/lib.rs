@@ -23,9 +23,8 @@ mod storage;
 use pyo3::prelude::*;
 
 #[pymodule]
-fn _pulseon(_m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Classes and functions will be registered in later phases.
-    // Phase 5: Client, Run
-    // Phase 8: Agent, tool definitions
+fn _pulseon(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<sdk::client::PyClient>()?;
+    m.add_function(wrap_pyfunction!(sdk::client::init, m)?)?;
     Ok(())
 }

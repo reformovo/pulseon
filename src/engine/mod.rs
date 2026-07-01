@@ -19,6 +19,8 @@ pub enum EngineError {
     Catalog(#[from] crate::catalog::CatalogError),
     #[error("duckdb error: {0}")]
     DuckDb(#[from] duckdb::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("run already exists: {run_id}")]
     RunAlreadyExists { run_id: String },
     #[error("run not found: {run_id}")]
