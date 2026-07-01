@@ -87,7 +87,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
   status and last write error.
 - [x] Document the stable PulseOn Parquet schema contract and compatibility
   rules.
-- [ ] Keep charting outside PulseOn v1: return chart-ready metric data only and
+- [x] Keep charting outside PulseOn v1: return chart-ready metric data only and
   do not add built-in plotting dependencies or rendering APIs.
 - [ ] Add Python-facing tests for query range filters, downsampling limits,
   endpoint preservation, and summary comparison.
