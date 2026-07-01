@@ -70,7 +70,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
 ## Phase 5: V1 Closure Backlog
 
 - [x] Expose project/run selection APIs for existing local data.
-- [ ] Expose explicit run resume in Python instead of requiring callers to
+- [x] Expose explicit run resume in Python instead of requiring callers to
   recreate run handles from saved IDs.
 - [ ] Expose run listing by project so multi-run comparison does not require
   callers to persist run IDs outside PulseOn.

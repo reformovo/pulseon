@@ -63,6 +63,14 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
+    pub fn resume_run(&self, run_id: &str) -> PyResult<PyRun> {
+        let run_id = RunId::from_string(run_id);
+        self._inner
+            .resume_run(&run_id)
+            .map(|run| PyRun::from(self._inner.run_handle(run)))
+            .map_err(runtime_error)
+    }
+
     pub fn diagnostics(&self) -> PyDiagnostics {
         PyDiagnostics::from(self._inner.diagnostics())
     }

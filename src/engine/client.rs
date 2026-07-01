@@ -119,6 +119,10 @@ impl NativeClient {
         NativeWriteStore::new(&connection).resume_run(run_id)
     }
 
+    pub fn resume_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
+        self.get_run(run_id)
+    }
+
     pub fn run_handle(&self, run: Run) -> NativeRun {
         NativeRun {
             run_id: run.run_id,

@@ -58,6 +58,30 @@ def test_client_selects_existing_project_and_run(tmp_path: pathlib.Path) -> None
     assert selected_run.status == "running"
 
 
+def test_client_resumes_existing_run_for_logging(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    del client
+
+    resumed_client = pulseon.init(root_path)
+    resumed_run = resumed_client.resume_run(run.run_id)
+    resumed_run.log("train/loss", 0, 0.25)
+    points = _wait_for_metric_points(
+        resumed_client,
+        resumed_run.run_id,
+        "train/loss",
+        expected_count=1,
+    )
+
+    assert isinstance(resumed_run, pulseon.Run)
+    assert resumed_run.run_id == run.run_id
+    assert [point.value_f64 for point in points] == [0.25]
+
+
 def test_run_log_accepts_value_and_explicit_step(tmp_path: pathlib.Path) -> None:
     import pulseon
 
