@@ -25,7 +25,7 @@ impl NativeClient {
         let data_path = root_path.join("data");
         std::fs::create_dir_all(&data_path)?;
 
-        let connection = duckdb::Connection::open_in_memory()?;
+        let connection = open_duckdb_connection()?;
         attach_ducklake(&connection, &catalog_path, &data_path)?;
         create_v1_tables(&connection)?;
         let connection = Arc::new(Mutex::new(connection));
@@ -341,6 +341,14 @@ fn attach_ducklake(
          ATTACH {catalog_path} AS dl (TYPE ducklake, DATA_PATH {data_path});"
     ))?;
     Ok(())
+}
+
+fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
+    let mut config = duckdb::Config::default();
+    if std::env::var_os("PULSEON_LTTB_EXTENSION_PATH").is_some() {
+        config = config.allow_unsigned_extensions()?;
+    }
+    Ok(duckdb::Connection::open_in_memory_with_flags(config)?)
 }
 
 fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {

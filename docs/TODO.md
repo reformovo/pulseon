@@ -89,7 +89,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
   rules.
 - [x] Keep charting outside PulseOn v1: return chart-ready metric data only and
   do not add built-in plotting dependencies or rendering APIs.
-- [ ] Add Python-facing tests for query range filters, downsampling limits,
+- [x] Add Python-facing tests for query range filters, downsampling limits,
   endpoint preservation, and summary comparison.
 - [ ] Define Python-facing error classes for actionable SDK failures such as
   duplicate run, missing project/run, DuckLake unavailable, and query failure.

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::engine::EngineError;
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
 use crate::engine::write_rows::{
@@ -370,8 +372,36 @@ impl<'connection> NativeWriteStore<'connection> {
 
         match self.connection.execute_batch("LOAD lttb;") {
             Ok(()) if self.lttb_function_available() => Ok(()),
+            Ok(()) | Err(_) => self.install_and_load_lttb_extension(),
+        }
+    }
+
+    fn install_and_load_lttb_extension(&self) -> Result<(), EngineError> {
+        if let Some(path) = std::env::var_os("PULSEON_LTTB_EXTENSION_PATH") {
+            return self.load_lttb_extension_from_path(Path::new(&path));
+        }
+
+        match self
+            .connection
+            .execute_batch("INSTALL lttb FROM community; LOAD lttb;")
+        {
+            Ok(()) if self.lttb_function_available() => Ok(()),
             Ok(()) => Err(EngineError::LttbExtensionUnavailable {
-                message: "LOAD lttb did not register lttb".to_owned(),
+                message: "INSTALL/LOAD lttb did not register lttb".to_owned(),
+            }),
+            Err(source) => Err(EngineError::LttbExtensionUnavailable {
+                message: source.to_string(),
+            }),
+        }
+    }
+
+    fn load_lttb_extension_from_path(&self, path: &Path) -> Result<(), EngineError> {
+        let path = sql_string_literal(path.to_string_lossy().as_ref());
+        match self.connection.execute_batch(&format!("LOAD {path};")) {
+            Ok(()) if self.lttb_function_available() => Ok(()),
+            Ok(()) => Err(EngineError::LttbExtensionUnavailable {
+                message: "LOAD lttb from PULSEON_LTTB_EXTENSION_PATH did not register lttb"
+                    .to_owned(),
             }),
             Err(source) => Err(EngineError::LttbExtensionUnavailable {
                 message: source.to_string(),
@@ -458,4 +488,8 @@ fn stored_metric_point_from_row(row: &duckdb::Row<'_>) -> duckdb::Result<StoredM
         value_f64: row.get(4)?,
         ingested_at_millis: row.get(5)?,
     })
+}
+
+fn sql_string_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
