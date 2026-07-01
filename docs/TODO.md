@@ -83,7 +83,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
 - [x] Expose metric discovery as data-returning APIs over aggregate/index state.
 - [x] Clarify diagnostics semantics: accepted reports mean accepted into the
   native buffer, not durably stored metric points.
-- [ ] Expand diagnostics with writer freshness state such as backlog/drained
+- [x] Expand diagnostics with writer freshness state such as backlog/drained
   status and last write error.
 - [ ] Document the stable PulseOn Parquet schema contract and compatibility
   rules.

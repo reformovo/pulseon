@@ -142,11 +142,14 @@ impl Drop for MetricReporterInner {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MetricReporterDiagnostics {
     pub accepted_reports: u64,
     pub dropped_reports: u64,
     pub failed_reports: u64,
+    pub pending_reports: u64,
+    pub writer_drained: bool,
+    pub last_write_error: Option<String>,
 }
 
 #[derive(Default)]
@@ -155,6 +158,7 @@ struct MetricReporterDiagnosticsInner {
     dropped_reports: AtomicU64,
     failed_reports: AtomicU64,
     pending_reports: AtomicU64,
+    last_write_error: Mutex<Option<String>>,
 }
 
 impl MetricReporterDiagnosticsInner {
@@ -170,6 +174,12 @@ impl MetricReporterDiagnosticsInner {
         self.failed_reports.fetch_add(1, Ordering::Relaxed);
     }
 
+    fn set_last_write_error(&self, message: String) {
+        if let Ok(mut last_write_error) = self.last_write_error.lock() {
+            *last_write_error = Some(message);
+        }
+    }
+
     fn increment_pending(&self) {
         self.pending_reports.fetch_add(1, Ordering::Relaxed);
     }
@@ -183,10 +193,18 @@ impl MetricReporterDiagnosticsInner {
     }
 
     fn snapshot(&self) -> MetricReporterDiagnostics {
+        let pending_reports = self.pending_reports();
         MetricReporterDiagnostics {
             accepted_reports: self.accepted_reports.load(Ordering::Relaxed),
             dropped_reports: self.dropped_reports.load(Ordering::Relaxed),
             failed_reports: self.failed_reports.load(Ordering::Relaxed),
+            pending_reports,
+            writer_drained: pending_reports == 0,
+            last_write_error: self
+                .last_write_error
+                .lock()
+                .ok()
+                .and_then(|last_write_error| last_write_error.clone()),
         }
     }
 }
@@ -210,6 +228,9 @@ fn metric_worker(
 ) -> Result<(), EngineError> {
     for report in receiver {
         let result = write_metric_report(&connection, &report);
+        if let Err(error) = &result {
+            diagnostics.set_last_write_error(error.to_string());
+        }
         diagnostics.decrement_pending();
         result?;
     }
@@ -258,6 +279,8 @@ mod tests {
         let diagnostics = reporter.diagnostics();
         assert_eq!(diagnostics.accepted_reports, 1);
         assert_eq!(diagnostics.dropped_reports, 1);
+        assert_eq!(diagnostics.pending_reports, 1);
+        assert!(!diagnostics.writer_drained);
     }
 
     #[test]
@@ -271,6 +294,7 @@ mod tests {
         );
 
         assert!(!reporter.drain_for(Duration::from_millis(1)));
+        assert_eq!(reporter.diagnostics().pending_reports, 1);
     }
 
     #[test]
@@ -286,5 +310,16 @@ mod tests {
         );
 
         assert_eq!(reporter.diagnostics().failed_reports, 1);
+    }
+
+    #[test]
+    fn diagnostics_reports_drained_when_no_reports_are_pending() {
+        let reporter = MetricReporter::blocked_for_test(1);
+
+        let diagnostics = reporter.diagnostics();
+
+        assert_eq!(diagnostics.pending_reports, 0);
+        assert!(diagnostics.writer_drained);
+        assert_eq!(diagnostics.last_write_error, None);
     }
 }

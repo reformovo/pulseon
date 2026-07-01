@@ -278,6 +278,12 @@ pub struct PyDiagnostics {
     dropped_reports: u64,
     #[pyo3(get)]
     failed_reports: u64,
+    #[pyo3(get)]
+    pending_reports: u64,
+    #[pyo3(get)]
+    writer_drained: bool,
+    #[pyo3(get)]
+    last_write_error: Option<String>,
 }
 
 impl From<MetricReporterDiagnostics> for PyDiagnostics {
@@ -286,6 +292,9 @@ impl From<MetricReporterDiagnostics> for PyDiagnostics {
             accepted_reports: diagnostics.accepted_reports,
             dropped_reports: diagnostics.dropped_reports,
             failed_reports: diagnostics.failed_reports,
+            pending_reports: diagnostics.pending_reports,
+            writer_drained: diagnostics.writer_drained,
+            last_write_error: diagnostics.last_write_error,
         }
     }
 }

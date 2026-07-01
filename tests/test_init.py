@@ -212,6 +212,7 @@ def test_client_queries_metric_points_and_summaries(tmp_path: pathlib.Path) -> N
 
     points = _wait_for_metric_points(client, run.run_id, "train/loss", expected_count=2)
     summaries = client.query_metric_summaries([run.run_id], "train/loss")
+    diagnostics = client.diagnostics()
 
     assert [point.step for point in points] == [0, 1]
     assert [point.value_f64 for point in points] == [0.25, 0.125]
@@ -221,6 +222,9 @@ def test_client_queries_metric_points_and_summaries(tmp_path: pathlib.Path) -> N
     assert summaries[0].effective_count == 2
     assert summaries[0].last_step == 1
     assert summaries[0].last_value_f64 == 0.125
+    assert diagnostics.pending_reports == 0
+    assert diagnostics.writer_drained
+    assert diagnostics.last_write_error is None
 
 
 def test_client_discovers_metrics_from_aggregate_state(

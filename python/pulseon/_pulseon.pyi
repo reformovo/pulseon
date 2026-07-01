@@ -5,6 +5,9 @@ class Diagnostics:
     accepted_reports: int
     dropped_reports: int
     failed_reports: int
+    pending_reports: int
+    writer_drained: bool
+    last_write_error: str | None
 
 class MetricPoint:
     run_id: str
