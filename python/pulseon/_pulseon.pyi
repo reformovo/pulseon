@@ -6,6 +6,23 @@ class Diagnostics:
     dropped_reports: int
     failed_reports: int
 
+class MetricPoint:
+    run_id: str
+    metric_key: str
+    step: int
+    timestamp: str
+    value_f64: float
+    ingested_at: str
+
+class MetricSummary:
+    run_id: str
+    metric_key: str
+    effective_count: int
+    last_step: int
+    last_value_f64: float
+    min_value_f64: float
+    max_value_f64: float
+
 class Project:
     project_id: str
     name: str
@@ -32,5 +49,16 @@ class Client:
         self, project_id: str, name: str, run_id: str | None = None
     ) -> Run: ...
     def diagnostics(self) -> Diagnostics: ...
+    def query_metric(
+        self,
+        run_id: str,
+        metric_key: str,
+        start_step: int | None = None,
+        end_step: int | None = None,
+        max_points: int | None = None,
+    ) -> list[MetricPoint]: ...
+    def query_metric_summaries(
+        self, run_ids: list[str], metric_key: str
+    ) -> list[MetricSummary]: ...
 
 def init(path: str | os.PathLike[str]) -> Client: ...

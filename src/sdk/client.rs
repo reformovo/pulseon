@@ -6,6 +6,7 @@ use pyo3::types::PyTuple;
 
 use crate::engine::client::{NativeClient, NativeRun};
 use crate::engine::reporting::MetricReporterDiagnostics;
+use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 
@@ -48,6 +49,42 @@ impl PyClient {
 
     pub fn diagnostics(&self) -> PyDiagnostics {
         PyDiagnostics::from(self._inner.diagnostics())
+    }
+
+    #[pyo3(signature = (run_id, metric_key, start_step=None, end_step=None, max_points=None))]
+    pub fn query_metric(
+        &self,
+        run_id: &str,
+        metric_key: &str,
+        start_step: Option<i64>,
+        end_step: Option<i64>,
+        max_points: Option<usize>,
+    ) -> PyResult<Vec<PyMetricPoint>> {
+        let run_id = RunId::from_string(run_id);
+        let metric_key = MetricKey::from_string(metric_key);
+        self._inner
+            .query_metric(
+                &run_id,
+                &metric_key,
+                start_step.map(Step::new),
+                end_step.map(Step::new),
+                max_points,
+            )
+            .map(|points| points.into_iter().map(PyMetricPoint::from).collect())
+            .map_err(runtime_error)
+    }
+
+    pub fn query_metric_summaries(
+        &self,
+        run_ids: Vec<String>,
+        metric_key: &str,
+    ) -> PyResult<Vec<PyMetricSummary>> {
+        let run_ids: Vec<RunId> = run_ids.into_iter().map(RunId::from_string).collect();
+        let metric_key = MetricKey::from_string(metric_key);
+        self._inner
+            .query_metric_summaries(&run_ids, &metric_key)
+            .map(|summaries| summaries.into_iter().map(PyMetricSummary::from).collect())
+            .map_err(runtime_error)
     }
 }
 
@@ -158,6 +195,67 @@ impl From<MetricReporterDiagnostics> for PyDiagnostics {
             accepted_reports: diagnostics.accepted_reports,
             dropped_reports: diagnostics.dropped_reports,
             failed_reports: diagnostics.failed_reports,
+        }
+    }
+}
+
+#[pyclass(name = "MetricPoint", module = "pulseon._pulseon")]
+pub struct PyMetricPoint {
+    #[pyo3(get)]
+    run_id: String,
+    #[pyo3(get)]
+    metric_key: String,
+    #[pyo3(get)]
+    step: i64,
+    #[pyo3(get)]
+    timestamp: String,
+    #[pyo3(get)]
+    value_f64: f64,
+    #[pyo3(get)]
+    ingested_at: String,
+}
+
+impl From<MetricPoint> for PyMetricPoint {
+    fn from(point: MetricPoint) -> Self {
+        Self {
+            run_id: point.run_id.as_str().to_owned(),
+            metric_key: point.metric_key.as_str().to_owned(),
+            step: point.step.value(),
+            timestamp: point.timestamp.to_rfc3339(),
+            value_f64: point.value_f64,
+            ingested_at: point.ingested_at.to_rfc3339(),
+        }
+    }
+}
+
+#[pyclass(name = "MetricSummary", module = "pulseon._pulseon")]
+pub struct PyMetricSummary {
+    #[pyo3(get)]
+    run_id: String,
+    #[pyo3(get)]
+    metric_key: String,
+    #[pyo3(get)]
+    effective_count: u64,
+    #[pyo3(get)]
+    last_step: i64,
+    #[pyo3(get)]
+    last_value_f64: f64,
+    #[pyo3(get)]
+    min_value_f64: f64,
+    #[pyo3(get)]
+    max_value_f64: f64,
+}
+
+impl From<MetricAggregate> for PyMetricSummary {
+    fn from(summary: MetricAggregate) -> Self {
+        Self {
+            run_id: summary.run_id.as_str().to_owned(),
+            metric_key: summary.metric_key.as_str().to_owned(),
+            effective_count: summary.effective_count,
+            last_step: summary.last_step.value(),
+            last_value_f64: summary.last_value_f64,
+            min_value_f64: summary.min_value_f64,
+            max_value_f64: summary.max_value_f64,
         }
     }
 }

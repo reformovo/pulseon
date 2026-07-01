@@ -1,4 +1,3 @@
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
@@ -6,7 +5,6 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread::JoinHandle;
 
 use crate::engine::EngineError;
-use crate::engine::client::attach_ducklake;
 use crate::engine::write::NativeWriteStore;
 use crate::model::metric::{MetricKey, Step};
 use crate::model::run::RunId;
@@ -19,32 +17,28 @@ pub struct MetricReporter {
 }
 
 impl MetricReporter {
-    pub fn open(catalog_path: PathBuf, data_path: PathBuf) -> Result<Self, EngineError> {
-        Self::open_with_capacity(catalog_path, data_path, DEFAULT_METRIC_BUFFER_CAPACITY)
+    pub fn open(connection: Arc<Mutex<duckdb::Connection>>) -> Self {
+        Self::open_with_capacity(connection, DEFAULT_METRIC_BUFFER_CAPACITY)
     }
 
-    fn open_with_capacity(
-        catalog_path: PathBuf,
-        data_path: PathBuf,
-        capacity: usize,
-    ) -> Result<Self, EngineError> {
+    fn open_with_capacity(connection: Arc<Mutex<duckdb::Connection>>, capacity: usize) -> Self {
         let (sender, receiver) = mpsc::sync_channel(capacity);
         let diagnostics = Arc::new(MetricReporterDiagnosticsInner::default());
         let worker_diagnostics = Arc::clone(&diagnostics);
         let worker = std::thread::spawn(move || {
-            let result = metric_worker(catalog_path.as_path(), data_path.as_path(), receiver);
+            let result = metric_worker(connection, receiver);
             if result.is_err() {
                 worker_diagnostics.increment_failed();
             }
         });
 
-        Ok(Self {
+        Self {
             inner: Arc::new(MetricReporterInner {
                 sender: Mutex::new(Some(sender)),
                 diagnostics,
                 worker: Mutex::new(Some(worker)),
             }),
-        })
+        }
     }
 
     pub fn report_metric(
@@ -164,14 +158,14 @@ fn take_mutex_value<T>(mutex: &Mutex<Option<T>>) -> Option<T> {
 }
 
 fn metric_worker(
-    catalog_path: &Path,
-    data_path: &Path,
+    connection: Arc<Mutex<duckdb::Connection>>,
     receiver: mpsc::Receiver<MetricReport>,
 ) -> Result<(), EngineError> {
-    let connection = duckdb::Connection::open_in_memory()?;
-    attach_ducklake(&connection, catalog_path, data_path)?;
-    let store = NativeWriteStore::new(&connection);
     for report in receiver {
+        let connection = connection
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+        let store = NativeWriteStore::new(&connection);
         let result = match report.step {
             Some(step) => {
                 store.log_metric_at_step(&report.run_id, &report.metric_key, step, report.value_f64)

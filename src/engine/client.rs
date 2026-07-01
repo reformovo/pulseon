@@ -1,17 +1,18 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::engine::EngineError;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
 use crate::engine::write::NativeWriteStore;
-use crate::model::metric::{MetricKey, Step};
+use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId};
 use crate::model::types::{Project, ProjectId};
 
 pub struct NativeClient {
     _root_path: PathBuf,
     reporter: MetricReporter,
-    _connection: duckdb::Connection,
+    connection: Arc<Mutex<duckdb::Connection>>,
 }
 
 impl NativeClient {
@@ -24,12 +25,13 @@ impl NativeClient {
         let connection = duckdb::Connection::open_in_memory()?;
         attach_ducklake(&connection, &catalog_path, &data_path)?;
         create_v1_tables(&connection)?;
-        let reporter = MetricReporter::open(catalog_path, data_path)?;
+        let connection = Arc::new(Mutex::new(connection));
+        let reporter = MetricReporter::open(Arc::clone(&connection));
 
         Ok(Self {
             _root_path: root_path,
             reporter,
-            _connection: connection,
+            connection,
         })
     }
 
@@ -47,7 +49,8 @@ impl NativeClient {
         }
 
         let created_at = current_timestamp("created_at")?;
-        self._connection.execute(
+        let connection = self.connection()?;
+        connection.execute(
             "INSERT INTO dl.projects (project_id, name, created_at)
              VALUES (?, ?, ?)",
             (project_id.as_str(), name, timestamp_as_rfc3339(created_at)),
@@ -72,7 +75,8 @@ impl NativeClient {
             });
         }
 
-        NativeWriteStore::new(&self._connection).create_run(project_id, name, run_id)
+        let connection = self.connection()?;
+        NativeWriteStore::new(&connection).create_run(project_id, name, run_id)
     }
 
     pub fn run_handle(&self, run: Run) -> NativeRun {
@@ -92,8 +96,31 @@ impl NativeClient {
         self.reporter.diagnostics()
     }
 
+    pub fn query_metric(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        start_step: Option<Step>,
+        end_step: Option<Step>,
+        max_points: Option<usize>,
+    ) -> Result<Vec<MetricPoint>, EngineError> {
+        let connection = self.connection()?;
+        NativeWriteStore::new(&connection)
+            .query_metric(run_id, metric_key, start_step, end_step, max_points)
+    }
+
+    pub fn query_metric_summaries(
+        &self,
+        run_ids: &[RunId],
+        metric_key: &MetricKey,
+    ) -> Result<Vec<MetricAggregate>, EngineError> {
+        let connection = self.connection()?;
+        NativeWriteStore::new(&connection).query_metric_summaries(run_ids, metric_key)
+    }
+
     fn project_exists(&self, project_id: &ProjectId) -> Result<bool, EngineError> {
-        let exists = self._connection.query_row(
+        let connection = self.connection()?;
+        let exists = connection.query_row(
             "SELECT EXISTS (
                  SELECT 1
                  FROM dl.projects
@@ -104,9 +131,15 @@ impl NativeClient {
         )?;
         Ok(exists)
     }
+
+    fn connection(&self) -> Result<MutexGuard<'_, duckdb::Connection>, EngineError> {
+        self.connection
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)
+    }
 }
 
-pub(crate) fn attach_ducklake(
+fn attach_ducklake(
     connection: &duckdb::Connection,
     catalog_path: &Path,
     data_path: &Path,

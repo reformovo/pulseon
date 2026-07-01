@@ -60,8 +60,8 @@ downsampled output length, endpoint preservation, and summary comparison.
   bounded native buffering.
 - [x] Surface dropped or failed metric reports through diagnostics without
   raising by default from hot-path logging.
-- [ ] Expose metric query and summary query as data-returning APIs only.
-- [ ] Update `python/pulseon/_pulseon.pyi`.
+- [x] Expose metric query and summary query as data-returning APIs only.
+- [x] Update `python/pulseon/_pulseon.pyi`.
 
 Acceptance: pytest covers the native loop from Python without plotting
 dependencies. Rust or Python tests simulate a slow or blocked writer and verify

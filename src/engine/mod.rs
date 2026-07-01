@@ -22,6 +22,8 @@ pub enum EngineError {
     DuckDb(#[from] duckdb::Error),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("native connection lock was poisoned")]
+    ConnectionLockPoisoned,
     #[error("project already exists: {project_id}")]
     ProjectAlreadyExists { project_id: String },
     #[error("project not found: {project_id}")]

@@ -1,6 +1,7 @@
 """Verify that the pulseon package can be imported."""
 
 import pathlib
+import time
 
 
 def test_import_pulseon() -> None:
@@ -49,3 +50,41 @@ def test_run_log_accepts_value_and_explicit_step(tmp_path: pathlib.Path) -> None
     assert diagnostics.accepted_reports >= 2
     assert diagnostics.dropped_reports == 0
     assert diagnostics.failed_reports == 0
+
+
+def test_client_queries_metric_points_and_summaries(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run.log("train/loss", 0, 0.25)
+    run.log("train/loss", 1, 0.125)
+
+    points = _wait_for_metric_points(client, run.run_id, "train/loss", expected_count=2)
+    summaries = client.query_metric_summaries([run.run_id], "train/loss")
+
+    assert [point.step for point in points] == [0, 1]
+    assert [point.value_f64 for point in points] == [0.25, 0.125]
+    assert isinstance(points[0], pulseon.MetricPoint)
+    assert len(summaries) == 1
+    assert isinstance(summaries[0], pulseon.MetricSummary)
+    assert summaries[0].effective_count == 2
+    assert summaries[0].last_step == 1
+    assert summaries[0].last_value_f64 == 0.125
+
+
+def _wait_for_metric_points(
+    client: object,
+    run_id: str,
+    metric_key: str,
+    expected_count: int,
+) -> list[object]:
+    deadline = time.monotonic() + 5.0
+    points: list[object] = []
+    while time.monotonic() < deadline:
+        points = client.query_metric(run_id, metric_key)
+        if len(points) >= expected_count:
+            return points
+        time.sleep(0.05)
+    return points
