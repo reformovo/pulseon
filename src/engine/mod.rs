@@ -32,6 +32,12 @@ pub enum EngineError {
     RunAlreadyExists { run_id: String },
     #[error("run not found: {run_id}")]
     RunNotFound { run_id: String },
+    #[error("invalid run transition for {run_id}: {from} -> {to}")]
+    InvalidRunTransition {
+        run_id: String,
+        from: &'static str,
+        to: &'static str,
+    },
     #[error("metric query max_points is too large for DuckDB LTTB: {max_points}")]
     MetricQueryMaxPointsTooLarge { max_points: usize },
     #[error("DuckDB LTTB extension is unavailable: {message}")]

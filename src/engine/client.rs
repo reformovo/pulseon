@@ -6,7 +6,7 @@ use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
 use crate::engine::write::NativeWriteStore;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
-use crate::model::run::{Run, RunId};
+use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 
 pub struct NativeClient {
@@ -198,6 +198,14 @@ impl NativeClient {
             .collect::<Result<Vec<_>, _>>()
     }
 
+    pub fn finish_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
+        self.finalize_run(run_id, RunStatus::Finished)
+    }
+
+    pub fn fail_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
+        self.finalize_run(run_id, RunStatus::Failed)
+    }
+
     pub fn run_handle(&self, run: Run) -> NativeRun {
         NativeRun {
             run_id: run.run_id,
@@ -249,6 +257,35 @@ impl NativeClient {
             |row| row.get(0),
         )?;
         Ok(exists)
+    }
+
+    fn finalize_run(&self, run_id: &RunId, target_status: RunStatus) -> Result<Run, EngineError> {
+        let finished_at = current_timestamp("finished_at")?;
+        let connection = self.connection()?;
+        let updated = connection.execute(
+            "UPDATE dl.runs
+             SET status = ?,
+                 finished_at = ?
+             WHERE run_id = ?
+               AND status = 'running'",
+            (
+                run_status_value(target_status),
+                timestamp_as_rfc3339(finished_at),
+                run_id.as_str(),
+            ),
+        )?;
+        drop(connection);
+
+        if updated > 0 {
+            return self.get_run(run_id);
+        }
+
+        let run = self.get_run(run_id)?;
+        Err(EngineError::InvalidRunTransition {
+            run_id: run_id.as_str().to_owned(),
+            from: run_status_value(run.status),
+            to: run_status_value(target_status),
+        })
     }
 
     fn connection(&self) -> Result<MutexGuard<'_, duckdb::Connection>, EngineError> {
@@ -312,6 +349,14 @@ fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> 
 
 fn sql_string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+const fn run_status_value(status: RunStatus) -> &'static str {
+    match status {
+        RunStatus::Running => "running",
+        RunStatus::Finished => "finished",
+        RunStatus::Failed => "failed",
+    }
 }
 
 pub struct NativeRun {
@@ -406,6 +451,42 @@ mod tests {
 
         assert_eq!(selected_project, created_project);
         assert_eq!(selected_run, created_run);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finish_run_updates_status_and_rejects_second_transition()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-finalize")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-finalize")),
+        )?;
+
+        let finished = client.finish_run(&run.run_id)?;
+        let second_transition = client.fail_run(&run.run_id).unwrap_err();
+
+        assert_eq!(finished.status, RunStatus::Finished);
+        assert!(finished.finished_at.is_some());
+        assert!(
+            matches!(
+                second_transition,
+                EngineError::InvalidRunTransition {
+                    from: "finished",
+                    to: "failed",
+                    ..
+                }
+            ),
+            "expected invalid finished -> failed transition, got {second_transition:?}",
+        );
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }

@@ -140,6 +140,29 @@ def test_client_detects_orphan_running_runs(tmp_path: pathlib.Path) -> None:
     assert [run.run_id for run in project_orphans] == [first_run_id]
 
 
+def test_client_finalizes_runs_as_finished_or_failed(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    finished_run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    failed_run = client.create_run(project.project_id, "candidate", run_id="run-2")
+
+    finished = client.finish_run(finished_run.run_id)
+    failed = client.fail_run(failed_run.run_id)
+    orphan_runs = client.list_orphan_runs(project.project_id)
+
+    assert finished.run_id == finished_run.run_id
+    assert finished.status == "finished"
+    assert finished.finished_at is not None
+    assert failed.run_id == failed_run.run_id
+    assert failed.status == "failed"
+    assert failed.finished_at is not None
+    assert orphan_runs == []
+
+
 def test_run_log_accepts_value_and_explicit_step(tmp_path: pathlib.Path) -> None:
     import pulseon
 

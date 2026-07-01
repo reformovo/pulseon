@@ -75,7 +75,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
 - [x] Expose run listing by project so multi-run comparison does not require
   callers to persist run IDs outside PulseOn.
 - [x] Make orphan `running` runs detectable from Python.
-- [ ] Implement run finalization APIs for `finished` and `failed` lifecycle
+- [x] Implement run finalization APIs for `finished` and `failed` lifecycle
   transitions.
 - [ ] Define bounded drain behavior for run finalization and client shutdown.
 - [ ] Expose an explicit client shutdown path, preferably context-manager
