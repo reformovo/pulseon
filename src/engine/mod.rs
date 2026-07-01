@@ -3,6 +3,7 @@
 
 pub mod client;
 pub mod flush;
+pub mod reporting;
 mod time;
 pub mod write;
 mod write_rows;

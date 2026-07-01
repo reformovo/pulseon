@@ -55,10 +55,10 @@ downsampled output length, endpoint preservation, and summary comparison.
 
 - [x] Expose `pulseon.init(path)`.
 - [x] Expose project/run creation.
-- [ ] Expose `run.log(key, value)` and `run.log(key, step, value)`.
-- [ ] Keep ordinary `run.log(...)` calls training-loop non-blocking with
+- [x] Expose `run.log(key, value)` and `run.log(key, step, value)`.
+- [x] Keep ordinary `run.log(...)` calls training-loop non-blocking with
   bounded native buffering.
-- [ ] Surface dropped or failed metric reports through diagnostics without
+- [x] Surface dropped or failed metric reports through diagnostics without
   raising by default from hot-path logging.
 - [ ] Expose metric query and summary query as data-returning APIs only.
 - [ ] Update `python/pulseon/_pulseon.pyi`.

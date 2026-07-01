@@ -25,6 +25,7 @@ use pyo3::prelude::*;
 #[pymodule]
 fn _pulseon(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<sdk::client::PyClient>()?;
+    m.add_class::<sdk::client::PyDiagnostics>()?;
     m.add_class::<sdk::client::PyProject>()?;
     m.add_class::<sdk::client::PyRun>()?;
     m.add_function(wrap_pyfunction!(sdk::client::init, m)?)?;

@@ -1,13 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use crate::engine::EngineError;
+use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
 use crate::engine::write::NativeWriteStore;
+use crate::model::metric::{MetricKey, Step};
 use crate::model::run::{Run, RunId};
 use crate::model::types::{Project, ProjectId};
 
 pub struct NativeClient {
     _root_path: PathBuf,
+    reporter: MetricReporter,
     _connection: duckdb::Connection,
 }
 
@@ -21,9 +24,11 @@ impl NativeClient {
         let connection = duckdb::Connection::open_in_memory()?;
         attach_ducklake(&connection, &catalog_path, &data_path)?;
         create_v1_tables(&connection)?;
+        let reporter = MetricReporter::open(catalog_path, data_path)?;
 
         Ok(Self {
             _root_path: root_path,
+            reporter,
             _connection: connection,
         })
     }
@@ -70,6 +75,23 @@ impl NativeClient {
         NativeWriteStore::new(&self._connection).create_run(project_id, name, run_id)
     }
 
+    pub fn run_handle(&self, run: Run) -> NativeRun {
+        NativeRun {
+            run_id: run.run_id,
+            project_id: run.project_id,
+            name: run.name,
+            status: run.status,
+            created_at: run.created_at,
+            started_at: run.started_at,
+            finished_at: run.finished_at,
+            reporter: self.reporter.clone(),
+        }
+    }
+
+    pub fn diagnostics(&self) -> MetricReporterDiagnostics {
+        self.reporter.diagnostics()
+    }
+
     fn project_exists(&self, project_id: &ProjectId) -> Result<bool, EngineError> {
         let exists = self._connection.query_row(
             "SELECT EXISTS (
@@ -84,7 +106,7 @@ impl NativeClient {
     }
 }
 
-fn attach_ducklake(
+pub(crate) fn attach_ducklake(
     connection: &duckdb::Connection,
     catalog_path: &Path,
     data_path: &Path,
@@ -140,6 +162,37 @@ fn sql_string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+pub struct NativeRun {
+    pub run_id: RunId,
+    pub project_id: ProjectId,
+    pub name: String,
+    pub status: crate::model::run::RunStatus,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    reporter: MetricReporter,
+}
+
+impl NativeRun {
+    pub fn log_metric(&self, metric_key: &str, value_f64: f64) {
+        self.reporter.report_metric(
+            self.run_id.clone(),
+            MetricKey::from_string(metric_key),
+            None,
+            value_f64,
+        );
+    }
+
+    pub fn log_metric_at_step(&self, metric_key: &str, step: i64, value_f64: f64) {
+        self.reporter.report_metric(
+            self.run_id.clone(),
+            MetricKey::from_string(metric_key),
+            Some(Step::new(step)),
+            value_f64,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,10 +224,11 @@ mod tests {
             "baseline",
             Some(RunId::from_string("run-python")),
         )?;
+        let run_handle = client.run_handle(run);
 
         assert_eq!(project.project_id.as_str(), "project-python");
-        assert_eq!(run.run_id.as_str(), "run-python");
-        assert_eq!(run.project_id, project.project_id);
+        assert_eq!(run_handle.run_id.as_str(), "run-python");
+        assert_eq!(run_handle.project_id, project.project_id);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }

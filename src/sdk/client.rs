@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 
-use crate::engine::client::NativeClient;
-use crate::model::run::{Run, RunId, RunStatus};
+use crate::engine::client::{NativeClient, NativeRun};
+use crate::engine::reporting::MetricReporterDiagnostics;
+use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 
 #[pyclass(name = "Client", module = "pulseon._pulseon", unsendable)]
@@ -40,8 +42,12 @@ impl PyClient {
         let run_id = run_id.map(RunId::from_string);
         self._inner
             .create_run(&project_id, name, run_id)
-            .map(PyRun::from)
+            .map(|run| PyRun::from(self._inner.run_handle(run)))
             .map_err(runtime_error)
+    }
+
+    pub fn diagnostics(&self) -> PyDiagnostics {
+        PyDiagnostics::from(self._inner.diagnostics())
     }
 }
 
@@ -67,32 +73,91 @@ impl From<Project> for PyProject {
 
 #[pyclass(name = "Run", module = "pulseon._pulseon")]
 pub struct PyRun {
-    #[pyo3(get)]
-    run_id: String,
-    #[pyo3(get)]
-    project_id: String,
-    #[pyo3(get)]
-    name: String,
-    #[pyo3(get)]
-    status: String,
-    #[pyo3(get)]
-    created_at: String,
-    #[pyo3(get)]
-    started_at: String,
-    #[pyo3(get)]
-    finished_at: Option<String>,
+    inner: NativeRun,
 }
 
-impl From<Run> for PyRun {
-    fn from(run: Run) -> Self {
+#[pymethods]
+impl PyRun {
+    #[getter]
+    pub fn run_id(&self) -> String {
+        self.inner.run_id.as_str().to_owned()
+    }
+
+    #[getter]
+    pub fn project_id(&self) -> String {
+        self.inner.project_id.as_str().to_owned()
+    }
+
+    #[getter]
+    pub fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    #[getter]
+    pub fn status(&self) -> String {
+        status_as_string(self.inner.status)
+    }
+
+    #[getter]
+    pub fn created_at(&self) -> String {
+        self.inner.created_at.to_rfc3339()
+    }
+
+    #[getter]
+    pub fn started_at(&self) -> String {
+        self.inner.started_at.to_rfc3339()
+    }
+
+    #[getter]
+    pub fn finished_at(&self) -> Option<String> {
+        self.inner
+            .finished_at
+            .map(|timestamp| timestamp.to_rfc3339())
+    }
+
+    #[pyo3(signature = (key, *args))]
+    pub fn log(&self, key: &str, args: &Bound<'_, PyTuple>) -> PyResult<()> {
+        match args.len() {
+            1 => {
+                let value = args.get_item(0)?.extract::<f64>()?;
+                self.inner.log_metric(key, value);
+                Ok(())
+            }
+            2 => {
+                let step = args.get_item(0)?.extract::<i64>()?;
+                let value = args.get_item(1)?.extract::<f64>()?;
+                self.inner.log_metric_at_step(key, step, value);
+                Ok(())
+            }
+            _ => Err(PyTypeError::new_err(
+                "log() expects (key, value) or (key, step, value)",
+            )),
+        }
+    }
+}
+
+impl From<NativeRun> for PyRun {
+    fn from(run: NativeRun) -> Self {
+        Self { inner: run }
+    }
+}
+
+#[pyclass(name = "Diagnostics", module = "pulseon._pulseon")]
+pub struct PyDiagnostics {
+    #[pyo3(get)]
+    accepted_reports: u64,
+    #[pyo3(get)]
+    dropped_reports: u64,
+    #[pyo3(get)]
+    failed_reports: u64,
+}
+
+impl From<MetricReporterDiagnostics> for PyDiagnostics {
+    fn from(diagnostics: MetricReporterDiagnostics) -> Self {
         Self {
-            run_id: run.run_id.as_str().to_owned(),
-            project_id: run.project_id.as_str().to_owned(),
-            name: run.name,
-            status: status_as_string(run.status),
-            created_at: run.created_at.to_rfc3339(),
-            started_at: run.started_at.to_rfc3339(),
-            finished_at: run.finished_at.map(|timestamp| timestamp.to_rfc3339()),
+            accepted_reports: diagnostics.accepted_reports,
+            dropped_reports: diagnostics.dropped_reports,
+            failed_reports: diagnostics.failed_reports,
         }
     }
 }
