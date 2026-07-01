@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::engine::EngineError;
+use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
+use crate::engine::write::NativeWriteStore;
+use crate::model::run::{Run, RunId};
+use crate::model::types::{Project, ProjectId};
 
 pub struct NativeClient {
     _root_path: PathBuf,
@@ -22,6 +26,61 @@ impl NativeClient {
             _root_path: root_path,
             _connection: connection,
         })
+    }
+
+    pub fn create_project(
+        &self,
+        name: &str,
+        project_id: Option<ProjectId>,
+    ) -> Result<Project, EngineError> {
+        let project_id =
+            project_id.unwrap_or_else(|| ProjectId::from_string(uuid::Uuid::new_v4().to_string()));
+        if self.project_exists(&project_id)? {
+            return Err(EngineError::ProjectAlreadyExists {
+                project_id: project_id.as_str().to_owned(),
+            });
+        }
+
+        let created_at = current_timestamp("created_at")?;
+        self._connection.execute(
+            "INSERT INTO dl.projects (project_id, name, created_at)
+             VALUES (?, ?, ?)",
+            (project_id.as_str(), name, timestamp_as_rfc3339(created_at)),
+        )?;
+
+        Ok(Project {
+            project_id,
+            name: name.to_owned(),
+            created_at,
+        })
+    }
+
+    pub fn create_run(
+        &self,
+        project_id: &ProjectId,
+        name: &str,
+        run_id: Option<RunId>,
+    ) -> Result<Run, EngineError> {
+        if !self.project_exists(project_id)? {
+            return Err(EngineError::ProjectNotFound {
+                project_id: project_id.as_str().to_owned(),
+            });
+        }
+
+        NativeWriteStore::new(&self._connection).create_run(project_id, name, run_id)
+    }
+
+    fn project_exists(&self, project_id: &ProjectId) -> Result<bool, EngineError> {
+        let exists = self._connection.query_row(
+            "SELECT EXISTS (
+                 SELECT 1
+                 FROM dl.projects
+                 WHERE project_id = ?
+             )",
+            [project_id.as_str()],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
     }
 }
 
@@ -93,6 +152,29 @@ mod tests {
         let _client = NativeClient::open(&root_path)?;
 
         assert!(root_path.join("data").is_dir());
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn create_project_and_run_persist_v1_records() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-python")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-python")),
+        )?;
+
+        assert_eq!(project.project_id.as_str(), "project-python");
+        assert_eq!(run.run_id.as_str(), "run-python");
+        assert_eq!(run.project_id, project.project_id);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }

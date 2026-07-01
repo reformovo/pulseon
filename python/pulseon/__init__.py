@@ -7,10 +7,12 @@ import os
 from pulseon import _pulseon
 
 Client = _pulseon.Client
+Project = _pulseon.Project
+Run = _pulseon.Run
 
 
 def init(path: str | os.PathLike[str]) -> Client:
     return _pulseon.init(path)
 
 
-__all__ = ["Client", "init"]
+__all__ = ["Client", "Project", "Run", "init"]
