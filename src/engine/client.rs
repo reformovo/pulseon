@@ -252,6 +252,31 @@ impl NativeClient {
         NativeWriteStore::new(&connection).query_metric_summaries(run_ids, metric_key)
     }
 
+    pub fn list_metrics(&self, run_id: &RunId) -> Result<Vec<MetricAggregate>, EngineError> {
+        self.get_run(run_id)?;
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT run_id, metric_key, effective_count, last_step, last_value_f64,
+                    min_value_f64, max_value_f64
+             FROM dl.metric_aggregates
+             WHERE run_id = ?
+             ORDER BY metric_key",
+        )?;
+        let rows = statement.query_map([run_id.as_str()], |row| {
+            Ok(MetricAggregate {
+                run_id: RunId::from_string(row.get::<_, String>(0)?),
+                metric_key: MetricKey::from_string(row.get::<_, String>(1)?),
+                effective_count: row.get(2)?,
+                last_step: Step::new(row.get(3)?),
+                last_value_f64: row.get(4)?,
+                min_value_f64: row.get(5)?,
+                max_value_f64: row.get(6)?,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     fn project_exists(&self, project_id: &ProjectId) -> Result<bool, EngineError> {
         let connection = self.connection()?;
         let exists = connection.query_row(

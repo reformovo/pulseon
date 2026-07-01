@@ -80,7 +80,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
 - [x] Define bounded drain behavior for run finalization and client shutdown.
 - [x] Expose an explicit client shutdown path, preferably context-manager
   friendly.
-- [ ] Expose metric discovery as data-returning APIs over aggregate/index state.
+- [x] Expose metric discovery as data-returning APIs over aggregate/index state.
 - [ ] Clarify diagnostics semantics: accepted reports mean accepted into the
   native buffer, not durably stored metric points.
 - [ ] Expand diagnostics with writer freshness state such as backlog/drained

@@ -223,6 +223,29 @@ def test_client_queries_metric_points_and_summaries(tmp_path: pathlib.Path) -> N
     assert summaries[0].last_value_f64 == 0.125
 
 
+def test_client_discovers_metrics_from_aggregate_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run.log("eval/accuracy", 0, 0.8)
+    run.log("train/loss", 0, 0.25)
+    _wait_for_metric_points(client, run.run_id, "eval/accuracy", expected_count=1)
+    _wait_for_metric_points(client, run.run_id, "train/loss", expected_count=1)
+
+    metrics = client.list_metrics(run.run_id)
+
+    assert [metric.metric_key for metric in metrics] == [
+        "eval/accuracy",
+        "train/loss",
+    ]
+    assert [metric.effective_count for metric in metrics] == [1, 1]
+    assert isinstance(metrics[0], pulseon.MetricSummary)
+
+
 def _wait_for_metric_points(
     client: object,
     run_id: str,

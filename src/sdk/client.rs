@@ -169,6 +169,14 @@ impl PyClient {
             .map(|summaries| summaries.into_iter().map(PyMetricSummary::from).collect())
             .map_err(runtime_error)
     }
+
+    pub fn list_metrics(&self, run_id: &str) -> PyResult<Vec<PyMetricSummary>> {
+        let run_id = RunId::from_string(run_id);
+        self._inner
+            .list_metrics(&run_id)
+            .map(|metrics| metrics.into_iter().map(PyMetricSummary::from).collect())
+            .map_err(runtime_error)
+    }
 }
 
 #[pyclass(name = "Project", module = "pulseon._pulseon")]
