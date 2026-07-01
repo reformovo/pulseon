@@ -72,7 +72,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
 - [x] Expose project/run selection APIs for existing local data.
 - [x] Expose explicit run resume in Python instead of requiring callers to
   recreate run handles from saved IDs.
-- [ ] Expose run listing by project so multi-run comparison does not require
+- [x] Expose run listing by project so multi-run comparison does not require
   callers to persist run IDs outside PulseOn.
 - [ ] Make orphan `running` runs detectable from Python.
 - [ ] Implement run finalization APIs for `finished` and `failed` lifecycle

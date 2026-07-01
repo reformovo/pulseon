@@ -71,6 +71,18 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
+    pub fn list_runs(&self, project_id: &str) -> PyResult<Vec<PyRun>> {
+        let project_id = ProjectId::from_string(project_id);
+        self._inner
+            .list_runs(&project_id)
+            .map(|runs| {
+                runs.into_iter()
+                    .map(|run| PyRun::from(self._inner.run_handle(run)))
+                    .collect()
+            })
+            .map_err(runtime_error)
+    }
+
     pub fn diagnostics(&self) -> PyDiagnostics {
         PyDiagnostics::from(self._inner.diagnostics())
     }

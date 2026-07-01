@@ -82,6 +82,37 @@ def test_client_resumes_existing_run_for_logging(tmp_path: pathlib.Path) -> None
     assert [point.value_f64 for point in points] == [0.25]
 
 
+def test_client_lists_project_runs_for_summary_queries(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    first_run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    second_run = client.create_run(project.project_id, "candidate", run_id="run-2")
+    first_run.log("train/loss", 0, 0.25)
+    second_run.log("train/loss", 0, 0.125)
+    _wait_for_metric_points(client, first_run.run_id, "train/loss", expected_count=1)
+    _wait_for_metric_points(client, second_run.run_id, "train/loss", expected_count=1)
+    del first_run
+    del second_run
+    del client
+
+    reopened_client = pulseon.init(root_path)
+    runs = reopened_client.list_runs(project.project_id)
+    summaries = reopened_client.query_metric_summaries(
+        [run.run_id for run in runs],
+        "train/loss",
+    )
+
+    assert [run.run_id for run in runs] == ["run-1", "run-2"]
+    assert [run.name for run in runs] == ["baseline", "candidate"]
+    assert [summary.run_id for summary in summaries] == ["run-1", "run-2"]
+    assert [summary.last_value_f64 for summary in summaries] == [0.25, 0.125]
+
+
 def test_run_log_accepts_value_and_explicit_step(tmp_path: pathlib.Path) -> None:
     import pulseon
 
