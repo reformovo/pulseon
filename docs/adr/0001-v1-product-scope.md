@@ -11,7 +11,8 @@ turns speculative features into false requirements.
 ## Decision
 PulseOn v1 targets a minimal native loop for individual trainers who use AI
 tools: create/select project, start run, log numeric metrics, query local data,
-plot metric series, and compare runs.
+return chart-ready metric series data, and compare runs. PulseOn v1 does not
+provide built-in plotting or plotting dependencies.
 
 AI Native remains the product direction, but v1 only proves that DuckLake can
 support the metrics ingestion and local query workload. Agent workflows,

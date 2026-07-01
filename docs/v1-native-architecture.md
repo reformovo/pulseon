@@ -2,7 +2,7 @@
 
 ## Scope
 V1 validates a local-first loop for individual trainers: create project, create
-run, log numeric metrics, query data, and plot charts.
+run, log numeric metrics, query chart-ready data, and compare runs.
 
 V1 value is local ownership with an open Parquet boundary. AI Native, Cloud,
 MCP, and agent memory are future work.
@@ -78,14 +78,15 @@ storage or backpressure failures; those failures must be surfaced through
 diagnostics.
 
 Initial scale targets: around 10,000 runs, up to 1,000,000 distinct metric
-keys, very long metric series with downsampled plotting, and TB-scale local
-datasets.
+keys, very long metric series with downsampled chart-ready output, and TB-scale
+local datasets.
 
 ## Implementation Boundaries
 Keep v1 code focused on native mode: no deletion, workspace hierarchy,
 config/tag filtering, Cloud skeletons, public `StorageLayer`, agent tables, or MCP.
 
-The Python API should initially return query data only; plotting stays outside PulseOn v1.
+The Python API should return chart-ready query data only. Built-in plotting,
+rendering APIs, and plotting dependencies stay outside PulseOn v1.
 
 Future architecture documents may preserve Cloud and AI Native constraints, but
 they should not drive v1 code shape until the native loop is proven.

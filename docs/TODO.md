@@ -67,6 +67,38 @@ Acceptance: pytest covers the native loop from Python without plotting
 dependencies. Rust or Python tests simulate a slow or blocked writer and verify
 ordinary `run.log(...)` calls do not wait indefinitely.
 
+## Phase 5: V1 Closure Backlog
+
+- [ ] Expose project/run selection APIs for existing local data.
+- [ ] Expose explicit run resume in Python instead of requiring callers to
+  recreate run handles from saved IDs.
+- [ ] Expose run listing by project so multi-run comparison does not require
+  callers to persist run IDs outside PulseOn.
+- [ ] Make orphan `running` runs detectable from Python.
+- [ ] Implement run finalization APIs for `finished` and `failed` lifecycle
+  transitions.
+- [ ] Define bounded drain behavior for run finalization and client shutdown.
+- [ ] Expose an explicit client shutdown path, preferably context-manager
+  friendly.
+- [ ] Expose metric discovery as data-returning APIs over aggregate/index state.
+- [ ] Clarify diagnostics semantics: accepted reports mean accepted into the
+  native buffer, not durably stored metric points.
+- [ ] Expand diagnostics with writer freshness state such as backlog/drained
+  status and last write error.
+- [ ] Document the stable PulseOn Parquet schema contract and compatibility
+  rules.
+- [ ] Keep charting outside PulseOn v1: return chart-ready metric data only and
+  do not add built-in plotting dependencies or rendering APIs.
+- [ ] Add Python-facing tests for query range filters, downsampling limits,
+  endpoint preservation, and summary comparison.
+- [ ] Define Python-facing error classes for actionable SDK failures such as
+  duplicate run, missing project/run, DuckLake unavailable, and query failure.
+
+Acceptance: a restarted Python process can select existing local data, detect
+orphan running runs, resume or finalize runs explicitly, discover metric keys,
+query chart-ready data without plotting dependencies, and inspect diagnostics
+that distinguish queued, persisted, dropped, delayed, and failed metric reports.
+
 ## Deferred
 
 - Workspace and organization hierarchy.
