@@ -26,11 +26,15 @@ logging must not raise by default for transient storage or backpressure
 failures.
 
 Run finalization may perform a bounded drain or flush, but it must not hang
-indefinitely. Query results are eventually consistent with accepted metric
-reports until the writer has drained.
+indefinitely. Diagnostics that count accepted reports mean reports accepted into
+the native in-process buffer, not durably stored metric points. Query results
+are eventually consistent with accepted metric reports until the writer has
+drained.
 
 ## Consequences
 - Metric reporting has weaker durability than the training process itself.
+- Accepted-report diagnostics are buffer-admission diagnostics, not storage
+  durability diagnostics.
 - Tests need to cover slow or blocked storage paths without allowing
   `run.log(...)` to stall indefinitely.
 - Diagnostics for dropped or failed metric reports are required before v1 can

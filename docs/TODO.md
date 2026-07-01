@@ -81,7 +81,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
 - [x] Expose an explicit client shutdown path, preferably context-manager
   friendly.
 - [x] Expose metric discovery as data-returning APIs over aggregate/index state.
-- [ ] Clarify diagnostics semantics: accepted reports mean accepted into the
+- [x] Clarify diagnostics semantics: accepted reports mean accepted into the
   native buffer, not durably stored metric points.
 - [ ] Expand diagnostics with writer freshness state such as backlog/drained
   status and last write error.

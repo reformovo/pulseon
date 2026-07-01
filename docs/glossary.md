@@ -11,6 +11,8 @@ part of the v1 architecture contract.
 - **Metric point**: One numeric observation in a metric series.
 - **Metric reporting**: The hot-path handoff from training code to PulseOn.
   Reporting must not block training progress.
+- **Accepted report**: A metric report accepted into PulseOn's native in-process
+  buffer. It is not a durability claim until the writer persists a metric point.
 - **Run summary**: Derived per-run values for run lists and comparisons.
 - **Metric aggregate**: Materialized-view-like index/state from metric writes.
 - **Reporting diagnostics**: Observable state for dropped, delayed, or failed
