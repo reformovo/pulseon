@@ -66,8 +66,9 @@ the same bounded-drain rule.
 DuckLake is required in native v1 to avoid custom staging, flush, and compaction
 before validation.
 
-The stable product contract is the PulseOn Parquet schema. DuckLake catalog
-metadata is implementation detail.
+The stable product contract is the PulseOn Parquet schema documented in
+`docs/v1-parquet-schema-contract.md`. DuckLake catalog metadata is
+implementation detail.
 
 ## Query Goals
 Both query paths matter for v1: long single-series chart queries with range

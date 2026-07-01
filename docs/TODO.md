@@ -85,7 +85,7 @@ ordinary `run.log(...)` calls do not wait indefinitely.
   native buffer, not durably stored metric points.
 - [x] Expand diagnostics with writer freshness state such as backlog/drained
   status and last write error.
-- [ ] Document the stable PulseOn Parquet schema contract and compatibility
+- [x] Document the stable PulseOn Parquet schema contract and compatibility
   rules.
 - [ ] Keep charting outside PulseOn v1: return chart-ready metric data only and
   do not add built-in plotting dependencies or rendering APIs.
