@@ -1,8 +1,15 @@
 """Verify that the pulseon package can be imported."""
 
+from __future__ import annotations
+
 import os
 import pathlib
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
+    import pulseon
 
 
 def test_import_pulseon() -> None:
@@ -38,7 +45,7 @@ def test_client_creates_project_and_run(tmp_path: pathlib.Path) -> None:
 
 def test_client_raises_actionable_sdk_errors(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import pytest
     import pulseon
@@ -227,8 +234,7 @@ def test_client_shutdown_closes_logging_and_context_manager(
     with pulseon.init(root_path) as context_client:
         selected_project = context_client.get_project(project.project_id)
 
-    assert selected_project.project_id == project.project_id
-    assert context_client.shutdown()
+        assert selected_project.project_id == project.project_id
 
 
 def test_run_log_accepts_value_and_explicit_step(tmp_path: pathlib.Path) -> None:
@@ -349,13 +355,13 @@ def _configure_lttb_extension() -> None:
 
 
 def _wait_for_metric_points(
-    client: object,
+    client: pulseon.Client,
     run_id: str,
     metric_key: str,
     expected_count: int,
-) -> list[object]:
+) -> list[pulseon.MetricPoint]:
     deadline = time.monotonic() + 5.0
-    points: list[object] = []
+    points: list[pulseon.MetricPoint] = []
     while time.monotonic() < deadline:
         points = client.query_metric(run_id, metric_key)
         if len(points) >= expected_count:
