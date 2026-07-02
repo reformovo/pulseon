@@ -184,10 +184,24 @@ v1 coverage easier to maintain and easier to diagnose when it fails.
   LTTB path for strict length and endpoint behavior; Python tests should cover
   SDK-level success/error mapping without depending on a developer-local
   extension path.
-- [ ] Add or maintain a v1 coverage matrix in this roadmap. The matrix should
+- [x] Add or maintain a v1 coverage matrix in this roadmap. The matrix should
   map run lifecycle, explicit resume, non-blocking logging, last-write-wins,
   aggregate discovery, range query, downsampling, summary comparison, and
   diagnostics to their Rust and Python test owners.
+
+### V1 Coverage Matrix
+
+| Behavior | Rust owner | Python owner |
+| --- | --- | --- |
+| Run lifecycle | `src/engine/client.rs`, `src/engine/write_rows.rs` | `tests/test_sdk_lifecycle.py` |
+| Explicit resume | `src/native_engine_behavior.rs` | `tests/test_sdk_lifecycle.py` |
+| Non-blocking logging | `src/engine/reporting.rs` | `tests/test_metric_logging.py` |
+| Last-write-wins | `src/native_engine_behavior.rs` | SDK boundary covered by query outputs in `tests/test_metric_queries.py` |
+| Aggregate discovery | `src/native_engine_behavior.rs` | `tests/test_metric_queries.py` |
+| Range query | `src/native_engine_behavior.rs` | `tests/test_metric_queries.py` |
+| Downsampling | deterministic LTTB macro path in `src/native_engine_behavior.rs` | SDK max-points success and `QueryError` mapping in `tests/test_metric_queries.py` and `tests/test_sdk_errors.py` |
+| Summary comparison | `src/native_engine_behavior.rs` | `tests/test_sdk_lifecycle.py` and `tests/test_metric_queries.py` |
+| Diagnostics | `src/engine/reporting.rs` | `tests/test_sdk_diagnostics.py`, `tests/helpers.py`, and `tests/test_helpers.py` |
 
 Acceptance: test files are named by protected behavior, helper failures are
 diagnostic, native engine semantics still exercise real DuckLake storage,
