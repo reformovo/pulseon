@@ -154,6 +154,46 @@ gone, v1 behavior is unchanged, Rust and Python public APIs stay compatible, and
 the relevant gates (`cargo check`, `cargo test`, `uv run pyright`, and
 `uv run pytest`) pass.
 
+## Testing Optimization Backlog
+
+Source: 2026-07-02 test-organization audit against
+`docs/v1-native-architecture.md`, Python testing conventions, and Rust testing
+best practices. These items do not add product behavior; they make the existing
+v1 coverage easier to maintain and easier to diagnose when it fails.
+
+- [ ] Split `tests/test_init.py` by Python-facing behavior. Keep import smoke
+  coverage separate from SDK lifecycle, metric logging, query/downsampling,
+  diagnostics, and actionable error tests so each file name explains the
+  behavior it protects.
+- [ ] Make Python async-write wait helpers fail explicitly on timeout. Replace
+  partial-result returns with assertion failures that include the expected
+  count, actual count, run id, metric key, and current diagnostics.
+- [ ] Rename or reorganize `src/ducklake_probe.rs` as native engine behavior
+  tests. The file now protects core v1 write/query/aggregate semantics rather
+  than a temporary DuckLake probe, so its name and grouping should reflect the
+  durable responsibility.
+- [ ] Reduce repeated Rust DuckLake setup in behavior tests without hiding the
+  storage boundary. Keep tests backed by real temporary DuckLake datasets, but
+  move boilerplate project/run/metric setup into small test helpers with
+  behavior-focused names.
+- [ ] Keep low-level Rust unit tests near implementation details and keep
+  public Python tests at the SDK boundary. Unit tests should cover private
+  parsing, status, reporter, and environment-option edge cases; pytest should
+  verify user-visible behavior only.
+- [ ] Stabilize downsampling coverage. Rust tests should keep a deterministic
+  LTTB path for strict length and endpoint behavior; Python tests should cover
+  SDK-level success/error mapping without depending on a developer-local
+  extension path.
+- [ ] Add or maintain a v1 coverage matrix in this roadmap. The matrix should
+  map run lifecycle, explicit resume, non-blocking logging, last-write-wins,
+  aggregate discovery, range query, downsampling, summary comparison, and
+  diagnostics to their Rust and Python test owners.
+
+Acceptance: test files are named by protected behavior, helper failures are
+diagnostic, native engine semantics still exercise real DuckLake storage,
+Python tests stay focused on public SDK behavior, and the relevant gates
+(`cargo check`, `cargo test`, `uv run pyright`, and `uv run pytest`) pass.
+
 ## Deferred
 
 - Workspace and organization hierarchy.
