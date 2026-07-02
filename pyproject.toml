@@ -33,6 +33,11 @@ config-settings = { build-args = '--profile=dev' }
 python-source = "python"
 module-name = "pulseon._pulseon"
 
+[tool.maturin.generate-ci.github]
+trusted-publishing = true
+# Optional: name of the GitHub Actions environment to use for the release job
+publishing-environment = "release"
+
 [tool.pyright]
 include = ["python"]
 reportUnnecessaryTypeIgnoreComment = true
