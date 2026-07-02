@@ -2,7 +2,6 @@
 // Architecture ref: docs/native-architecture.md §4, §5, §6.1
 
 pub mod client;
-pub mod flush;
 pub mod reporting;
 mod time;
 pub mod write;

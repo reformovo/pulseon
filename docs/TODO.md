@@ -136,7 +136,7 @@ to maintain.
   `src/sdk/query.rs`, and `src/sdk/run.rs`. The implemented Python-facing
   classes currently live in `src/sdk/client.rs`; either split those classes into
   real modules or delete the empty Phase 5 placeholders.
-- [ ] Remove `src/engine/flush.rs` or turn it into a real drain/finalization
+- [x] Remove `src/engine/flush.rs` or turn it into a real drain/finalization
   module. It is a Phase 4 one-line placeholder, while bounded drain behavior is
   already implemented in `src/engine/reporting.rs` and used by
   `src/engine/client.rs`.
