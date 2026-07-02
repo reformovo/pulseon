@@ -168,7 +168,7 @@ v1 coverage easier to maintain and easier to diagnose when it fails.
 - [x] Make Python async-write wait helpers fail explicitly on timeout. Replace
   partial-result returns with assertion failures that include the expected
   count, actual count, run id, metric key, and current diagnostics.
-- [ ] Rename or reorganize `src/ducklake_probe.rs` as native engine behavior
+- [x] Rename or reorganize `src/ducklake_probe.rs` as native engine behavior
   tests. The file now protects core v1 write/query/aggregate semantics rather
   than a temporary DuckLake probe, so its name and grouping should reflect the
   durable responsibility.

@@ -7,7 +7,7 @@
 //   sdk/    - PyO3 bindings
 
 #[cfg(test)]
-mod ducklake_probe;
+mod native_engine_behavior;
 #[cfg(test)]
 mod ducklake_test_support;
 pub mod engine;
