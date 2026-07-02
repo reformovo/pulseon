@@ -11,15 +11,50 @@ mod tests {
     use crate::model::run::RunId;
     use crate::model::types::ProjectId;
 
+    const PROJECT_ID: &str = "project-1";
+    const PROJECT_NAME: &str = "local training";
+
+    struct BehaviorDataset {
+        _dataset: TestDataset,
+        connection: duckdb::Connection,
+    }
+
+    impl BehaviorDataset {
+        fn connection(&self) -> &duckdb::Connection {
+            &self.connection
+        }
+    }
+
+    fn open_behavior_dataset() -> Result<BehaviorDataset, Box<dyn Error>> {
+        let dataset = TestDataset::new()?;
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &dataset)?;
+        create_minimal_v1_tables(&connection)?;
+        Ok(BehaviorDataset {
+            _dataset: dataset,
+            connection,
+        })
+    }
+
+    fn open_project_dataset() -> Result<BehaviorDataset, Box<dyn Error>> {
+        let dataset = open_behavior_dataset()?;
+        insert_project(dataset.connection())?;
+        Ok(dataset)
+    }
+
+    fn insert_project(connection: &duckdb::Connection) -> Result<(), duckdb::Error> {
+        connection.execute(
+            "INSERT INTO dl.projects VALUES (?1, ?2, now())",
+            duckdb::params![PROJECT_ID, PROJECT_NAME],
+        )?;
+        Ok(())
+    }
+
     #[test]
     fn ducklake_round_trips_minimal_v1_data() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-
-        // When
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
+        let dataset = open_behavior_dataset()?;
+        let connection = dataset.connection();
 
         // Then
         let table_count: i64 = connection.query_row(
@@ -32,7 +67,7 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(table_count, 4);
-        seed_minimal_v1_data(&connection)?;
+        seed_minimal_v1_data(connection)?;
 
         let metric_total: f64 = connection.query_row(
             "SELECT sum(value_f64)
@@ -49,16 +84,10 @@ mod tests {
     #[test]
     fn create_run_persists_generated_and_user_supplied_ids() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
 
         // When
         let generated = store.create_run(&project_id, "generated", None)?;
@@ -80,16 +109,10 @@ mod tests {
     #[test]
     fn create_run_requires_explicit_resume_for_existing_run_id() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run_id = RunId::from_string("run-user-1");
         let created = store.create_run(&project_id, "first", Some(run_id.clone()))?;
 
@@ -112,16 +135,10 @@ mod tests {
     #[test]
     fn log_metric_assigns_next_step_per_run_and_metric_key() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
 
@@ -149,16 +166,10 @@ mod tests {
     #[test]
     fn log_metric_stores_ingested_at_for_metric_points() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
 
@@ -183,17 +194,11 @@ mod tests {
     #[test]
     fn query_metric_uses_last_write_wins_for_duplicate_steps() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let query = NativeQueryStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let query = NativeQueryStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
@@ -215,17 +220,11 @@ mod tests {
     #[test]
     fn query_metric_filters_effective_series_by_step_range() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let query = NativeQueryStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let query = NativeQueryStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.5)?;
@@ -256,17 +255,11 @@ mod tests {
     fn query_metric_returns_short_series_unchanged_under_max_points() -> Result<(), Box<dyn Error>>
     {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let query = NativeQueryStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let query = NativeQueryStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
@@ -287,10 +280,8 @@ mod tests {
     #[test]
     fn query_metric_downsamples_long_series_with_duckdb_lttb() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
+        let dataset = open_behavior_dataset()?;
+        let connection = dataset.connection();
         connection.execute_batch(
             "CREATE MACRO lttb(x, y, n) AS [
                  list({x: x, y: y} ORDER BY x)[1],
@@ -304,7 +295,7 @@ mod tests {
                  ('run-1', 'train/loss', 2, now(), 0.125, now()),
                  ('run-1', 'train/loss', 3, now(), 0.0625, now());",
         )?;
-        let query = NativeQueryStore::new(&connection);
+        let query = NativeQueryStore::new(connection);
         let run_id = RunId::from_string("run-1");
         let metric_key = MetricKey::from_string("train/loss");
 
@@ -323,17 +314,11 @@ mod tests {
     #[test]
     fn metric_aggregate_tracks_effective_series_values() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let query = NativeQueryStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let query = NativeQueryStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
@@ -356,17 +341,11 @@ mod tests {
     #[test]
     fn query_metric_summaries_returns_multi_run_comparison() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let query = NativeQueryStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let query = NativeQueryStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run_a = store.create_run(&project_id, "a", Some(RunId::from_string("run-a")))?;
         let run_b = store.create_run(&project_id, "b", Some(RunId::from_string("run-b")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -407,17 +386,11 @@ mod tests {
     #[test]
     fn repair_metric_aggregate_refreshes_stale_old_step_overwrite() -> Result<(), Box<dyn Error>> {
         // Given
-        let dataset = TestDataset::new()?;
-        let connection = duckdb::Connection::open_in_memory()?;
-        attach_ducklake(&connection, &dataset)?;
-        create_minimal_v1_tables(&connection)?;
-        connection.execute(
-            "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
-            [],
-        )?;
-        let store = NativeWriteStore::new(&connection);
-        let query = NativeQueryStore::new(&connection);
-        let project_id = ProjectId::from_string("project-1");
+        let dataset = open_project_dataset()?;
+        let connection = dataset.connection();
+        let store = NativeWriteStore::new(connection);
+        let query = NativeQueryStore::new(connection);
+        let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;

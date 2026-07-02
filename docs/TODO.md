@@ -172,7 +172,7 @@ v1 coverage easier to maintain and easier to diagnose when it fails.
   tests. The file now protects core v1 write/query/aggregate semantics rather
   than a temporary DuckLake probe, so its name and grouping should reflect the
   durable responsibility.
-- [ ] Reduce repeated Rust DuckLake setup in behavior tests without hiding the
+- [x] Reduce repeated Rust DuckLake setup in behavior tests without hiding the
   storage boundary. Keep tests backed by real temporary DuckLake datasets, but
   move boilerplate project/run/metric setup into small test helpers with
   behavior-focused names.
