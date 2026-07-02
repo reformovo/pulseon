@@ -1,5 +1,5 @@
-// engine/mod.rs — 编排层：持有三层引用，实现写入/查询路径
-// Architecture ref: docs/native-architecture.md §4, §5, §6.1
+// Native v1 engine over DuckLake.
+// Architecture ref: docs/v1-native-architecture.md
 
 pub mod client;
 pub mod reporting;

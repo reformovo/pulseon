@@ -140,7 +140,7 @@ to maintain.
   module. It is a Phase 4 one-line placeholder, while bounded drain behavior is
   already implemented in `src/engine/reporting.rs` and used by
   `src/engine/client.rs`.
-- [ ] Update stale module comments after removing placeholders. `src/lib.rs`
+- [x] Update stale module comments after removing placeholders. `src/lib.rs`
   and several `mod.rs` headers still describe the removed broad architecture
   (`docs/native-architecture.md`, AI Native, catalog/storage/compute layers).
   Point maintainers at `docs/v1-native-architecture.md` and the v1 native

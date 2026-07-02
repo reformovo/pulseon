@@ -1,5 +1,5 @@
-// model/mod.rs — 逻辑数据模型（纯数据类型，无 I/O 依赖）
-// Architecture ref: docs/native-architecture.md §3, §6.1
+// Native v1 domain types.
+// Architecture ref: docs/v1-native-architecture.md
 
 pub mod metric;
 pub mod run;
