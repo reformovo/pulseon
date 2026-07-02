@@ -132,7 +132,7 @@ to maintain.
   `config.rs`, `event.rs`, `summary.rs`, and `tag.rs`. Configs, tags,
   artifacts, and events are deferred outside v1, and the implemented v1 summary
   state already lives in `metric.rs` as `MetricAggregate`.
-- [ ] Remove or replace stale SDK placeholder files: `src/sdk/config.rs`,
+- [x] Remove or replace stale SDK placeholder files: `src/sdk/config.rs`,
   `src/sdk/query.rs`, and `src/sdk/run.rs`. The implemented Python-facing
   classes currently live in `src/sdk/client.rs`; either split those classes into
   real modules or delete the empty Phase 5 placeholders.
