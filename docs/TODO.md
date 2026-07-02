@@ -99,6 +99,61 @@ orphan running runs, resume or finalize runs explicitly, discover metric keys,
 query chart-ready data without plotting dependencies, and inspect diagnostics
 that distinguish queued, persisted, dropped, delayed, and failed metric reports.
 
+## Structural Cleanup Backlog
+
+Source: 2026-07-02 code-organization audit against
+`docs/v1-native-architecture.md`. These items are not new product features; they
+remove obsolete scaffold shape and make the existing native v1 behavior easier
+to maintain.
+
+- [ ] Split query behavior out of `src/engine/write.rs`. `NativeWriteStore`
+  currently owns run creation, metric writes, effective-series queries,
+  downsampling, LTTB extension loading, aggregate lookup, summary queries, and
+  aggregate repair. Move read/query/downsampling code to a query-focused engine
+  module and keep the write path responsible for writes and write-side aggregate
+  maintenance.
+- [ ] Split storage bootstrap/schema code out of `src/engine/client.rs`.
+  `NativeClient` currently mixes DuckLake attach, schema creation, project/run
+  selection, run lifecycle, metric discovery, metric queries, diagnostics, and
+  `NativeRun`. Introduce focused native modules for bootstrap/schema and
+  project/run/query operations, while preserving the current Python API.
+- [ ] Deduplicate v1 DuckLake schema and attach helpers. The schema exists in
+  both `src/engine/client.rs` and `src/ducklake_test_support.rs`; tests should
+  use the same schema/bootstrap path as the engine so future Parquet contract
+  changes do not drift.
+- [ ] Remove obsolete scaffold modules that contradict the v1 native boundary:
+  `src/catalog/`, `src/storage/`, and `src/compute/`. Their leaf files are
+  one-line TODO placeholders for `CatalogLayer`, `StorageLayer`,
+  `ComputeLayer`, Cloud, S3, and future query abstractions, while v1 explicitly
+  has no public `StorageLayer` or Cloud skeletons. Relocate any still-needed
+  error type before removing `mod catalog`, `mod storage`, and `mod compute`
+  from `src/lib.rs`.
+- [ ] Remove invalid model placeholder files from `src/model/`: `artifact.rs`,
+  `config.rs`, `event.rs`, `summary.rs`, and `tag.rs`. Configs, tags,
+  artifacts, and events are deferred outside v1, and the implemented v1 summary
+  state already lives in `metric.rs` as `MetricAggregate`.
+- [ ] Remove or replace stale SDK placeholder files: `src/sdk/config.rs`,
+  `src/sdk/query.rs`, and `src/sdk/run.rs`. The implemented Python-facing
+  classes currently live in `src/sdk/client.rs`; either split those classes into
+  real modules or delete the empty Phase 5 placeholders.
+- [ ] Remove `src/engine/flush.rs` or turn it into a real drain/finalization
+  module. It is a Phase 4 one-line placeholder, while bounded drain behavior is
+  already implemented in `src/engine/reporting.rs` and used by
+  `src/engine/client.rs`.
+- [ ] Update stale module comments after removing placeholders. `src/lib.rs`
+  and several `mod.rs` headers still describe the removed broad architecture
+  (`docs/native-architecture.md`, AI Native, catalog/storage/compute layers).
+  Point maintainers at `docs/v1-native-architecture.md` and the v1 native
+  module boundaries instead.
+- [ ] Keep valid empty marker files. `python/pulseon/py.typed` and
+  `tests/__init__.py` are intentional marker/package files, not invalid
+  placeholders.
+
+Acceptance: placeholder-only Rust files and obsolete module declarations are
+gone, v1 behavior is unchanged, Rust and Python public APIs stay compatible, and
+the relevant gates (`cargo check`, `cargo test`, `uv run pyright`, and
+`uv run pytest`) pass.
+
 ## Deferred
 
 - Workspace and organization hierarchy.

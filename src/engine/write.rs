@@ -9,6 +9,9 @@ use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::ProjectId;
 
+const LTTB_AUTO_INSTALL_ENV: &str = "PULSEON_LTTB_AUTO_INSTALL";
+const LTTB_EXTENSION_PATH_ENV: &str = "PULSEON_LTTB_EXTENSION_PATH";
+
 pub struct NativeWriteStore<'connection> {
     connection: &'connection duckdb::Connection,
 }
@@ -370,17 +373,33 @@ impl<'connection> NativeWriteStore<'connection> {
             return Ok(());
         }
 
-        match self.connection.execute_batch("LOAD lttb;") {
-            Ok(()) if self.lttb_function_available() => Ok(()),
-            Ok(()) | Err(_) => self.install_and_load_lttb_extension(),
-        }
-    }
+        let load_error = match self.connection.execute_batch("LOAD lttb;") {
+            Ok(()) if self.lttb_function_available() => return Ok(()),
+            Ok(()) => None,
+            Err(source) => Some(source.to_string()),
+        };
 
-    fn install_and_load_lttb_extension(&self) -> Result<(), EngineError> {
-        if let Some(path) = std::env::var_os("PULSEON_LTTB_EXTENSION_PATH") {
+        if let Some(path) = std::env::var_os(LTTB_EXTENSION_PATH_ENV) {
             return self.load_lttb_extension_from_path(Path::new(&path));
         }
 
+        if lttb_auto_install_allowed(std::env::var_os(LTTB_AUTO_INSTALL_ENV).as_deref()) {
+            return self.install_and_load_lttb_extension();
+        }
+
+        let mut message = format!(
+            "lttb is not loaded and PulseOn will not download it automatically; \
+             set {LTTB_AUTO_INSTALL_ENV}=1 to allow INSTALL lttb FROM community, \
+             or set {LTTB_EXTENSION_PATH_ENV} to a local lttb.duckdb_extension"
+        );
+        if let Some(load_error) = load_error {
+            message.push_str("; LOAD lttb failed: ");
+            message.push_str(&load_error);
+        }
+        Err(EngineError::LttbExtensionUnavailable { message })
+    }
+
+    fn install_and_load_lttb_extension(&self) -> Result<(), EngineError> {
         match self
             .connection
             .execute_batch("INSTALL lttb FROM community; LOAD lttb;")
@@ -492,4 +511,30 @@ fn stored_metric_point_from_row(row: &duckdb::Row<'_>) -> duckdb::Result<StoredM
 
 fn sql_string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+fn lttb_auto_install_allowed(value: Option<&std::ffi::OsStr>) -> bool {
+    value
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    fn allows(value: &str) -> bool {
+        lttb_auto_install_allowed(Some(OsStr::new(value)))
+    }
+
+    #[test]
+    fn lttb_auto_install_is_opt_in() {
+        assert!(!lttb_auto_install_allowed(None));
+        assert!(!allows("0"));
+        assert!(allows("1"));
+        assert!(allows("true"));
+        assert!(allows("yes"));
+        assert!(allows("on"));
+    }
 }

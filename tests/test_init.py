@@ -352,6 +352,8 @@ def _configure_lttb_extension() -> None:
     )
     if local_extension.is_file():
         os.environ["PULSEON_LTTB_EXTENSION_PATH"] = str(local_extension)
+    else:
+        os.environ.setdefault("PULSEON_LTTB_AUTO_INSTALL", "1")
 
 
 def _wait_for_metric_points(
