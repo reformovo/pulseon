@@ -4,13 +4,36 @@ build-backend = "maturin"
 
 [project]
 name = "pulseon"
-requires-python = ">=3.10"
+description = "Local-first training metrics tracker backed by Rust, PyO3, DuckDB, and DuckLake."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "PulseOn contributors" },
+]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/reformovo/pulseon"
+Repository = "https://github.com/reformovo/pulseon"
+Issues = "https://github.com/reformovo/pulseon/issues"
+Documentation = "https://github.com/reformovo/pulseon#readme"
 
 [dependency-groups]
 dev = ["maturin"]

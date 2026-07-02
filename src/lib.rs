@@ -7,11 +7,11 @@
 //   sdk/    - PyO3 bindings
 
 #[cfg(test)]
-mod native_engine_behavior;
-#[cfg(test)]
 mod ducklake_test_support;
 pub mod engine;
 pub mod model;
+#[cfg(test)]
+mod native_engine_behavior;
 mod sdk;
 
 use pyo3::prelude::*;
