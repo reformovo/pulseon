@@ -95,3 +95,35 @@ fn run_status_from_str(status: &str) -> Result<RunStatus, EngineError> {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_status_round_trips_storage_values() {
+        let statuses = [
+            (RunStatus::Running, "running"),
+            (RunStatus::Finished, "finished"),
+            (RunStatus::Failed, "failed"),
+        ];
+
+        for (status, raw) in statuses {
+            assert_eq!(status_as_str(status), raw);
+            assert_eq!(run_status_from_str(raw).unwrap(), status);
+        }
+    }
+
+    #[test]
+    fn run_status_from_str_rejects_unknown_storage_value() {
+        let err = run_status_from_str("paused").unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                EngineError::InvalidRunStatus { ref status } if status == "paused"
+            ),
+            "expected invalid run status error, got {err:?}",
+        );
+    }
+}

@@ -176,7 +176,7 @@ v1 coverage easier to maintain and easier to diagnose when it fails.
   storage boundary. Keep tests backed by real temporary DuckLake datasets, but
   move boilerplate project/run/metric setup into small test helpers with
   behavior-focused names.
-- [ ] Keep low-level Rust unit tests near implementation details and keep
+- [x] Keep low-level Rust unit tests near implementation details and keep
   public Python tests at the SDK boundary. Unit tests should cover private
   parsing, status, reporter, and environment-option edge cases; pytest should
   verify user-visible behavior only.
