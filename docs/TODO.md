@@ -145,7 +145,7 @@ to maintain.
   (`docs/native-architecture.md`, AI Native, catalog/storage/compute layers).
   Point maintainers at `docs/v1-native-architecture.md` and the v1 native
   module boundaries instead.
-- [ ] Keep valid empty marker files. `python/pulseon/py.typed` and
+- [x] Keep valid empty marker files. `python/pulseon/py.typed` and
   `tests/__init__.py` are intentional marker/package files, not invalid
   placeholders.
 
