@@ -161,7 +161,7 @@ Source: 2026-07-02 test-organization audit against
 best practices. These items do not add product behavior; they make the existing
 v1 coverage easier to maintain and easier to diagnose when it fails.
 
-- [ ] Split `tests/test_init.py` by Python-facing behavior. Keep import smoke
+- [x] Split `tests/test_init.py` by Python-facing behavior. Keep import smoke
   coverage separate from SDK lifecycle, metric logging, query/downsampling,
   diagnostics, and actionable error tests so each file name explains the
   behavior it protects.

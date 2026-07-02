@@ -1,0 +1,170 @@
+"""Verify Python SDK client, project, and run lifecycle behavior."""
+
+from __future__ import annotations
+
+import pathlib
+
+from tests import helpers
+
+
+def test_init_returns_client(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+
+    assert isinstance(client, pulseon.Client)
+
+
+def test_client_creates_project_and_run(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+
+    assert isinstance(project, pulseon.Project)
+    assert project.project_id == "project-1"
+    assert project.name == "local training"
+    assert isinstance(run, pulseon.Run)
+    assert run.run_id == "run-1"
+    assert run.project_id == project.project_id
+    assert run.name == "baseline"
+    assert run.status == "running"
+
+
+def test_client_selects_existing_project_and_run(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    del client
+
+    reopened_client = pulseon.init(root_path)
+    selected_project = reopened_client.get_project(project.project_id)
+    selected_run = reopened_client.get_run(run.run_id)
+
+    assert isinstance(selected_project, pulseon.Project)
+    assert selected_project.project_id == project.project_id
+    assert selected_project.name == "local training"
+    assert isinstance(selected_run, pulseon.Run)
+    assert selected_run.run_id == run.run_id
+    assert selected_run.project_id == selected_project.project_id
+    assert selected_run.name == "baseline"
+    assert selected_run.status == "running"
+
+
+def test_client_resumes_existing_run_for_logging(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    del client
+
+    resumed_client = pulseon.init(root_path)
+    resumed_run = resumed_client.resume_run(run.run_id)
+    resumed_run.log("train/loss", 0, 0.25)
+    points = helpers.wait_for_metric_points(
+        resumed_client,
+        resumed_run.run_id,
+        "train/loss",
+        expected_count=1,
+    )
+
+    assert isinstance(resumed_run, pulseon.Run)
+    assert resumed_run.run_id == run.run_id
+    assert [point.value_f64 for point in points] == [0.25]
+
+
+def test_client_lists_project_runs_for_summary_queries(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    first_run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    second_run = client.create_run(project.project_id, "candidate", run_id="run-2")
+    first_run.log("train/loss", 0, 0.25)
+    second_run.log("train/loss", 0, 0.125)
+    helpers.wait_for_metric_points(
+        client,
+        first_run.run_id,
+        "train/loss",
+        expected_count=1,
+    )
+    helpers.wait_for_metric_points(
+        client,
+        second_run.run_id,
+        "train/loss",
+        expected_count=1,
+    )
+    del first_run
+    del second_run
+    del client
+
+    reopened_client = pulseon.init(root_path)
+    runs = reopened_client.list_runs(project.project_id)
+    summaries = reopened_client.query_metric_summaries(
+        [run.run_id for run in runs],
+        "train/loss",
+    )
+
+    assert [run.run_id for run in runs] == ["run-1", "run-2"]
+    assert [run.name for run in runs] == ["baseline", "candidate"]
+    assert [summary.run_id for summary in summaries] == ["run-1", "run-2"]
+    assert [summary.last_value_f64 for summary in summaries] == [0.25, 0.125]
+
+
+def test_client_detects_orphan_running_runs(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    first_project = client.create_project("local training", project_id="project-1")
+    second_project = client.create_project("sweep", project_id="project-2")
+    first_run = client.create_run(first_project.project_id, "baseline", run_id="run-1")
+    second_run = client.create_run(second_project.project_id, "candidate", run_id="run-2")
+    first_run_id = first_run.run_id
+    second_run_id = second_run.run_id
+    del first_run
+    del second_run
+    del client
+
+    reopened_client = pulseon.init(root_path)
+    all_orphans = reopened_client.list_orphan_runs()
+    project_orphans = reopened_client.list_orphan_runs(first_project.project_id)
+
+    assert [run.run_id for run in all_orphans] == [
+        first_run_id,
+        second_run_id,
+    ]
+    assert [run.status for run in all_orphans] == ["running", "running"]
+    assert [run.run_id for run in project_orphans] == [first_run_id]
+
+
+def test_client_finalizes_runs_as_finished_or_failed(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    finished_run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    failed_run = client.create_run(project.project_id, "candidate", run_id="run-2")
+
+    finished = client.finish_run(finished_run.run_id)
+    failed = client.fail_run(failed_run.run_id)
+    orphan_runs = client.list_orphan_runs(project.project_id)
+
+    assert finished.run_id == finished_run.run_id
+    assert finished.status == "finished"
+    assert finished.finished_at is not None
+    assert failed.run_id == failed_run.run_id
+    assert failed.status == "failed"
+    assert failed.finished_at is not None
+    assert orphan_runs == []
