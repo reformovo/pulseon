@@ -2,28 +2,11 @@
 
 from __future__ import annotations
 
-import os
-import pathlib
 import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pulseon
-
-
-def configure_lttb_extension() -> None:
-    if "PULSEON_LTTB_EXTENSION_PATH" in os.environ:
-        return
-
-    local_extension = (
-        pathlib.Path.home()
-        / "projects/duckdb-lttb/build/release/repository/v1.5.4/osx_arm64/"
-        "lttb.duckdb_extension"
-    )
-    if local_extension.is_file():
-        os.environ["PULSEON_LTTB_EXTENSION_PATH"] = str(local_extension)
-    else:
-        os.environ.setdefault("PULSEON_LTTB_AUTO_INSTALL", "1")
 
 
 def wait_for_metric_points(

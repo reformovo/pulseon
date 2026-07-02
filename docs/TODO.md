@@ -180,7 +180,7 @@ v1 coverage easier to maintain and easier to diagnose when it fails.
   public Python tests at the SDK boundary. Unit tests should cover private
   parsing, status, reporter, and environment-option edge cases; pytest should
   verify user-visible behavior only.
-- [ ] Stabilize downsampling coverage. Rust tests should keep a deterministic
+- [x] Stabilize downsampling coverage. Rust tests should keep a deterministic
   LTTB path for strict length and endpoint behavior; Python tests should cover
   SDK-level success/error mapping without depending on a developer-local
   extension path.

@@ -1,4 +1,4 @@
-"""Verify Python SDK metric query, discovery, and downsampling behavior."""
+"""Verify Python SDK metric query, discovery, and max-points behavior."""
 
 from __future__ import annotations
 
@@ -73,12 +73,11 @@ def test_client_discovers_metrics_from_aggregate_state(
     assert isinstance(metrics[0], pulseon.MetricSummary)
 
 
-def test_client_query_metric_applies_range_filters_and_downsampling(
+def test_client_query_metric_applies_range_filters_and_short_max_points(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
 
-    helpers.configure_lttb_extension()
     client = pulseon.init(tmp_path / "pulseon")
     project = client.create_project("local training", project_id="project-1")
     run = client.create_run(project.project_id, "baseline", run_id="run-1")
@@ -97,20 +96,13 @@ def test_client_query_metric_applies_range_filters_and_downsampling(
         start_step=10,
         end_step=15,
     )
-    try:
-        downsampled_points = client.query_metric(
-            run.run_id,
-            "train/loss",
-            max_points=10,
-        )
-    except RuntimeError as error:
-        if "DuckDB LTTB extension is unavailable" in str(error):
-            import pytest
-
-            pytest.skip(str(error))
-        raise
+    unchanged_points = client.query_metric(
+        run.run_id,
+        "train/loss",
+        max_points=100,
+    )
 
     assert [point.step for point in ranged_points] == [10, 11, 12, 13, 14, 15]
-    assert len(downsampled_points) <= 10
-    assert downsampled_points[0].step == 0
-    assert downsampled_points[-1].step == 99
+    assert len(unchanged_points) == 100
+    assert unchanged_points[0].step == 0
+    assert unchanged_points[-1].step == 99
