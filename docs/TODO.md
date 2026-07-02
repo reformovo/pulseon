@@ -128,7 +128,7 @@ to maintain.
   has no public `StorageLayer` or Cloud skeletons. Relocate any still-needed
   error type before removing `mod catalog`, `mod storage`, and `mod compute`
   from `src/lib.rs`.
-- [ ] Remove invalid model placeholder files from `src/model/`: `artifact.rs`,
+- [x] Remove invalid model placeholder files from `src/model/`: `artifact.rs`,
   `config.rs`, `event.rs`, `summary.rs`, and `tag.rs`. Configs, tags,
   artifacts, and events are deferred outside v1, and the implemented v1 summary
   state already lives in `metric.rs` as `MetricAggregate`.
