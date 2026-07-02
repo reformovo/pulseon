@@ -165,7 +165,7 @@ v1 coverage easier to maintain and easier to diagnose when it fails.
   coverage separate from SDK lifecycle, metric logging, query/downsampling,
   diagnostics, and actionable error tests so each file name explains the
   behavior it protects.
-- [ ] Make Python async-write wait helpers fail explicitly on timeout. Replace
+- [x] Make Python async-write wait helpers fail explicitly on timeout. Replace
   partial-result returns with assertion failures that include the expected
   count, actual count, run id, metric key, and current diagnostics.
 - [ ] Rename or reorganize `src/ducklake_probe.rs` as native engine behavior

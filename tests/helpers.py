@@ -31,12 +31,38 @@ def wait_for_metric_points(
     run_id: str,
     metric_key: str,
     expected_count: int,
+    *,
+    timeout_seconds: float = 5.0,
+    sleep_seconds: float = 0.05,
 ) -> list[pulseon.MetricPoint]:
-    deadline = time.monotonic() + 5.0
+    deadline = time.monotonic() + timeout_seconds
     points: list[pulseon.MetricPoint] = []
-    while time.monotonic() < deadline:
+    while time.monotonic() <= deadline:
         points = client.query_metric(run_id, metric_key)
         if len(points) >= expected_count:
             return points
-        time.sleep(0.05)
-    return points
+        time.sleep(sleep_seconds)
+
+    actual_count = len(points)
+    diagnostics = client.diagnostics()
+    raise AssertionError(
+        "Timed out waiting for metric points: "
+        f"expected_count={expected_count}, "
+        f"actual_count={actual_count}, "
+        f"run_id={run_id!r}, "
+        f"metric_key={metric_key!r}, "
+        f"diagnostics={_format_diagnostics(diagnostics)}"
+    )
+
+
+def _format_diagnostics(diagnostics: pulseon.Diagnostics) -> str:
+    return (
+        "{"
+        f"accepted_reports={diagnostics.accepted_reports}, "
+        f"dropped_reports={diagnostics.dropped_reports}, "
+        f"failed_reports={diagnostics.failed_reports}, "
+        f"pending_reports={diagnostics.pending_reports}, "
+        f"writer_drained={diagnostics.writer_drained}, "
+        f"last_write_error={diagnostics.last_write_error!r}"
+        "}"
+    )
