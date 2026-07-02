@@ -10,13 +10,8 @@ mod write_rows;
 // Unified error type for engine operations.
 // Merged from engine/error.rs per oracle review (simplify: extract to
 // error.rs when this grows beyond a handful of variants).
-// Note: both CatalogError and EngineError wrap duckdb::Error via #[from].
-// If engine calls catalog: DuckDB → CatalogError → EngineError::Catalog.
-// If engine calls DuckDB directly: DuckDB → EngineError::DuckDb.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    #[error("catalog error: {0}")]
-    Catalog(#[from] crate::catalog::CatalogError),
     #[error("duckdb error: {0}")]
     DuckDb(#[from] duckdb::Error),
     #[error("I/O error: {0}")]

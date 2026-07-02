@@ -121,7 +121,7 @@ to maintain.
   both `src/engine/client.rs` and `src/ducklake_test_support.rs`; tests should
   use the same schema/bootstrap path as the engine so future Parquet contract
   changes do not drift.
-- [ ] Remove obsolete scaffold modules that contradict the v1 native boundary:
+- [x] Remove obsolete scaffold modules that contradict the v1 native boundary:
   `src/catalog/`, `src/storage/`, and `src/compute/`. Their leaf files are
   one-line TODO placeholders for `CatalogLayer`, `StorageLayer`,
   `ComputeLayer`, Cloud, S3, and future query abstractions, while v1 explicitly
