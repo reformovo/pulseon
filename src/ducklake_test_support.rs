@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+use crate::engine::EngineError;
+use crate::engine::bootstrap::{attach_ducklake as attach_ducklake_dataset, create_v1_tables};
+
 pub struct TestDataset {
     root: PathBuf,
     catalog_path: PathBuf,
@@ -27,50 +30,12 @@ impl Drop for TestDataset {
 pub fn attach_ducklake(
     connection: &duckdb::Connection,
     dataset: &TestDataset,
-) -> duckdb::Result<()> {
-    let catalog_path = dataset.catalog_path.display();
-    let data_path = dataset.data_path.display();
-    connection.execute_batch(&format!(
-        "INSTALL ducklake;
-         LOAD ducklake;
-         ATTACH '{catalog_path}' AS dl (TYPE ducklake, DATA_PATH '{data_path}');"
-    ))
+) -> Result<(), EngineError> {
+    attach_ducklake_dataset(connection, &dataset.catalog_path, &dataset.data_path)
 }
 
-pub fn create_minimal_v1_tables(connection: &duckdb::Connection) -> duckdb::Result<()> {
-    connection.execute_batch(
-        "CREATE TABLE dl.projects (
-             project_id VARCHAR NOT NULL,
-             name VARCHAR NOT NULL,
-             created_at TIMESTAMPTZ NOT NULL
-         );
-         CREATE TABLE dl.runs (
-             run_id VARCHAR NOT NULL,
-             project_id VARCHAR NOT NULL,
-             name VARCHAR NOT NULL,
-             status VARCHAR NOT NULL,
-             created_at TIMESTAMPTZ NOT NULL,
-             started_at TIMESTAMPTZ NOT NULL,
-             finished_at TIMESTAMPTZ
-         );
-         CREATE TABLE dl.metric_points (
-             run_id VARCHAR NOT NULL,
-             metric_key VARCHAR NOT NULL,
-             step BIGINT NOT NULL,
-             timestamp TIMESTAMPTZ NOT NULL,
-             value_f64 DOUBLE NOT NULL,
-             ingested_at TIMESTAMPTZ NOT NULL
-         );
-         CREATE TABLE dl.metric_aggregates (
-             run_id VARCHAR NOT NULL,
-             metric_key VARCHAR NOT NULL,
-             effective_count UBIGINT NOT NULL,
-             last_step BIGINT NOT NULL,
-             last_value_f64 DOUBLE NOT NULL,
-             min_value_f64 DOUBLE NOT NULL,
-             max_value_f64 DOUBLE NOT NULL
-         );",
-    )
+pub fn create_minimal_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {
+    create_v1_tables(connection)
 }
 
 pub fn seed_minimal_v1_data(connection: &duckdb::Connection) -> duckdb::Result<()> {

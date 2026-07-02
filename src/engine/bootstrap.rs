@@ -13,7 +13,7 @@ pub(crate) fn open_native_connection(root_path: &Path) -> Result<duckdb::Connect
     Ok(connection)
 }
 
-fn attach_ducklake(
+pub(crate) fn attach_ducklake(
     connection: &duckdb::Connection,
     catalog_path: &Path,
     data_path: &Path,
@@ -36,7 +36,7 @@ fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
     Ok(duckdb::Connection::open_in_memory_with_flags(config)?)
 }
 
-fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {
+pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS dl.projects (
              project_id VARCHAR NOT NULL,

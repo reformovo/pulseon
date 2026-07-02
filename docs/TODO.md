@@ -117,7 +117,7 @@ to maintain.
   selection, run lifecycle, metric discovery, metric queries, diagnostics, and
   `NativeRun`. Introduce focused native modules for bootstrap/schema and
   project/run/query operations, while preserving the current Python API.
-- [ ] Deduplicate v1 DuckLake schema and attach helpers. The schema exists in
+- [x] Deduplicate v1 DuckLake schema and attach helpers. The schema exists in
   both `src/engine/client.rs` and `src/ducklake_test_support.rs`; tests should
   use the same schema/bootstrap path as the engine so future Parquet contract
   changes do not drift.
