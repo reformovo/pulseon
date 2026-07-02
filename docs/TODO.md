@@ -112,7 +112,7 @@ to maintain.
   aggregate repair. Move read/query/downsampling code to a query-focused engine
   module and keep the write path responsible for writes and write-side aggregate
   maintenance.
-- [ ] Split storage bootstrap/schema code out of `src/engine/client.rs`.
+- [x] Split storage bootstrap/schema code out of `src/engine/client.rs`.
   `NativeClient` currently mixes DuckLake attach, schema creation, project/run
   selection, run lifecycle, metric discovery, metric queries, diagnostics, and
   `NativeRun`. Introduce focused native modules for bootstrap/schema and

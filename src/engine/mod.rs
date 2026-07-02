@@ -1,6 +1,7 @@
 // Native v1 engine over DuckLake.
 // Architecture ref: docs/v1-native-architecture.md
 
+pub(crate) mod bootstrap;
 pub mod client;
 pub mod query;
 pub mod reporting;
