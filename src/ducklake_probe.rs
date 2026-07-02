@@ -5,6 +5,8 @@ mod tests {
     use crate::ducklake_test_support::{
         TestDataset, attach_ducklake, create_minimal_v1_tables, seed_minimal_v1_data,
     };
+    use crate::engine::query::NativeQueryStore;
+    use crate::engine::write::NativeWriteStore;
     use crate::model::metric::{MetricKey, Step};
     use crate::model::run::RunId;
     use crate::model::types::ProjectId;
@@ -55,7 +57,7 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
 
         // When
@@ -86,7 +88,7 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run_id = RunId::from_string("run-user-1");
         let created = store.create_run(&project_id, "first", Some(run_id.clone()))?;
@@ -118,7 +120,7 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -155,7 +157,7 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -189,7 +191,8 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
+        let query = NativeQueryStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -198,7 +201,7 @@ mod tests {
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.0625)?;
 
         // When
-        let effective = store.query_metric_effective(&run.run_id, &metric_key)?;
+        let effective = query.query_metric_effective(&run.run_id, &metric_key)?;
 
         // Then
         let values: Vec<(i64, f64)> = effective
@@ -220,7 +223,8 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
+        let query = NativeQueryStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -231,7 +235,7 @@ mod tests {
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(3), 0.03125)?;
 
         // When
-        let points = store.query_metric(
+        let points = query.query_metric(
             &run.run_id,
             &metric_key,
             Some(Step::new(1)),
@@ -260,7 +264,8 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
+        let query = NativeQueryStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -268,7 +273,7 @@ mod tests {
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.125)?;
 
         // When
-        let points = store.query_metric(&run.run_id, &metric_key, None, None, Some(2))?;
+        let points = query.query_metric(&run.run_id, &metric_key, None, None, Some(2))?;
 
         // Then
         let values: Vec<(i64, f64)> = points
@@ -299,12 +304,12 @@ mod tests {
                  ('run-1', 'train/loss', 2, now(), 0.125, now()),
                  ('run-1', 'train/loss', 3, now(), 0.0625, now());",
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let query = NativeQueryStore::new(&connection);
         let run_id = RunId::from_string("run-1");
         let metric_key = MetricKey::from_string("train/loss");
 
         // When
-        let points = store.query_metric(&run_id, &metric_key, None, None, Some(2))?;
+        let points = query.query_metric(&run_id, &metric_key, None, None, Some(2))?;
 
         // Then
         let values: Vec<(i64, f64)> = points
@@ -326,7 +331,8 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
+        let query = NativeQueryStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -336,7 +342,7 @@ mod tests {
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(2), 0.375)?;
 
         // When
-        let aggregate = store.metric_aggregate(&run.run_id, &metric_key)?;
+        let aggregate = query.metric_aggregate(&run.run_id, &metric_key)?;
 
         // Then
         assert_eq!(aggregate.effective_count, 3);
@@ -358,7 +364,8 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
+        let query = NativeQueryStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run_a = store.create_run(&project_id, "a", Some(RunId::from_string("run-a")))?;
         let run_b = store.create_run(&project_id, "b", Some(RunId::from_string("run-b")))?;
@@ -370,7 +377,7 @@ mod tests {
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(2), 0.1)?;
 
         // When
-        let summaries = store
+        let summaries = query
             .query_metric_summaries(&[run_b.run_id.clone(), run_a.run_id.clone()], &metric_key)?;
 
         // Then
@@ -408,7 +415,8 @@ mod tests {
             "INSERT INTO dl.projects VALUES ('project-1', 'local training', now())",
             [],
         )?;
-        let store = crate::engine::write::NativeWriteStore::new(&connection);
+        let store = NativeWriteStore::new(&connection);
+        let query = NativeQueryStore::new(&connection);
         let project_id = ProjectId::from_string("project-1");
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -419,11 +427,11 @@ mod tests {
                  ('run-1', 'train/loss', 0, now(), 0.125, now())",
             [],
         )?;
-        let stale = store.metric_aggregate(&run.run_id, &metric_key)?;
+        let stale = query.metric_aggregate(&run.run_id, &metric_key)?;
 
         // When
         store.repair_metric_aggregate(&run.run_id, &metric_key)?;
-        let repaired = store.metric_aggregate(&run.run_id, &metric_key)?;
+        let repaired = query.metric_aggregate(&run.run_id, &metric_key)?;
 
         // Then
         assert_eq!(stale.min_value_f64, 0.25);

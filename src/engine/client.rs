@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use crate::engine::EngineError;
+use crate::engine::query::NativeQueryStore;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
 use crate::engine::write::NativeWriteStore;
@@ -239,7 +240,7 @@ impl NativeClient {
         max_points: Option<usize>,
     ) -> Result<Vec<MetricPoint>, EngineError> {
         let connection = self.connection()?;
-        NativeWriteStore::new(&connection)
+        NativeQueryStore::new(&connection)
             .query_metric(run_id, metric_key, start_step, end_step, max_points)
     }
 
@@ -249,7 +250,7 @@ impl NativeClient {
         metric_key: &MetricKey,
     ) -> Result<Vec<MetricAggregate>, EngineError> {
         let connection = self.connection()?;
-        NativeWriteStore::new(&connection).query_metric_summaries(run_ids, metric_key)
+        NativeQueryStore::new(&connection).query_metric_summaries(run_ids, metric_key)
     }
 
     pub fn list_metrics(&self, run_id: &RunId) -> Result<Vec<MetricAggregate>, EngineError> {

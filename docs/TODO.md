@@ -106,7 +106,7 @@ Source: 2026-07-02 code-organization audit against
 remove obsolete scaffold shape and make the existing native v1 behavior easier
 to maintain.
 
-- [ ] Split query behavior out of `src/engine/write.rs`. `NativeWriteStore`
+- [x] Split query behavior out of `src/engine/write.rs`. `NativeWriteStore`
   currently owns run creation, metric writes, effective-series queries,
   downsampling, LTTB extension loading, aggregate lookup, summary queries, and
   aggregate repair. Move read/query/downsampling code to a query-focused engine

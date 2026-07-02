@@ -2,6 +2,7 @@
 // Architecture ref: docs/v1-native-architecture.md
 
 pub mod client;
+pub mod query;
 pub mod reporting;
 mod time;
 pub mod write;
