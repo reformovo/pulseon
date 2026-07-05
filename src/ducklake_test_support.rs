@@ -45,8 +45,8 @@ pub fn seed_minimal_v1_data(connection: &duckdb::Connection) -> duckdb::Result<(
          INSERT INTO dl.pulseon_runs VALUES
              ('run-1', 'project-1', 'baseline', 'running', now(), now(), NULL);
          INSERT INTO dl.metric_points VALUES
-             ('run-1', 'train/loss', 0, now(), 0.25, now()),
-             ('run-1', 'train/loss', 1, now(), 0.125, now());
+             ('run-1', 'train/loss', 'train%2Floss', 0, now(), 0.25, now()),
+             ('run-1', 'train/loss', 'train%2Floss', 1, now(), 0.125, now());
          INSERT INTO dl.pulseon_metric_aggregates VALUES
              ('run-1', 'train/loss', 2, 1, 0.125, 0.125, 0.25);",
     )

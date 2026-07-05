@@ -90,11 +90,13 @@ pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), En
          CREATE TABLE IF NOT EXISTS dl.metric_points (
              run_id VARCHAR NOT NULL,
              metric_key VARCHAR NOT NULL,
+             metric_key_encoded VARCHAR NOT NULL,
              step BIGINT NOT NULL,
              timestamp TIMESTAMPTZ NOT NULL,
              value_f64 DOUBLE NOT NULL,
              ingested_at TIMESTAMPTZ NOT NULL
          );
+         ALTER TABLE dl.metric_points SET PARTITIONED BY (run_id, metric_key_encoded);
          CREATE TABLE IF NOT EXISTS dl.pulseon_metric_aggregates (
              run_id VARCHAR NOT NULL,
              metric_key VARCHAR NOT NULL,
@@ -126,5 +128,31 @@ mod tests {
     #[test]
     fn sql_string_literal_escapes_single_quotes() {
         assert_eq!(sql_string_literal("canary's/data"), "'canary''s/data'");
+    }
+
+    #[test]
+    fn create_v1_tables_partitions_metric_points_by_run_and_encoded_key()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-bootstrap-{}", uuid::Uuid::new_v4()));
+        let connection = open_native_connection(&root_path)?;
+
+        let partition_columns: Vec<String> = connection
+            .prepare(
+                "SELECT columns.column_name
+                 FROM __ducklake_metadata_dl.ducklake_partition_column AS partitions
+                 JOIN __ducklake_metadata_dl.ducklake_column AS columns
+                   ON columns.column_id = partitions.column_id
+                 JOIN __ducklake_metadata_dl.ducklake_table AS tables
+                   ON tables.table_id = columns.table_id
+                 WHERE tables.table_name = 'metric_points'
+                 ORDER BY partitions.partition_key_index",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+
+        assert_eq!(partition_columns, ["run_id", "metric_key_encoded"]);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
     }
 }

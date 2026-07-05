@@ -127,11 +127,12 @@ impl<'connection> NativeWriteStore<'connection> {
     ) -> Result<MetricPoint, EngineError> {
         self.connection.execute(
             "INSERT INTO dl.metric_points
-                 (run_id, metric_key, step, timestamp, value_f64, ingested_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
+                 (run_id, metric_key, metric_key_encoded, step, timestamp, value_f64, ingested_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id.as_str(),
                 metric_key.as_str(),
+                percent_encode_metric_key(metric_key.as_str()),
                 step.value(),
                 timestamp_as_rfc3339(timestamp),
                 value_f64,
@@ -215,5 +216,36 @@ impl<'connection> NativeWriteStore<'connection> {
             (run_id.as_str(), metric_key.as_str()),
         )?;
         Ok(())
+    }
+}
+
+fn percent_encode_metric_key(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'~' | b'-' => {
+                encoded.push(char::from(byte));
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_encode_metric_key_preserves_unreserved_ascii() {
+        assert_eq!(percent_encode_metric_key("AZaz09._~-"), "AZaz09._~-");
+    }
+
+    #[test]
+    fn percent_encode_metric_key_encodes_path_and_utf8_bytes() {
+        assert_eq!(
+            percent_encode_metric_key("train/loss 零"),
+            "train%2Floss%20%E9%9B%B6"
+        );
     }
 }
