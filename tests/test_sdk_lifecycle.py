@@ -132,6 +132,34 @@ def test_active_run_lock_conflict_and_release_after_shutdown(
     assert resumed.run_id == run.run_id
 
 
+def test_create_run_existing_id_requires_explicit_resume(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    first_client = pulseon.init(root_path)
+    project = first_client.create_project("local training", project_id="project-1")
+    first_client.create_run(project.project_id, "baseline", run_id="run-1")
+    second_client = pulseon.init(root_path)
+
+    with pytest.raises(pulseon.RunAlreadyExistsError, match="run-1"):
+        second_client.create_run(project.project_id, "duplicate", run_id="run-1")
+
+
+def test_resume_run_rejects_terminal_runs(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    client.finish_run(run.run_id)
+
+    with pytest.raises(pulseon.InvalidRunStateError, match="finished -> running"):
+        client.resume_run(run.run_id)
+
+
 def test_leftover_lock_file_does_not_block_resume(
     tmp_path: pathlib.Path,
 ) -> None:

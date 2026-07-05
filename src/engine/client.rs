@@ -120,6 +120,15 @@ impl NativeClient {
         }
 
         let run_id = run_id.unwrap_or_else(|| RunId::from_string(uuid::Uuid::new_v4().to_string()));
+        match self.get_run(&run_id) {
+            Ok(_) => {
+                return Err(EngineError::RunAlreadyExists {
+                    run_id: run_id.as_str().to_owned(),
+                });
+            }
+            Err(EngineError::RunNotFound { .. }) => {}
+            Err(error) => return Err(error),
+        }
         let active_run = self.acquire_run_writer(&run_id)?;
         let connection = self.connection()?;
         let created =
@@ -753,6 +762,71 @@ mod tests {
         first_client.shutdown(None)?;
         let resumed_after_shutdown = second_client.resume_run(&run.run_id)?;
         assert_eq!(resumed_after_shutdown.run_id, run.run_id);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn create_run_existing_id_reports_exists_before_active_lock()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let first_client = NativeClient::open(&root_path)?;
+        let project = first_client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-existing-active")),
+        )?;
+        first_client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-existing-active")),
+        )?;
+        let second_client = NativeClient::open(&root_path)?;
+
+        let duplicate = second_client.create_run(
+            &project.project_id,
+            "duplicate",
+            Some(RunId::from_string("run-existing-active")),
+        );
+
+        assert!(
+            matches!(duplicate, Err(EngineError::RunAlreadyExists { .. })),
+            "expected duplicate run id error, got {duplicate:?}",
+        );
+        first_client.shutdown(None)?;
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn resume_run_rejects_terminal_runs() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-terminal-resume")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-terminal-resume")),
+        )?;
+        client.finish_run(&run.run_id)?;
+
+        let resumed = client.resume_run(&run.run_id);
+
+        assert!(
+            matches!(
+                resumed,
+                Err(EngineError::InvalidRunTransition {
+                    from: "finished",
+                    to: "running",
+                    ..
+                })
+            ),
+            "expected terminal resume rejection, got {resumed:?}",
+        );
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }
