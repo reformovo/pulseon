@@ -36,6 +36,8 @@ pub enum EngineError {
     },
     #[error("metric query max_points is too large for DuckDB LTTB: {max_points}")]
     MetricQueryMaxPointsTooLarge { max_points: usize },
+    #[error("metric queue is full")]
+    MetricQueueFull,
     #[error("DuckDB LTTB extension is unavailable: {message}")]
     LttbExtensionUnavailable { message: String },
     #[error("invalid stored run status: {status}")]

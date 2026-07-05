@@ -36,7 +36,8 @@ def test_client_queries_metric_points_and_summaries(
     assert summaries[0].last_step == 1
     assert summaries[0].last_value_f64 == 0.125
     assert diagnostics.pending_reports == 0
-    assert diagnostics.writer_drained
+    assert diagnostics.persisted_reports >= 2
+    assert diagnostics.writer_state == "drained"
     assert diagnostics.last_write_error is None
 
 

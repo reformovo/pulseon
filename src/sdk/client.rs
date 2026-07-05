@@ -282,8 +282,10 @@ impl PyRun {
             .map(|timestamp| timestamp.to_rfc3339())
     }
 
-    pub fn log(&self, key: &str, step: i64, value: f64) {
-        self.inner.log_metric_at_step(key, step, value);
+    pub fn log(&self, key: &str, step: i64, value: f64) -> PyResult<()> {
+        self.inner
+            .log_metric_at_step(key, step, value)
+            .map_err(runtime_error)
     }
 }
 
@@ -296,28 +298,34 @@ impl From<NativeRun> for PyRun {
 #[pyclass(name = "Diagnostics", module = "pulseon._pulseon")]
 pub struct PyDiagnostics {
     #[pyo3(get)]
-    accepted_reports: u64,
-    #[pyo3(get)]
-    dropped_reports: u64,
-    #[pyo3(get)]
-    failed_reports: u64,
-    #[pyo3(get)]
     pending_reports: u64,
     #[pyo3(get)]
-    writer_drained: bool,
+    queue_full_errors: u64,
+    #[pyo3(get)]
+    persisted_reports: u64,
+    #[pyo3(get)]
+    writer_state: &'static str,
     #[pyo3(get)]
     last_write_error: Option<String>,
+    #[pyo3(get)]
+    last_flush_run_id: Option<String>,
+    #[pyo3(get)]
+    last_flush_status: &'static str,
+    #[pyo3(get)]
+    last_flush_error: Option<String>,
 }
 
 impl From<MetricReporterDiagnostics> for PyDiagnostics {
     fn from(diagnostics: MetricReporterDiagnostics) -> Self {
         Self {
-            accepted_reports: diagnostics.accepted_reports,
-            dropped_reports: diagnostics.dropped_reports,
-            failed_reports: diagnostics.failed_reports,
             pending_reports: diagnostics.pending_reports,
-            writer_drained: diagnostics.writer_drained,
+            queue_full_errors: diagnostics.queue_full_errors,
+            persisted_reports: diagnostics.persisted_reports,
+            writer_state: diagnostics.writer_state,
             last_write_error: diagnostics.last_write_error,
+            last_flush_run_id: diagnostics.last_flush_run_id,
+            last_flush_status: diagnostics.last_flush_status,
+            last_flush_error: diagnostics.last_flush_error,
         }
     }
 }
@@ -407,7 +415,7 @@ pub fn init(
         catalog_path.as_deref(),
         metric_queue_capacity,
     )?;
-    NativeClient::open(path)
+    NativeClient::open_with_metric_queue_capacity(path, metric_queue_capacity)
         .map(PyClient::new)
         .map_err(runtime_error)
 }
@@ -465,6 +473,7 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         crate::engine::EngineError::MetricQueryMaxPointsTooLarge { .. } => {
             PulseOnError::new_err(message)
         }
+        crate::engine::EngineError::MetricQueueFull => MetricQueueFullError::new_err(message),
         _ => PulseOnError::new_err(message),
     }
 }

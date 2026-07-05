@@ -15,12 +15,14 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class _FakeDiagnostics:
-    accepted_reports: int = 1
-    dropped_reports: int = 2
-    failed_reports: int = 3
     pending_reports: int = 4
-    writer_drained: bool = False
+    queue_full_errors: int = 2
+    persisted_reports: int = 3
+    writer_state: str = "running"
     last_write_error: str | None = "write failed"
+    last_flush_run_id: str | None = "run-1"
+    last_flush_status: str = "failed"
+    last_flush_error: str | None = "flush failed"
 
 
 class _FakeClient:
@@ -54,5 +56,6 @@ def test_wait_for_metric_points_timeout_includes_context() -> None:
     assert "actual_count=0" in message
     assert "run_id='run-1'" in message
     assert "metric_key='train/loss'" in message
-    assert "accepted_reports=1" in message
     assert "pending_reports=4" in message
+    assert "queue_full_errors=2" in message
+    assert "writer_state='running'" in message

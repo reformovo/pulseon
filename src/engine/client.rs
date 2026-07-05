@@ -22,10 +22,18 @@ pub struct NativeClient {
 
 impl NativeClient {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, EngineError> {
+        Self::open_with_metric_queue_capacity(path, 65_536)
+    }
+
+    pub fn open_with_metric_queue_capacity(
+        path: impl AsRef<Path>,
+        metric_queue_capacity: usize,
+    ) -> Result<Self, EngineError> {
         let root_path = path.as_ref().to_path_buf();
         let connection = open_native_connection(&root_path)?;
         let connection = Arc::new(Mutex::new(connection));
-        let reporter = MetricReporter::open(Arc::clone(&connection));
+        let reporter =
+            MetricReporter::open_with_capacity(Arc::clone(&connection), metric_queue_capacity);
 
         Ok(Self {
             _root_path: root_path,
@@ -344,22 +352,27 @@ pub struct NativeRun {
 }
 
 impl NativeRun {
-    pub fn log_metric(&self, metric_key: &str, value_f64: f64) {
+    pub fn log_metric(&self, metric_key: &str, value_f64: f64) -> Result<(), EngineError> {
         self.reporter.report_metric(
             self.run_id.clone(),
             MetricKey::from_string(metric_key),
             None,
             value_f64,
-        );
+        )
     }
 
-    pub fn log_metric_at_step(&self, metric_key: &str, step: i64, value_f64: f64) {
+    pub fn log_metric_at_step(
+        &self,
+        metric_key: &str,
+        step: i64,
+        value_f64: f64,
+    ) -> Result<(), EngineError> {
         self.reporter.report_metric(
             self.run_id.clone(),
             MetricKey::from_string(metric_key),
             Some(Step::new(step)),
             value_f64,
-        );
+        )
     }
 }
 
@@ -424,6 +437,43 @@ mod tests {
 
         assert_eq!(selected_project, created_project);
         assert_eq!(selected_run, created_run);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn query_metric_excludes_queued_reports_until_they_are_persisted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        let client = NativeClient {
+            _root_path: root_path.clone(),
+            reporter: MetricReporter::blocked_for_test(1),
+            connection,
+        };
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-queued")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-queued")),
+        )?;
+        let run_handle = client.run_handle(run);
+
+        run_handle.log_metric_at_step("train/loss", 0, 0.25)?;
+        let points = client.query_metric(
+            &run_handle.run_id,
+            &MetricKey::from_string("train/loss"),
+            None,
+            None,
+            None,
+        )?;
+
+        assert_eq!(points, []);
+        assert_eq!(client.diagnostics().pending_reports, 1);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }

@@ -41,11 +41,13 @@ def wait_for_metric_points(
 def _format_diagnostics(diagnostics: pulseon.Diagnostics) -> str:
     return (
         "{"
-        f"accepted_reports={diagnostics.accepted_reports}, "
-        f"dropped_reports={diagnostics.dropped_reports}, "
-        f"failed_reports={diagnostics.failed_reports}, "
         f"pending_reports={diagnostics.pending_reports}, "
-        f"writer_drained={diagnostics.writer_drained}, "
-        f"last_write_error={diagnostics.last_write_error!r}"
+        f"queue_full_errors={diagnostics.queue_full_errors}, "
+        f"persisted_reports={diagnostics.persisted_reports}, "
+        f"writer_state={diagnostics.writer_state!r}, "
+        f"last_write_error={diagnostics.last_write_error!r}, "
+        f"last_flush_run_id={diagnostics.last_flush_run_id!r}, "
+        f"last_flush_status={diagnostics.last_flush_status!r}, "
+        f"last_flush_error={diagnostics.last_flush_error!r}"
         "}"
     )
