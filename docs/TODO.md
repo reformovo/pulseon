@@ -52,13 +52,13 @@ and writer internals may still use the existing v1 implementation underneath.
 
 #### Phase 2: Bounded Metric Queue And Diagnostics
 
-- [ ] Replace v1 dropped-report semantics with a bounded metric queue and
+- [x] Replace v1 dropped-report semantics with a bounded metric queue and
   non-fatal `MetricQueueFullError`.
-- [ ] Implement the v2 diagnostics object with read-only fields for pending
+- [x] Implement the v2 diagnostics object with read-only fields for pending
   reports, queue-full failures, persisted reports, writer state, last write
   error, and flush status.
-- [ ] Remove v1 `dropped_reports` terminology from Python diagnostics.
-- [ ] Keep queries reading persisted DuckLake data only; do not merge queued
+- [x] Remove v1 `dropped_reports` terminology from Python diagnostics.
+- [x] Keep queries reading persisted DuckLake data only; do not merge queued
   reports into query results.
 
 Exit gate: tests prove queue capacity, queue-full recovery, diagnostics field
