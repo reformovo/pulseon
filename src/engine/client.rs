@@ -60,7 +60,7 @@ impl NativeClient {
         let created_at = current_timestamp("created_at")?;
         let connection = self.connection()?;
         connection.execute(
-            "INSERT INTO dl.projects (project_id, name, created_at)
+            "INSERT INTO dl.pulseon_projects (project_id, name, created_at)
              VALUES (?, ?, ?)",
             (project_id.as_str(), name, timestamp_as_rfc3339(created_at)),
         )?;
@@ -76,7 +76,7 @@ impl NativeClient {
         let connection = self.connection()?;
         let result = connection.query_row(
             "SELECT project_id, name, epoch_ms(created_at)
-             FROM dl.projects
+             FROM dl.pulseon_projects
              WHERE project_id = ?",
             [project_id.as_str()],
             |row| {
@@ -169,7 +169,7 @@ impl NativeClient {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
                 "SELECT run_id
-                 FROM dl.runs
+                 FROM dl.pulseon_runs
                  WHERE project_id = ?
                  ORDER BY created_at, run_id",
             )?;
@@ -203,7 +203,7 @@ impl NativeClient {
                 Some(project_id) => {
                     let mut statement = connection.prepare(
                         "SELECT run_id
-                         FROM dl.runs
+                         FROM dl.pulseon_runs
                          WHERE project_id = ?
                            AND status = 'running'
                          ORDER BY created_at, run_id",
@@ -216,7 +216,7 @@ impl NativeClient {
                 None => {
                     let mut statement = connection.prepare(
                         "SELECT run_id
-                         FROM dl.runs
+                         FROM dl.pulseon_runs
                          WHERE status = 'running'
                          ORDER BY created_at, run_id",
                     )?;
@@ -301,7 +301,7 @@ impl NativeClient {
         let mut statement = connection.prepare(
             "SELECT run_id, metric_key, effective_count, last_step, last_value_f64,
                     min_value_f64, max_value_f64
-             FROM dl.metric_aggregates
+             FROM dl.pulseon_metric_aggregates
              WHERE run_id = ?
              ORDER BY metric_key",
         )?;
@@ -325,7 +325,7 @@ impl NativeClient {
         let exists = connection.query_row(
             "SELECT EXISTS (
                  SELECT 1
-                 FROM dl.projects
+                 FROM dl.pulseon_projects
                  WHERE project_id = ?
              )",
             [project_id.as_str()],
@@ -352,7 +352,7 @@ impl NativeClient {
         let finished_at = current_timestamp("finished_at")?;
         let connection = self.connection()?;
         let updated = connection.execute(
-            "UPDATE dl.runs
+            "UPDATE dl.pulseon_runs
              SET status = ?,
                  finished_at = ?
              WHERE run_id = ?

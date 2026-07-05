@@ -44,7 +44,7 @@ mod tests {
 
     fn insert_project(connection: &duckdb::Connection) -> Result<(), duckdb::Error> {
         connection.execute(
-            "INSERT INTO dl.projects VALUES (?1, ?2, now())",
+            "INSERT INTO dl.pulseon_projects VALUES (?1, ?2, now())",
             duckdb::params![PROJECT_ID, PROJECT_NAME],
         )?;
         Ok(())
@@ -62,7 +62,12 @@ mod tests {
              FROM information_schema.tables
              WHERE table_catalog = 'dl'
                AND table_schema = 'main'
-               AND table_name IN ('projects', 'runs', 'metric_points', 'metric_aggregates')",
+               AND table_name IN (
+                   'pulseon_projects',
+                   'pulseon_runs',
+                   'metric_points',
+                   'pulseon_metric_aggregates'
+               )",
             [],
             |row| row.get(0),
         )?;
@@ -101,7 +106,7 @@ mod tests {
         assert_ne!(generated.run_id, supplied.run_id);
         assert_eq!(supplied.run_id.as_str(), "run-user-1");
         let run_count: i64 =
-            connection.query_row("SELECT count(*) FROM dl.runs", [], |row| row.get(0))?;
+            connection.query_row("SELECT count(*) FROM dl.pulseon_runs", [], |row| row.get(0))?;
         assert_eq!(run_count, 2);
         Ok(())
     }
@@ -127,7 +132,7 @@ mod tests {
         ));
         assert_eq!(resumed, created);
         let run_count: i64 =
-            connection.query_row("SELECT count(*) FROM dl.runs", [], |row| row.get(0))?;
+            connection.query_row("SELECT count(*) FROM dl.pulseon_runs", [], |row| row.get(0))?;
         assert_eq!(run_count, 1);
         Ok(())
     }
@@ -286,8 +291,8 @@ mod tests {
             "CREATE MACRO lttb(x, y, n) AS [
                  list({x: x, y: y} ORDER BY x)[1],
                  list({x: x, y: y} ORDER BY x)[len(list({x: x, y: y} ORDER BY x))]];
-             INSERT INTO dl.projects VALUES ('project-1', 'local training', now());
-             INSERT INTO dl.runs VALUES
+             INSERT INTO dl.pulseon_projects VALUES ('project-1', 'local training', now());
+             INSERT INTO dl.pulseon_runs VALUES
                  ('run-1', 'project-1', 'metrics', 'running', now(), now(), NULL);
              INSERT INTO dl.metric_points VALUES
                  ('run-1', 'train/loss', 0, now(), 0.5, now()),

@@ -767,7 +767,7 @@ mod tests {
         {
             let connection = connection.lock().expect("test connection lock");
             connection.execute(
-                "INSERT INTO dl.projects (project_id, name, created_at)
+                "INSERT INTO dl.pulseon_projects (project_id, name, created_at)
                  VALUES ('project-1', 'local training', now())",
                 [],
             )?;
