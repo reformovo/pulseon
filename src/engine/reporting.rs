@@ -10,7 +10,7 @@ use crate::engine::write::NativeWriteStore;
 use crate::model::metric::{MetricKey, Step};
 use crate::model::run::RunId;
 
-const DEFAULT_METRIC_BUFFER_CAPACITY: usize = 4096;
+const DEFAULT_METRIC_BUFFER_CAPACITY: usize = 65_536;
 
 #[derive(Clone)]
 pub struct MetricReporter {
@@ -22,7 +22,7 @@ impl MetricReporter {
         Self::open_with_capacity(connection, DEFAULT_METRIC_BUFFER_CAPACITY)
     }
 
-    fn open_with_capacity(connection: Arc<Mutex<duckdb::Connection>>, capacity: usize) -> Self {
+    pub fn open_with_capacity(connection: Arc<Mutex<duckdb::Connection>>, capacity: usize) -> Self {
         let (sender, receiver) = mpsc::sync_channel(capacity);
         let diagnostics = Arc::new(MetricReporterDiagnosticsInner::default());
         let worker_diagnostics = Arc::clone(&diagnostics);
@@ -49,7 +49,7 @@ impl MetricReporter {
         metric_key: MetricKey,
         step: Option<Step>,
         value_f64: f64,
-    ) {
+    ) -> Result<(), EngineError> {
         let report = MetricReport {
             run_id,
             metric_key,
@@ -60,19 +60,24 @@ impl MetricReporter {
             Some(sender) => sender,
             None => {
                 self.inner.diagnostics.increment_failed();
-                return;
+                return Ok(());
             }
         };
         self.inner.diagnostics.increment_pending();
         match sender.try_send(report) {
-            Ok(()) => self.inner.diagnostics.increment_accepted(),
+            Ok(()) => {
+                self.inner.diagnostics.increment_accepted();
+                Ok(())
+            }
             Err(TrySendError::Full(_)) => {
                 self.inner.diagnostics.decrement_pending();
                 self.inner.diagnostics.increment_dropped();
+                Err(EngineError::MetricQueueFull)
             }
             Err(TrySendError::Disconnected(_)) => {
                 self.inner.diagnostics.decrement_pending();
                 self.inner.diagnostics.increment_failed();
+                Ok(())
             }
         }
     }
@@ -260,22 +265,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn report_metric_drops_immediately_when_buffer_is_full() {
+    fn report_metric_returns_queue_full_when_buffer_is_full() {
         let reporter = MetricReporter::blocked_for_test(1);
 
-        reporter.report_metric(
-            RunId::from_string("run-1"),
-            MetricKey::from_string("train/loss"),
-            None,
-            0.25,
-        );
-        reporter.report_metric(
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.25,
+            )
+            .expect("first report should enter the queue");
+        let result = reporter.report_metric(
             RunId::from_string("run-1"),
             MetricKey::from_string("train/loss"),
             None,
             0.125,
         );
 
+        assert!(matches!(result, Err(EngineError::MetricQueueFull)));
         let diagnostics = reporter.diagnostics();
         assert_eq!(diagnostics.accepted_reports, 1);
         assert_eq!(diagnostics.dropped_reports, 1);
@@ -286,12 +294,14 @@ mod tests {
     #[test]
     fn drain_for_returns_false_when_pending_report_is_not_written() {
         let reporter = MetricReporter::blocked_for_test(1);
-        reporter.report_metric(
-            RunId::from_string("run-1"),
-            MetricKey::from_string("train/loss"),
-            None,
-            0.25,
-        );
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.25,
+            )
+            .expect("report should enter the queue");
 
         assert!(!reporter.drain_for(Duration::from_millis(1)));
         assert_eq!(reporter.diagnostics().pending_reports, 1);
@@ -302,12 +312,14 @@ mod tests {
         let reporter = MetricReporter::blocked_for_test(1);
 
         assert!(reporter.shutdown_for(Duration::from_millis(1)));
-        reporter.report_metric(
-            RunId::from_string("run-1"),
-            MetricKey::from_string("train/loss"),
-            None,
-            0.25,
-        );
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.25,
+            )
+            .expect("closed reporter should retain current shutdown behavior");
 
         assert_eq!(reporter.diagnostics().failed_reports, 1);
     }

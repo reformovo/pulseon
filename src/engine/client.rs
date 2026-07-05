@@ -22,10 +22,18 @@ pub struct NativeClient {
 
 impl NativeClient {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, EngineError> {
+        Self::open_with_metric_queue_capacity(path, 65_536)
+    }
+
+    pub fn open_with_metric_queue_capacity(
+        path: impl AsRef<Path>,
+        metric_queue_capacity: usize,
+    ) -> Result<Self, EngineError> {
         let root_path = path.as_ref().to_path_buf();
         let connection = open_native_connection(&root_path)?;
         let connection = Arc::new(Mutex::new(connection));
-        let reporter = MetricReporter::open(Arc::clone(&connection));
+        let reporter =
+            MetricReporter::open_with_capacity(Arc::clone(&connection), metric_queue_capacity);
 
         Ok(Self {
             _root_path: root_path,
@@ -344,22 +352,27 @@ pub struct NativeRun {
 }
 
 impl NativeRun {
-    pub fn log_metric(&self, metric_key: &str, value_f64: f64) {
+    pub fn log_metric(&self, metric_key: &str, value_f64: f64) -> Result<(), EngineError> {
         self.reporter.report_metric(
             self.run_id.clone(),
             MetricKey::from_string(metric_key),
             None,
             value_f64,
-        );
+        )
     }
 
-    pub fn log_metric_at_step(&self, metric_key: &str, step: i64, value_f64: f64) {
+    pub fn log_metric_at_step(
+        &self,
+        metric_key: &str,
+        step: i64,
+        value_f64: f64,
+    ) -> Result<(), EngineError> {
         self.reporter.report_metric(
             self.run_id.clone(),
             MetricKey::from_string(metric_key),
             Some(Step::new(step)),
             value_f64,
-        );
+        )
     }
 }
 

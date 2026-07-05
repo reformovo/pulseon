@@ -282,8 +282,10 @@ impl PyRun {
             .map(|timestamp| timestamp.to_rfc3339())
     }
 
-    pub fn log(&self, key: &str, step: i64, value: f64) {
-        self.inner.log_metric_at_step(key, step, value);
+    pub fn log(&self, key: &str, step: i64, value: f64) -> PyResult<()> {
+        self.inner
+            .log_metric_at_step(key, step, value)
+            .map_err(runtime_error)
     }
 }
 
@@ -407,7 +409,7 @@ pub fn init(
         catalog_path.as_deref(),
         metric_queue_capacity,
     )?;
-    NativeClient::open(path)
+    NativeClient::open_with_metric_queue_capacity(path, metric_queue_capacity)
         .map(PyClient::new)
         .map_err(runtime_error)
 }
@@ -465,6 +467,7 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         crate::engine::EngineError::MetricQueryMaxPointsTooLarge { .. } => {
             PulseOnError::new_err(message)
         }
+        crate::engine::EngineError::MetricQueueFull => MetricQueueFullError::new_err(message),
         _ => PulseOnError::new_err(message),
     }
 }
