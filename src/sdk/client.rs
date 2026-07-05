@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use pyo3::create_exception;
-use pyo3::exceptions::{PyRuntimeError, PyTypeError};
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyTuple};
+use pyo3::types::PyAny;
 
 use crate::engine::client::{NativeClient, NativeRun};
 use crate::engine::reporting::MetricReporterDiagnostics;
@@ -281,24 +281,8 @@ impl PyRun {
             .map(|timestamp| timestamp.to_rfc3339())
     }
 
-    #[pyo3(signature = (key, *args))]
-    pub fn log(&self, key: &str, args: &Bound<'_, PyTuple>) -> PyResult<()> {
-        match args.len() {
-            1 => {
-                let value = args.get_item(0)?.extract::<f64>()?;
-                self.inner.log_metric(key, value);
-                Ok(())
-            }
-            2 => {
-                let step = args.get_item(0)?.extract::<i64>()?;
-                let value = args.get_item(1)?.extract::<f64>()?;
-                self.inner.log_metric_at_step(key, step, value);
-                Ok(())
-            }
-            _ => Err(PyTypeError::new_err(
-                "log() expects (key, value) or (key, step, value)",
-            )),
-        }
+    pub fn log(&self, key: &str, step: i64, value: f64) {
+        self.inner.log_metric_at_step(key, step, value);
     }
 }
 

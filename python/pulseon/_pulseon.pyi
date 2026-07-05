@@ -1,5 +1,4 @@
 import os
-from typing import overload
 
 class PulseOnError(RuntimeError): ...
 class DuplicateRunError(PulseOnError): ...
@@ -46,9 +45,6 @@ class Run:
     created_at: str
     started_at: str
     finished_at: str | None
-    @overload
-    def log(self, key: str, value: float, /) -> None: ...
-    @overload
     def log(self, key: str, step: int, value: float, /) -> None: ...
 
 class Client:
