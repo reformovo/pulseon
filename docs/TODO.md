@@ -66,14 +66,14 @@ shape, post-shutdown diagnostics readability, and absence of silent drops.
 
 #### Phase 3: Batch Writer, Drain, And Shutdown
 
-- [ ] Implement 8,192-report or 10 ms batch thresholds with enqueue-order
+- [x] Implement 8,192-report or 10 ms batch thresholds with enqueue-order
   preservation and writer-assigned `ingested_at`.
-- [ ] Retry writer persistence failures five times with bounded exponential
+- [x] Retry writer persistence failures five times with bounded exponential
   backoff before entering failed writer state.
-- [ ] Implement drain barriers for shutdown and writer failure semantics,
+- [x] Implement drain barriers for shutdown and writer failure semantics,
   including `MetricDrainTimeoutError`, `MetricWriterFailedError`, and
   context-manager teardown precedence.
-- [ ] Keep aggregate refresh off the `run.log(...)` hot path.
+- [x] Keep aggregate refresh off the `run.log(...)` hot path.
 
 Exit gate: Rust and Python tests cover writer state transitions, retry
 exhaustion, drain timeouts, failed-client shutdown, and context-manager
