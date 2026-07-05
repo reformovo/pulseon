@@ -43,7 +43,10 @@ sdk_exception!(
     RunAlreadyActiveError,
     "The requested run already has an active writer."
 );
-sdk_exception!(InvalidConfigurationError, "PulseOn configuration is invalid.");
+sdk_exception!(
+    InvalidConfigurationError,
+    "PulseOn configuration is invalid."
+);
 sdk_exception!(StorageError, "A storage operation failed.");
 
 #[pyclass(name = "Client", module = "pulseon._pulseon", unsendable)]
