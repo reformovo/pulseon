@@ -474,6 +474,9 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
             PulseOnError::new_err(message)
         }
         crate::engine::EngineError::MetricQueueFull => MetricQueueFullError::new_err(message),
+        crate::engine::EngineError::MetricWriterFailed { .. } => {
+            MetricWriterFailedError::new_err(message)
+        }
         _ => PulseOnError::new_err(message),
     }
 }

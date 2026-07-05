@@ -14,9 +14,13 @@ use crate::model::run::RunId;
 const DEFAULT_METRIC_BUFFER_CAPACITY: usize = 65_536;
 const METRIC_BATCH_MAX_REPORTS: usize = 8_192;
 const METRIC_BATCH_MAX_AGE: Duration = Duration::from_millis(10);
+const WRITER_MAX_RETRIES: usize = 5;
+const WRITER_INITIAL_RETRY_BACKOFF: Duration = Duration::from_millis(50);
+const WRITER_MAX_RETRY_BACKOFF: Duration = Duration::from_millis(1_000);
 const WRITER_RUNNING: u8 = 0;
-const WRITER_FAILED: u8 = 1;
-const WRITER_CLOSED: u8 = 2;
+const WRITER_RETRYING: u8 = 1;
+const WRITER_FAILED: u8 = 2;
+const WRITER_CLOSED: u8 = 3;
 
 #[derive(Clone)]
 pub struct MetricReporter {
@@ -56,6 +60,15 @@ impl MetricReporter {
         step: Option<Step>,
         value_f64: f64,
     ) -> Result<(), EngineError> {
+        if self.inner.diagnostics.is_writer_failed() {
+            return Err(EngineError::MetricWriterFailed {
+                message: self
+                    .inner
+                    .diagnostics
+                    .last_write_error()
+                    .unwrap_or_else(|| "metric writer failed".to_owned()),
+            });
+        }
         let report = MetricReport {
             run_id,
             metric_key,
@@ -189,6 +202,16 @@ impl MetricReporterDiagnosticsInner {
         self.persisted_reports.fetch_add(count, Ordering::Relaxed);
     }
 
+    fn set_writer_running(&self) {
+        self.writer_state
+            .store(WRITER_RUNNING.into(), Ordering::Relaxed);
+    }
+
+    fn set_writer_retrying(&self) {
+        self.writer_state
+            .store(WRITER_RETRYING.into(), Ordering::Relaxed);
+    }
+
     fn set_writer_failed(&self) {
         self.writer_state
             .store(WRITER_FAILED.into(), Ordering::Relaxed);
@@ -203,6 +226,17 @@ impl MetricReporterDiagnosticsInner {
         if let Ok(mut last_write_error) = self.last_write_error.lock() {
             *last_write_error = Some(message);
         }
+    }
+
+    fn last_write_error(&self) -> Option<String> {
+        self.last_write_error
+            .lock()
+            .ok()
+            .and_then(|last_write_error| last_write_error.clone())
+    }
+
+    fn is_writer_failed(&self) -> bool {
+        self.writer_state.load(Ordering::Relaxed) as u8 == WRITER_FAILED
     }
 
     fn increment_pending(&self) {
@@ -224,6 +258,7 @@ impl MetricReporterDiagnosticsInner {
     fn snapshot(&self) -> MetricReporterDiagnostics {
         let pending_reports = self.pending_reports();
         let writer_state = match self.writer_state.load(Ordering::Relaxed) as u8 {
+            WRITER_RETRYING => "retrying",
             WRITER_FAILED => "failed",
             WRITER_CLOSED => "closed",
             _ if pending_reports == 0 => "drained",
@@ -268,7 +303,13 @@ fn metric_worker(
         let mut batch = vec![first_report];
         collect_metric_batch(&receiver, &mut batch);
         let batch_len = u64::try_from(batch.len()).unwrap_or(u64::MAX);
-        match write_metric_batch(&connection, &batch, next_ingested_at_millis) {
+        match write_metric_batch_with_retries(
+            &connection,
+            &batch,
+            next_ingested_at_millis,
+            &diagnostics,
+            std::thread::sleep,
+        ) {
             Ok(next_millis) => {
                 next_ingested_at_millis = next_millis;
                 diagnostics.increment_persisted_by(batch_len);
@@ -278,7 +319,9 @@ fn metric_worker(
                 diagnostics.set_last_write_error(error.to_string());
                 diagnostics.set_writer_failed();
                 diagnostics.decrement_pending_by(batch_len);
-                return Err(error);
+                return Err(EngineError::MetricWriterFailed {
+                    message: error.to_string(),
+                });
             }
         }
     }
@@ -303,6 +346,45 @@ fn collect_metric_batch(receiver: &mpsc::Receiver<MetricReport>, batch: &mut Vec
                 }
             }
             Err(mpsc::TryRecvError::Disconnected) => return,
+        }
+    }
+}
+
+fn write_metric_batch_with_retries(
+    connection: &Arc<Mutex<duckdb::Connection>>,
+    batch: &[MetricReport],
+    next_ingested_at_millis: i64,
+    diagnostics: &MetricReporterDiagnosticsInner,
+    sleep: impl FnMut(Duration),
+) -> Result<i64, EngineError> {
+    retry_metric_batch_write(
+        || write_metric_batch(connection, batch, next_ingested_at_millis),
+        diagnostics,
+        sleep,
+    )
+}
+
+fn retry_metric_batch_write(
+    mut write: impl FnMut() -> Result<i64, EngineError>,
+    diagnostics: &MetricReporterDiagnosticsInner,
+    mut sleep: impl FnMut(Duration),
+) -> Result<i64, EngineError> {
+    let mut retry_count = 0;
+    let mut backoff = WRITER_INITIAL_RETRY_BACKOFF;
+    loop {
+        match write() {
+            Ok(next_millis) => {
+                diagnostics.set_writer_running();
+                return Ok(next_millis);
+            }
+            Err(error) if retry_count < WRITER_MAX_RETRIES => {
+                diagnostics.set_last_write_error(error.to_string());
+                diagnostics.set_writer_retrying();
+                sleep(backoff);
+                retry_count += 1;
+                backoff = (backoff * 2).min(WRITER_MAX_RETRY_BACKOFF);
+            }
+            Err(error) => return Err(error),
         }
     }
 }
@@ -466,6 +548,104 @@ mod tests {
         assert_eq!(diagnostics.last_flush_status, "none");
         assert_eq!(diagnostics.last_flush_run_id, None);
         assert_eq!(diagnostics.last_flush_error, None);
+    }
+
+    #[test]
+    fn report_metric_returns_writer_failed_after_failure_latches() {
+        let reporter = MetricReporter::blocked_for_test(1);
+        reporter
+            .inner
+            .diagnostics
+            .set_last_write_error("append metric batch failed".to_owned());
+        reporter.inner.diagnostics.set_writer_failed();
+
+        let result = reporter.report_metric(
+            RunId::from_string("run-1"),
+            MetricKey::from_string("train/loss"),
+            Some(Step::new(0)),
+            0.25,
+        );
+
+        assert!(
+            matches!(result, Err(EngineError::MetricWriterFailed { .. })),
+            "expected latched writer failure, got {result:?}",
+        );
+        assert_eq!(reporter.diagnostics().pending_reports, 0);
+    }
+
+    #[test]
+    fn retry_metric_batch_write_retries_five_times_before_error() {
+        let diagnostics = MetricReporterDiagnosticsInner::default();
+        let mut attempts = 0;
+        let mut sleeps = Vec::new();
+
+        let result = retry_metric_batch_write(
+            || {
+                attempts += 1;
+                Err(EngineError::InvalidTimestamp {
+                    field: "ingested_at",
+                    millis: -1,
+                })
+            },
+            &diagnostics,
+            |duration| sleeps.push(duration),
+        );
+
+        assert!(matches!(result, Err(EngineError::InvalidTimestamp { .. })));
+        assert_eq!(attempts, WRITER_MAX_RETRIES + 1);
+        assert_eq!(
+            sleeps,
+            vec![
+                Duration::from_millis(50),
+                Duration::from_millis(100),
+                Duration::from_millis(200),
+                Duration::from_millis(400),
+                Duration::from_millis(800),
+            ],
+        );
+        assert_eq!(diagnostics.snapshot().writer_state, "retrying");
+        assert!(
+            diagnostics
+                .snapshot()
+                .last_write_error
+                .as_deref()
+                .is_some_and(|message| message.contains("invalid stored timestamp"))
+        );
+    }
+
+    #[test]
+    fn retry_metric_batch_write_recovers_after_transient_errors() {
+        let diagnostics = MetricReporterDiagnosticsInner::default();
+        let mut attempts = 0;
+        let mut sleeps = Vec::new();
+
+        let next_millis = retry_metric_batch_write(
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    return Err(EngineError::InvalidTimestamp {
+                        field: "ingested_at",
+                        millis: -1,
+                    });
+                }
+                Ok(42)
+            },
+            &diagnostics,
+            |duration| sleeps.push(duration),
+        )
+        .expect("transient writer errors should recover before retry exhaustion");
+
+        assert_eq!(next_millis, 42);
+        assert_eq!(attempts, 3);
+        assert_eq!(
+            sleeps,
+            vec![Duration::from_millis(50), Duration::from_millis(100)]
+        );
+        assert_eq!(diagnostics.snapshot().writer_state, "drained");
+        assert!(
+            diagnostics.snapshot().last_write_error.is_some(),
+            "last write error should retain the most recent retry error"
+        );
     }
 
     #[test]
