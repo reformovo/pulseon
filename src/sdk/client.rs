@@ -421,7 +421,7 @@ pub fn init(
         catalog_path.as_deref(),
         metric_queue_capacity,
     )?;
-    NativeClient::open_with_metric_queue_capacity(path, metric_queue_capacity)
+    NativeClient::open_with_storage_config(path, catalog_path, data_path, metric_queue_capacity)
         .map(PyClient::new)
         .map_err(runtime_error)
 }

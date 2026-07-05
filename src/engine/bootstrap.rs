@@ -1,14 +1,49 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::engine::EngineError;
 
+pub(crate) struct NativeStorageConfig {
+    catalog_path: PathBuf,
+    data_path: PathBuf,
+}
+
+impl NativeStorageConfig {
+    pub(crate) fn duckdb(
+        root_path: &Path,
+        catalog_path: Option<PathBuf>,
+        data_path: Option<PathBuf>,
+    ) -> Self {
+        let pulseon_path = root_path.join(".pulseon");
+        Self {
+            catalog_path: catalog_path.unwrap_or_else(|| pulseon_path.join("catalog.ducklake")),
+            data_path: data_path.unwrap_or_else(|| pulseon_path.join("data")),
+        }
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn open_native_connection(root_path: &Path) -> Result<duckdb::Connection, EngineError> {
-    let catalog_path = root_path.join("catalog.ducklake");
-    let data_path = root_path.join("data");
-    std::fs::create_dir_all(&data_path)?;
+    open_native_connection_with_config(NativeStorageConfig::duckdb(root_path, None, None))
+}
+
+pub(crate) fn open_native_connection_with_config(
+    config: NativeStorageConfig,
+) -> Result<duckdb::Connection, EngineError> {
+    if let Some(catalog_parent) = config.catalog_path.parent() {
+        std::fs::create_dir_all(catalog_parent).map_err(|source| EngineError::Storage {
+            operation: "creating catalog directory",
+            name: path_basename(catalog_parent),
+            source,
+        })?;
+    }
+    std::fs::create_dir_all(&config.data_path).map_err(|source| EngineError::Storage {
+        operation: "creating data directory",
+        name: path_basename(&config.data_path),
+        source,
+    })?;
 
     let connection = open_duckdb_connection()?;
-    attach_ducklake(&connection, &catalog_path, &data_path)?;
+    attach_ducklake(&connection, &config.catalog_path, &config.data_path)?;
     create_v1_tables(&connection)?;
     Ok(connection)
 }
@@ -75,6 +110,13 @@ pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), En
 
 fn sql_string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+fn path_basename(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("storage path")
+        .to_owned()
 }
 
 #[cfg(test)]

@@ -20,15 +20,33 @@ def test_init_returns_client(tmp_path: pathlib.Path) -> None:
 def test_init_accepts_v2_configuration_keywords(tmp_path: pathlib.Path) -> None:
     import pulseon
 
+    data_path = tmp_path / "custom-data"
+    catalog_path = tmp_path / "catalog" / "catalog.ducklake"
     client = pulseon.init(
         tmp_path / "pulseon",
-        data_path=tmp_path / "custom-data",
+        data_path=data_path,
         catalog_backend="duckdb",
-        catalog_path=tmp_path / "catalog.ducklake",
+        catalog_path=catalog_path,
         metric_queue_capacity=1024,
     )
+    project = client.create_project("local training", project_id="project-1")
 
     assert isinstance(client, pulseon.Client)
+    assert project.project_id == "project-1"
+    assert data_path.is_dir()
+    assert catalog_path.is_file()
+
+
+def test_init_uses_duckdb_catalog_and_data_defaults(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert (root_path / ".pulseon" / "catalog.ducklake").is_file()
+    assert (root_path / ".pulseon" / "data").is_dir()
 
 
 def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use crate::engine::EngineError;
-use crate::engine::bootstrap::open_native_connection;
+use crate::engine::bootstrap::{NativeStorageConfig, open_native_connection_with_config};
 use crate::engine::query::NativeQueryStore;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
@@ -30,8 +30,18 @@ impl NativeClient {
         path: impl AsRef<Path>,
         metric_queue_capacity: usize,
     ) -> Result<Self, EngineError> {
+        Self::open_with_storage_config(path, None, None, metric_queue_capacity)
+    }
+
+    pub fn open_with_storage_config(
+        path: impl AsRef<Path>,
+        catalog_path: Option<PathBuf>,
+        data_path: Option<PathBuf>,
+        metric_queue_capacity: usize,
+    ) -> Result<Self, EngineError> {
         let root_path = path.as_ref().to_path_buf();
-        let connection = open_native_connection(&root_path)?;
+        let storage_config = NativeStorageConfig::duckdb(&root_path, catalog_path, data_path);
+        let connection = open_native_connection_with_config(storage_config)?;
         let connection = Arc::new(Mutex::new(connection));
         let reporter =
             MetricReporter::open_with_capacity(Arc::clone(&connection), metric_queue_capacity);
@@ -601,6 +611,7 @@ fn path_basename(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::bootstrap::open_native_connection;
 
     #[test]
     fn open_initializes_ducklake_dataset() -> Result<(), Box<dyn std::error::Error>> {
@@ -609,8 +620,37 @@ mod tests {
 
         let _client = NativeClient::open(&root_path)?;
 
-        assert!(root_path.join("data").is_dir());
+        assert!(root_path.join(".pulseon").join("data").is_dir());
         std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn open_uses_custom_catalog_and_data_paths() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let custom_root =
+            std::env::temp_dir().join(format!("pulseon-storage-{}", uuid::Uuid::new_v4()));
+        let catalog_path = custom_root.join("catalog").join("catalog.ducklake");
+        let data_path = custom_root.join("parquet-data");
+
+        let client = NativeClient::open_with_storage_config(
+            &root_path,
+            Some(catalog_path.clone()),
+            Some(data_path.clone()),
+            65_536,
+        )?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-custom-paths")),
+        )?;
+
+        assert_eq!(project.project_id.as_str(), "project-custom-paths");
+        assert!(catalog_path.is_file());
+        assert!(data_path.is_dir());
+        assert!(!root_path.join(".pulseon").join("data").exists());
+        let _ = std::fs::remove_dir_all(root_path);
+        std::fs::remove_dir_all(custom_root)?;
         Ok(())
     }
 
