@@ -36,15 +36,15 @@ Exit gate: no product behavior changes yet; `cargo test`, `uv run pyright`, and
 
 #### Phase 1: Public API Break And Configuration
 
-- [ ] Remove auto-step logging from the Python API and require
+- [x] Remove auto-step logging from the Python API and require
   `run.log(key, step, value)`.
-- [ ] Add the v2 error hierarchy and map Rust/PyO3 failures to Python-visible
+- [x] Add the v2 error hierarchy and map Rust/PyO3 failures to Python-visible
   exception types.
-- [ ] Add keyword initialization for `data_path`, `catalog_backend`,
+- [x] Add keyword initialization for `data_path`, `catalog_backend`,
   `catalog_path`, and `metric_queue_capacity`.
-- [ ] Validate queue capacity, catalog backend names, and unsupported data paths
+- [x] Validate queue capacity, catalog backend names, and unsupported data paths
   before client startup.
-- [ ] Update `python/pulseon/_pulseon.pyi`, README examples, and Python-facing
+- [x] Update `python/pulseon/_pulseon.pyi`, README examples, and Python-facing
   tests with the v2 API shape.
 
 Exit gate: Python users see the intended v2 API and error classes, while storage

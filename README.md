@@ -13,6 +13,23 @@ Current focus: plan and implement the 0.1.0a2 native loop:
 - keep the v2 public data path local-filesystem only
 - keep Parquet as the long-term compatibility boundary
 
+Python API shape:
+
+```python
+import pulseon
+
+client = pulseon.init(
+    "runs",
+    data_path=None,
+    catalog_backend="duckdb",
+    catalog_path=None,
+    metric_queue_capacity=65536,
+)
+project = client.create_project("local training")
+run = client.create_run(project.project_id, "baseline")
+run.log("train/loss", 0, 0.25)
+```
+
 Architecture entry points:
 
 - [Catalog/data boundary](docs/catalog-data-boundary.md)

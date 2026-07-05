@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from tests import helpers
 
 
@@ -13,6 +15,37 @@ def test_init_returns_client(tmp_path: pathlib.Path) -> None:
     client = pulseon.init(tmp_path / "pulseon")
 
     assert isinstance(client, pulseon.Client)
+
+
+def test_init_accepts_v2_configuration_keywords(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(
+        tmp_path / "pulseon",
+        data_path=tmp_path / "custom-data",
+        catalog_backend="duckdb",
+        catalog_path=tmp_path / "catalog.ducklake",
+        metric_queue_capacity=1024,
+    )
+
+    assert isinstance(client, pulseon.Client)
+
+
+def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    invalid_kwargs = [
+        {"metric_queue_capacity": 0},
+        {"metric_queue_capacity": 1_048_577},
+        {"catalog_backend": "postgres"},
+        {"data_path": "s3://bucket/pulseon"},
+        {"catalog_path": "s3://bucket/catalog.ducklake"},
+    ]
+    for index, kwargs in enumerate(invalid_kwargs):
+        root_path = tmp_path / f"pulseon-{index}"
+        with pytest.raises(pulseon.InvalidConfigurationError):
+            pulseon.init(root_path, **kwargs)
+        assert not root_path.exists()
 
 
 def test_client_creates_project_and_run(tmp_path: pathlib.Path) -> None:
