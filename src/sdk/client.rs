@@ -474,6 +474,10 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         crate::engine::EngineError::RunAlreadyExists { .. } => {
             RunAlreadyExistsError::new_err(message)
         }
+        crate::engine::EngineError::RunAlreadyActive { .. } => {
+            RunAlreadyActiveError::new_err(message)
+        }
+        crate::engine::EngineError::RunClosed { .. } => RunClosedError::new_err(message),
         crate::engine::EngineError::InvalidRunTransition { .. } => {
             InvalidRunStateError::new_err(message)
         }
@@ -482,9 +486,8 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         | crate::engine::EngineError::ProjectAlreadyExists { .. }
         | crate::engine::EngineError::ProjectNotFound { .. }
         | crate::engine::EngineError::RunNotFound { .. }
-        | crate::engine::EngineError::LttbExtensionUnavailable { .. } => {
-            StorageError::new_err(message)
-        }
+        | crate::engine::EngineError::LttbExtensionUnavailable { .. }
+        | crate::engine::EngineError::Storage { .. } => StorageError::new_err(message),
         crate::engine::EngineError::MetricQueryMaxPointsTooLarge { .. } => {
             PulseOnError::new_err(message)
         }

@@ -95,10 +95,12 @@ def test_client_resumes_existing_run_for_logging(tmp_path: pathlib.Path) -> None
     client = pulseon.init(root_path)
     project = client.create_project("local training", project_id="project-1")
     run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run_id = run.run_id
+    del run
     del client
 
     resumed_client = pulseon.init(root_path)
-    resumed_run = resumed_client.resume_run(run.run_id)
+    resumed_run = resumed_client.resume_run(run_id)
     resumed_run.log("train/loss", 0, 0.25)
     points = helpers.wait_for_metric_points(
         resumed_client,
@@ -108,8 +110,84 @@ def test_client_resumes_existing_run_for_logging(tmp_path: pathlib.Path) -> None
     )
 
     assert isinstance(resumed_run, pulseon.Run)
-    assert resumed_run.run_id == run.run_id
+    assert resumed_run.run_id == run_id
     assert [point.value_f64 for point in points] == [0.25]
+
+
+def test_active_run_lock_conflict_and_release_after_shutdown(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    first_client = pulseon.init(root_path)
+    project = first_client.create_project("local training", project_id="project-1")
+    run = first_client.create_run(project.project_id, "baseline", run_id="run-1")
+    second_client = pulseon.init(root_path)
+
+    with pytest.raises(pulseon.RunAlreadyActiveError, match="run-1"):
+        second_client.resume_run(run.run_id)
+
+    first_client.shutdown()
+    resumed = second_client.resume_run(run.run_id)
+
+    assert resumed.run_id == run.run_id
+
+
+def test_create_run_existing_id_requires_explicit_resume(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    first_client = pulseon.init(root_path)
+    project = first_client.create_project("local training", project_id="project-1")
+    first_client.create_run(project.project_id, "baseline", run_id="run-1")
+    second_client = pulseon.init(root_path)
+
+    with pytest.raises(pulseon.RunAlreadyExistsError, match="run-1"):
+        second_client.create_run(project.project_id, "duplicate", run_id="run-1")
+
+
+def test_resume_run_rejects_terminal_runs(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    client.finish_run(run.run_id)
+
+    with pytest.raises(pulseon.InvalidRunStateError, match="finished -> running"):
+        client.resume_run(run.run_id)
+
+
+def test_leftover_lock_file_does_not_block_resume(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    first_client = pulseon.init(root_path)
+    project = first_client.create_project("local training", project_id="project-1")
+    run = first_client.create_run(
+        project.project_id,
+        "baseline",
+        run_id="run/leftover lock",
+    )
+    first_client.shutdown()
+    lock_file = (
+        root_path
+        / ".pulseon"
+        / "locks"
+        / "runs"
+        / "run%2Fleftover%20lock.lock"
+    )
+
+    resumed = pulseon.init(root_path).resume_run(run.run_id)
+
+    assert lock_file.is_file()
+    assert resumed.run_id == run.run_id
 
 
 def test_client_lists_project_runs_for_summary_queries(
@@ -201,3 +279,44 @@ def test_client_finalizes_runs_as_finished_or_failed(
     assert failed.status == "failed"
     assert failed.finished_at is not None
     assert orphan_runs == []
+
+
+def test_finalization_closes_run_for_late_logging(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run.log("train/loss", 0, 0.25)
+
+    finished = client.finish_run(run.run_id)
+
+    with pytest.raises(pulseon.RunClosedError, match="run-1"):
+        run.log("train/loss", 1, 0.125)
+    points = client.query_metric(run.run_id, "train/loss")
+    assert finished.status == "finished"
+    assert [point.value_f64 for point in points] == [0.25]
+
+
+def test_shutdown_does_not_finalize_running_runs(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+
+    client.shutdown()
+
+    with pytest.raises(pulseon.ClientClosedError):
+        run.log("train/loss", 0, 0.25)
+    reopened_client = pulseon.init(root_path)
+    running_run = reopened_client.get_run(run.run_id)
+    resumed_run = reopened_client.resume_run(run.run_id)
+    assert running_run.status == "running"
+    assert running_run.finished_at is None
+    assert resumed_run.run_id == run.run_id

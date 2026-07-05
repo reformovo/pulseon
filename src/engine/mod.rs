@@ -26,8 +26,12 @@ pub enum EngineError {
     ProjectNotFound { project_id: String },
     #[error("run already exists: {run_id}")]
     RunAlreadyExists { run_id: String },
+    #[error("run already has an active writer: {run_id}")]
+    RunAlreadyActive { run_id: String },
     #[error("run not found: {run_id}")]
     RunNotFound { run_id: String },
+    #[error("run is closed for metric reporting: {run_id}")]
+    RunClosed { run_id: String },
     #[error("invalid run transition for {run_id}: {from} -> {to}")]
     InvalidRunTransition {
         run_id: String,
@@ -44,6 +48,13 @@ pub enum EngineError {
     MetricDrainTimeout,
     #[error("client is closed")]
     ClientClosed,
+    #[error("storage operation failed while {operation}: {name}")]
+    Storage {
+        operation: &'static str,
+        name: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("DuckDB LTTB extension is unavailable: {message}")]
     LttbExtensionUnavailable { message: String },
     #[error("invalid stored run status: {status}")]

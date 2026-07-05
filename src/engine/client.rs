@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -12,12 +14,11 @@ use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 
-const REPORTER_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
-
 pub struct NativeClient {
-    _root_path: PathBuf,
+    root_path: PathBuf,
     reporter: MetricReporter,
     connection: Arc<Mutex<duckdb::Connection>>,
+    active_runs: Arc<Mutex<HashMap<RunId, Arc<ActiveRun>>>>,
 }
 
 impl NativeClient {
@@ -36,9 +37,10 @@ impl NativeClient {
             MetricReporter::open_with_capacity(Arc::clone(&connection), metric_queue_capacity);
 
         Ok(Self {
-            _root_path: root_path,
+            root_path,
             reporter,
             connection,
+            active_runs: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -117,8 +119,25 @@ impl NativeClient {
             });
         }
 
+        let run_id = run_id.unwrap_or_else(|| RunId::from_string(uuid::Uuid::new_v4().to_string()));
+        match self.get_run(&run_id) {
+            Ok(_) => {
+                return Err(EngineError::RunAlreadyExists {
+                    run_id: run_id.as_str().to_owned(),
+                });
+            }
+            Err(EngineError::RunNotFound { .. }) => {}
+            Err(error) => return Err(error),
+        }
+        let active_run = self.acquire_run_writer(&run_id)?;
         let connection = self.connection()?;
-        NativeWriteStore::new(&connection).create_run(project_id, name, run_id)
+        let created =
+            NativeWriteStore::new(&connection).create_run(project_id, name, Some(run_id.clone()));
+        drop(connection);
+        if created.is_err() {
+            self.release_run_writer(&run_id);
+        }
+        created.inspect_err(|_| active_run.release_lock())
     }
 
     pub fn get_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
@@ -127,7 +146,16 @@ impl NativeClient {
     }
 
     pub fn resume_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
-        self.get_run(run_id)
+        let run = self.get_run(run_id)?;
+        if run.status != RunStatus::Running {
+            return Err(EngineError::InvalidRunTransition {
+                run_id: run_id.as_str().to_owned(),
+                from: run_status_value(run.status),
+                to: run_status_value(RunStatus::Running),
+            });
+        }
+        self.acquire_run_writer(run_id)?;
+        Ok(run)
     }
 
     pub fn list_runs(&self, project_id: &ProjectId) -> Result<Vec<Run>, EngineError> {
@@ -214,10 +242,20 @@ impl NativeClient {
     }
 
     pub fn shutdown(&self, timeout: Option<Duration>) -> Result<(), EngineError> {
-        self.reporter.shutdown(timeout)
+        let result = self.reporter.shutdown(timeout);
+        if !matches!(result, Err(EngineError::MetricDrainTimeout)) {
+            self.release_all_run_writers();
+        }
+        result
     }
 
     pub fn run_handle(&self, run: Run) -> NativeRun {
+        let active_run = self
+            .active_runs
+            .lock()
+            .ok()
+            .and_then(|active_runs| active_runs.get(&run.run_id).cloned())
+            .unwrap_or_else(ActiveRun::closed);
         NativeRun {
             run_id: run.run_id,
             project_id: run.project_id,
@@ -227,6 +265,7 @@ impl NativeClient {
             started_at: run.started_at,
             finished_at: run.finished_at,
             reporter: self.reporter.clone(),
+            active_run,
         }
     }
 
@@ -296,7 +335,20 @@ impl NativeClient {
     }
 
     fn finalize_run(&self, run_id: &RunId, target_status: RunStatus) -> Result<Run, EngineError> {
-        let _drained = self.reporter.drain_for(REPORTER_DRAIN_TIMEOUT);
+        let run = self.get_run(run_id)?;
+        if run.status != RunStatus::Running {
+            return Err(EngineError::InvalidRunTransition {
+                run_id: run_id.as_str().to_owned(),
+                from: run_status_value(run.status),
+                to: run_status_value(target_status),
+            });
+        }
+        let active_run = self.acquire_run_writer(run_id)?;
+        active_run.close_admission()?;
+        if let Err(error) = self.reporter.drain(None) {
+            active_run.open_admission()?;
+            return Err(error);
+        }
         let finished_at = current_timestamp("finished_at")?;
         let connection = self.connection()?;
         let updated = connection.execute(
@@ -314,10 +366,14 @@ impl NativeClient {
         drop(connection);
 
         if updated > 0 {
+            active_run.mark_terminal()?;
+            active_run.release_lock();
+            self.release_run_writer(run_id);
             return self.get_run(run_id);
         }
 
         let run = self.get_run(run_id)?;
+        active_run.open_admission()?;
         Err(EngineError::InvalidRunTransition {
             run_id: run_id.as_str().to_owned(),
             from: run_status_value(run.status),
@@ -329,6 +385,69 @@ impl NativeClient {
         self.connection
             .lock()
             .map_err(|_| EngineError::ConnectionLockPoisoned)
+    }
+
+    fn acquire_run_writer(&self, run_id: &RunId) -> Result<Arc<ActiveRun>, EngineError> {
+        let mut active_runs = self
+            .active_runs
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+        if let Some(active_run) = active_runs.get(run_id) {
+            return Ok(Arc::clone(active_run));
+        }
+
+        let lock_dir = self.root_path.join(".pulseon").join("locks").join("runs");
+        std::fs::create_dir_all(&lock_dir).map_err(|source| EngineError::Storage {
+            operation: "creating run lock directory",
+            name: path_basename(&lock_dir),
+            source,
+        })?;
+        let lock_path = lock_dir.join(format!(
+            "{}.lock",
+            percent_encode_path_segment(run_id.as_str())
+        ));
+        let lock_file = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|source| EngineError::Storage {
+                operation: "opening run lock file",
+                name: path_basename(&lock_path),
+                source,
+            })?;
+        match lock_file.try_lock() {
+            Ok(()) => {
+                let active_run = Arc::new(ActiveRun::open(lock_file));
+                active_runs.insert(run_id.clone(), Arc::clone(&active_run));
+                Ok(active_run)
+            }
+            Err(std::fs::TryLockError::WouldBlock) => Err(EngineError::RunAlreadyActive {
+                run_id: run_id.as_str().to_owned(),
+            }),
+            Err(source) => Err(EngineError::Storage {
+                operation: "locking run lock file",
+                name: path_basename(&lock_path),
+                source: source.into(),
+            }),
+        }
+    }
+
+    fn release_run_writer(&self, run_id: &RunId) {
+        if let Ok(mut active_runs) = self.active_runs.lock()
+            && let Some(active_run) = active_runs.remove(run_id)
+        {
+            active_run.release_lock();
+        }
+    }
+
+    fn release_all_run_writers(&self) {
+        if let Ok(mut active_runs) = self.active_runs.lock() {
+            for (_, active_run) in active_runs.drain() {
+                active_run.release_lock();
+            }
+        }
     }
 }
 
@@ -349,6 +468,7 @@ pub struct NativeRun {
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
     reporter: MetricReporter,
+    active_run: Arc<ActiveRun>,
 }
 
 impl NativeRun {
@@ -367,13 +487,115 @@ impl NativeRun {
         step: i64,
         value_f64: f64,
     ) -> Result<(), EngineError> {
-        self.reporter.report_metric(
-            self.run_id.clone(),
-            MetricKey::from_string(metric_key),
-            Some(Step::new(step)),
-            value_f64,
-        )
+        self.active_run.with_open_admission(&self.run_id, || {
+            self.reporter.report_metric(
+                self.run_id.clone(),
+                MetricKey::from_string(metric_key),
+                Some(Step::new(step)),
+                value_f64,
+            )
+        })
     }
+}
+
+struct ActiveRun {
+    lock_file: Mutex<Option<File>>,
+    admission: Mutex<RunAdmission>,
+}
+
+impl ActiveRun {
+    fn open(lock_file: File) -> Self {
+        Self {
+            lock_file: Mutex::new(Some(lock_file)),
+            admission: Mutex::new(RunAdmission::Open),
+        }
+    }
+
+    fn closed() -> Arc<Self> {
+        Arc::new(Self {
+            lock_file: Mutex::new(None),
+            admission: Mutex::new(RunAdmission::Terminal),
+        })
+    }
+
+    fn with_open_admission(
+        &self,
+        run_id: &RunId,
+        report: impl FnOnce() -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        let admission = self
+            .admission
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+        match *admission {
+            RunAdmission::Open => report(),
+            RunAdmission::Closing | RunAdmission::Terminal => Err(EngineError::RunClosed {
+                run_id: run_id.as_str().to_owned(),
+            }),
+        }
+    }
+
+    fn close_admission(&self) -> Result<(), EngineError> {
+        let mut admission = self
+            .admission
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+        *admission = RunAdmission::Closing;
+        Ok(())
+    }
+
+    fn open_admission(&self) -> Result<(), EngineError> {
+        let mut admission = self
+            .admission
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+        *admission = RunAdmission::Open;
+        Ok(())
+    }
+
+    fn mark_terminal(&self) -> Result<(), EngineError> {
+        let mut admission = self
+            .admission
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+        *admission = RunAdmission::Terminal;
+        Ok(())
+    }
+
+    fn release_lock(&self) {
+        if let Ok(mut lock_file) = self.lock_file.lock()
+            && let Some(lock_file) = lock_file.take()
+        {
+            let _ = lock_file.unlock();
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RunAdmission {
+    Open,
+    Closing,
+    Terminal,
+}
+
+fn percent_encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'~' | b'-' => {
+                encoded.push(char::from(byte));
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+fn path_basename(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("storage path")
+        .to_owned()
 }
 
 #[cfg(test)]
@@ -448,9 +670,10 @@ mod tests {
             std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
         let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
         let client = NativeClient {
-            _root_path: root_path.clone(),
+            root_path: root_path.clone(),
             reporter: MetricReporter::blocked_for_test(1),
             connection,
+            active_runs: Arc::new(Mutex::new(HashMap::new())),
         };
         let project = client.create_project(
             "local training",
@@ -512,5 +735,310 @@ mod tests {
         );
         std::fs::remove_dir_all(root_path)?;
         Ok(())
+    }
+
+    #[test]
+    fn finish_run_drains_reports_and_closes_existing_run_handle()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-close-admission")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-close-admission")),
+        )?;
+        let run_handle = client.run_handle(run.clone());
+        run_handle.log_metric_at_step("train/loss", 0, 0.25)?;
+
+        let finished = client.finish_run(&run.run_id)?;
+        let late_log = run_handle.log_metric_at_step("train/loss", 1, 0.125);
+        let points = client.query_metric(
+            &run.run_id,
+            &MetricKey::from_string("train/loss"),
+            None,
+            None,
+            None,
+        )?;
+
+        assert_eq!(finished.status, RunStatus::Finished);
+        assert_eq!(points.len(), 1);
+        assert!(
+            matches!(late_log, Err(EngineError::RunClosed { .. })),
+            "expected late log to raise RunClosed, got {late_log:?}",
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn admission_close_waits_for_in_flight_log_gate_before_rejecting_late_logs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let lock_path = std::env::temp_dir().join(format!("pulseon-lock-{}", uuid::Uuid::new_v4()));
+        let lock_file = File::options()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)?;
+        let active_run = Arc::new(ActiveRun::open(lock_file));
+        let run_id = RunId::from_string("run-admission-race");
+        let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let (logged_sender, logged_receiver) = std::sync::mpsc::channel();
+        let in_flight = Arc::clone(&active_run);
+        let in_flight_run_id = run_id.clone();
+        let log_thread = std::thread::spawn(move || {
+            let result = in_flight.with_open_admission(&in_flight_run_id, || {
+                entered_sender
+                    .send(())
+                    .expect("test should observe in-flight log gate");
+                release_receiver
+                    .recv()
+                    .expect("test should release in-flight log gate");
+                Ok(())
+            });
+            logged_sender
+                .send(result)
+                .expect("test should observe log result");
+        });
+        entered_receiver.recv()?;
+        let barrier = Arc::clone(&active_run);
+        let (closed_sender, closed_receiver) = std::sync::mpsc::channel();
+        let close_thread = std::thread::spawn(move || {
+            barrier
+                .close_admission()
+                .expect("close barrier should acquire admission gate");
+            closed_sender
+                .send(())
+                .expect("test should observe close barrier");
+        });
+
+        assert!(
+            closed_receiver
+                .recv_timeout(Duration::from_millis(10))
+                .is_err(),
+            "close barrier should wait for the in-flight admission gate",
+        );
+        release_sender.send(())?;
+        let log_result = logged_receiver.recv()?;
+        close_thread
+            .join()
+            .expect("close barrier thread should join");
+        log_thread.join().expect("log thread should join");
+        let late_log = active_run.with_open_admission(&run_id, || Ok(()));
+
+        assert!(log_result.is_ok());
+        assert!(
+            matches!(late_log, Err(EngineError::RunClosed { .. })),
+            "expected log after close barrier to raise RunClosed, got {late_log:?}",
+        );
+        std::fs::remove_file(lock_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finish_run_releases_writer_lock_after_terminal_state()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-terminal-lock")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-terminal-lock")),
+        )?;
+        let lock_path = root_path
+            .join(".pulseon")
+            .join("locks")
+            .join("runs")
+            .join("run-terminal-lock.lock");
+
+        client.finish_run(&run.run_id)?;
+        let lock_file = File::options().read(true).write(true).open(lock_path)?;
+        let lock_result = lock_file.try_lock();
+
+        assert!(
+            lock_result.is_ok(),
+            "expected terminal finalization to release writer lock, got {lock_result:?}",
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn shutdown_tears_down_client_without_finalizing_running_run()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-shutdown-running")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-shutdown-running")),
+        )?;
+        let run_handle = client.run_handle(run.clone());
+
+        client.shutdown(None)?;
+        let log_after_shutdown = run_handle.log_metric_at_step("train/loss", 0, 0.25);
+        let reopened_client = NativeClient::open(&root_path)?;
+        let reopened_run = reopened_client.get_run(&run.run_id)?;
+        let resumed_run = reopened_client.resume_run(&run.run_id)?;
+
+        assert!(
+            matches!(log_after_shutdown, Err(EngineError::ClientClosed)),
+            "expected closed client error after shutdown, got {log_after_shutdown:?}",
+        );
+        assert_eq!(reopened_run.status, RunStatus::Running);
+        assert!(reopened_run.finished_at.is_none());
+        assert_eq!(resumed_run.run_id, run.run_id);
+        reopened_client.shutdown(None)?;
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn run_writer_lock_rejects_second_active_client() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let first_client = NativeClient::open(&root_path)?;
+        let project = first_client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-lock")),
+        )?;
+        let run = first_client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-lock")),
+        )?;
+        let second_client = NativeClient::open(&root_path)?;
+
+        let resume = second_client.resume_run(&run.run_id);
+
+        assert!(
+            matches!(resume, Err(EngineError::RunAlreadyActive { .. })),
+            "expected active writer conflict, got {resume:?}",
+        );
+        first_client.shutdown(None)?;
+        let resumed_after_shutdown = second_client.resume_run(&run.run_id)?;
+        assert_eq!(resumed_after_shutdown.run_id, run.run_id);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn create_run_existing_id_reports_exists_before_active_lock()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let first_client = NativeClient::open(&root_path)?;
+        let project = first_client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-existing-active")),
+        )?;
+        first_client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-existing-active")),
+        )?;
+        let second_client = NativeClient::open(&root_path)?;
+
+        let duplicate = second_client.create_run(
+            &project.project_id,
+            "duplicate",
+            Some(RunId::from_string("run-existing-active")),
+        );
+
+        assert!(
+            matches!(duplicate, Err(EngineError::RunAlreadyExists { .. })),
+            "expected duplicate run id error, got {duplicate:?}",
+        );
+        first_client.shutdown(None)?;
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn resume_run_rejects_terminal_runs() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-terminal-resume")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-terminal-resume")),
+        )?;
+        client.finish_run(&run.run_id)?;
+
+        let resumed = client.resume_run(&run.run_id);
+
+        assert!(
+            matches!(
+                resumed,
+                Err(EngineError::InvalidRunTransition {
+                    from: "finished",
+                    to: "running",
+                    ..
+                })
+            ),
+            "expected terminal resume rejection, got {resumed:?}",
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn leftover_lock_file_without_os_lock_does_not_block_resume()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let first_client = NativeClient::open(&root_path)?;
+        let project = first_client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-leftover-lock")),
+        )?;
+        let run = first_client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run/leftover lock")),
+        )?;
+        first_client.shutdown(None)?;
+        let lock_path = root_path
+            .join(".pulseon")
+            .join("locks")
+            .join("runs")
+            .join("run%2Fleftover%20lock.lock");
+        assert!(lock_path.is_file());
+
+        let second_client = NativeClient::open(&root_path)?;
+        let resumed = second_client.resume_run(&run.run_id)?;
+
+        assert_eq!(resumed.run_id, run.run_id);
+        second_client.shutdown(None)?;
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn percent_encode_path_segment_uses_rfc3986_unreserved_bytes() {
+        assert_eq!(
+            percent_encode_path_segment("run/space ü._~-"),
+            "run%2Fspace%20%C3%BC._~-",
+        );
     }
 }
