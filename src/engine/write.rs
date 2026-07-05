@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+
 use crate::engine::EngineError;
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
 use crate::engine::write_rows::{StoredRun, status_as_str};
@@ -104,6 +106,25 @@ impl<'connection> NativeWriteStore<'connection> {
     ) -> Result<MetricPoint, EngineError> {
         let timestamp = current_timestamp("timestamp")?;
         let ingested_at = current_timestamp("ingested_at")?;
+        self.log_metric_at_step_with_timestamps(
+            run_id,
+            metric_key,
+            step,
+            value_f64,
+            timestamp,
+            ingested_at,
+        )
+    }
+
+    pub(crate) fn log_metric_at_step_with_timestamps(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        step: Step,
+        value_f64: f64,
+        timestamp: DateTime<Utc>,
+        ingested_at: DateTime<Utc>,
+    ) -> Result<MetricPoint, EngineError> {
         self.connection.execute(
             "INSERT INTO dl.metric_points
                  (run_id, metric_key, step, timestamp, value_f64, ingested_at)

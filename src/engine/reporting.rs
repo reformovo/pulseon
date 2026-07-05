@@ -6,11 +6,14 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::engine::EngineError;
+use crate::engine::time::timestamp_from_millis;
 use crate::engine::write::NativeWriteStore;
 use crate::model::metric::{MetricKey, Step};
 use crate::model::run::RunId;
 
 const DEFAULT_METRIC_BUFFER_CAPACITY: usize = 65_536;
+const METRIC_BATCH_MAX_REPORTS: usize = 8_192;
+const METRIC_BATCH_MAX_AGE: Duration = Duration::from_millis(10);
 const WRITER_RUNNING: u8 = 0;
 const WRITER_FAILED: u8 = 1;
 const WRITER_CLOSED: u8 = 2;
@@ -182,8 +185,8 @@ impl MetricReporterDiagnosticsInner {
         self.queue_full_errors.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn increment_persisted(&self) {
-        self.persisted_reports.fetch_add(1, Ordering::Relaxed);
+    fn increment_persisted_by(&self, count: u64) {
+        self.persisted_reports.fetch_add(count, Ordering::Relaxed);
     }
 
     fn set_writer_failed(&self) {
@@ -208,6 +211,10 @@ impl MetricReporterDiagnosticsInner {
 
     fn decrement_pending(&self) {
         self.pending_reports.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    fn decrement_pending_by(&self, count: u64) {
+        self.pending_reports.fetch_sub(count, Ordering::Relaxed);
     }
 
     fn pending_reports(&self) -> u64 {
@@ -256,41 +263,88 @@ fn metric_worker(
     receiver: mpsc::Receiver<MetricReport>,
     diagnostics: Arc<MetricReporterDiagnosticsInner>,
 ) -> Result<(), EngineError> {
-    for report in receiver {
-        let result = write_metric_report(&connection, &report);
-        if let Err(error) = &result {
-            diagnostics.set_last_write_error(error.to_string());
-            diagnostics.set_writer_failed();
-        } else {
-            diagnostics.increment_persisted();
+    let mut next_ingested_at_millis = chrono::Utc::now().timestamp_millis();
+    while let Ok(first_report) = receiver.recv() {
+        let mut batch = vec![first_report];
+        collect_metric_batch(&receiver, &mut batch);
+        let batch_len = u64::try_from(batch.len()).unwrap_or(u64::MAX);
+        match write_metric_batch(&connection, &batch, next_ingested_at_millis) {
+            Ok(next_millis) => {
+                next_ingested_at_millis = next_millis;
+                diagnostics.increment_persisted_by(batch_len);
+                diagnostics.decrement_pending_by(batch_len);
+            }
+            Err(error) => {
+                diagnostics.set_last_write_error(error.to_string());
+                diagnostics.set_writer_failed();
+                diagnostics.decrement_pending_by(batch_len);
+                return Err(error);
+            }
         }
-        diagnostics.decrement_pending();
-        result?;
     }
     Ok(())
 }
 
-fn write_metric_report(
+fn collect_metric_batch(receiver: &mpsc::Receiver<MetricReport>, batch: &mut Vec<MetricReport>) {
+    let deadline = Instant::now() + METRIC_BATCH_MAX_AGE;
+    while batch.len() < METRIC_BATCH_MAX_REPORTS {
+        match receiver.try_recv() {
+            Ok(report) => batch.push(report),
+            Err(mpsc::TryRecvError::Empty) => {
+                let now = Instant::now();
+                if now >= deadline {
+                    return;
+                }
+                match receiver.recv_timeout(deadline - now) {
+                    Ok(report) => batch.push(report),
+                    Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                        return;
+                    }
+                }
+            }
+            Err(mpsc::TryRecvError::Disconnected) => return,
+        }
+    }
+}
+
+fn write_metric_batch(
     connection: &Arc<Mutex<duckdb::Connection>>,
-    report: &MetricReport,
-) -> Result<(), EngineError> {
+    batch: &[MetricReport],
+    next_ingested_at_millis: i64,
+) -> Result<i64, EngineError> {
     let connection = connection
         .lock()
         .map_err(|_| EngineError::ConnectionLockPoisoned)?;
     let store = NativeWriteStore::new(&connection);
-    match report.step {
-        Some(step) => store
-            .log_metric_at_step(&report.run_id, &report.metric_key, step, report.value_f64)
-            .map(|_| ()),
-        None => store
-            .log_metric(&report.run_id, &report.metric_key, report.value_f64)
-            .map(|_| ()),
+    let mut ingested_at_millis = next_ingested_at_millis.max(chrono::Utc::now().timestamp_millis());
+    for report in batch {
+        match report.step {
+            Some(step) => {
+                let timestamp = timestamp_from_millis("timestamp", ingested_at_millis)?;
+                let ingested_at = timestamp_from_millis("ingested_at", ingested_at_millis)?;
+                store.log_metric_at_step_with_timestamps(
+                    &report.run_id,
+                    &report.metric_key,
+                    step,
+                    report.value_f64,
+                    timestamp,
+                    ingested_at,
+                )?;
+            }
+            None => {
+                store.log_metric(&report.run_id, &report.metric_key, report.value_f64)?;
+            }
+        }
+        ingested_at_millis += 1;
     }
+    Ok(ingested_at_millis)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::bootstrap::open_native_connection;
+    use crate::model::types::ProjectId;
 
     #[test]
     fn report_metric_returns_queue_full_when_buffer_is_full() {
@@ -412,5 +466,82 @@ mod tests {
         assert_eq!(diagnostics.last_flush_status, "none");
         assert_eq!(diagnostics.last_flush_run_id, None);
         assert_eq!(diagnostics.last_flush_error, None);
+    }
+
+    #[test]
+    fn collect_metric_batch_stops_at_report_threshold() {
+        let (sender, receiver) = mpsc::sync_channel(METRIC_BATCH_MAX_REPORTS + 1);
+        for step in 0..=METRIC_BATCH_MAX_REPORTS {
+            sender
+                .try_send(metric_report(step))
+                .expect("test channel should have capacity for queued reports");
+        }
+
+        let mut batch = vec![receiver.recv().expect("first report should be queued")];
+        collect_metric_batch(&receiver, &mut batch);
+
+        assert_eq!(batch.len(), METRIC_BATCH_MAX_REPORTS);
+        assert!(
+            receiver.try_recv().is_ok(),
+            "one report should remain after the size-capped batch"
+        );
+    }
+
+    #[test]
+    fn write_metric_batch_assigns_ingested_at_in_enqueue_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-reporter-{}", uuid::Uuid::new_v4()));
+        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        {
+            let connection = connection.lock().expect("test connection lock");
+            connection.execute(
+                "INSERT INTO dl.projects (project_id, name, created_at)
+                 VALUES ('project-1', 'local training', now())",
+                [],
+            )?;
+            NativeWriteStore::new(&connection).create_run(
+                &ProjectId::from_string("project-1"),
+                "baseline",
+                Some(RunId::from_string("run-1")),
+            )?;
+        }
+        let batch = vec![metric_report(0), metric_report(1), metric_report(2)];
+        let first_ingested_at_millis = 1_700_000_000_000;
+
+        let next_ingested_at_millis =
+            write_metric_batch(&connection, &batch, first_ingested_at_millis)?;
+
+        let connection = connection.lock().expect("test connection lock");
+        let stored: Vec<(i64, i64)> = connection
+            .prepare(
+                "SELECT step, epoch_ms(ingested_at)
+                 FROM dl.metric_points
+                 WHERE run_id = 'run-1'
+                 ORDER BY ingested_at",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        assert_eq!(
+            stored.iter().map(|(step, _)| *step).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(stored[1].1, stored[0].1 + 1);
+        assert_eq!(stored[2].1, stored[1].1 + 1);
+        assert_eq!(next_ingested_at_millis, stored[2].1 + 1);
+        assert!(stored[0].1 >= first_ingested_at_millis);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    fn metric_report(step: usize) -> MetricReport {
+        MetricReport {
+            run_id: RunId::from_string("run-1"),
+            metric_key: MetricKey::from_string("train/loss"),
+            step: Some(Step::new(
+                i64::try_from(step).expect("test step should fit i64"),
+            )),
+            value_f64: step as f64,
+        }
     }
 }
