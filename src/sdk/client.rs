@@ -381,7 +381,29 @@ impl From<MetricAggregate> for PyMetricSummary {
 }
 
 #[pyfunction]
-pub fn init(path: PathBuf) -> PyResult<PyClient> {
+#[pyo3(
+    signature = (
+        path,
+        *,
+        data_path=None,
+        catalog_backend="duckdb",
+        catalog_path=None,
+        metric_queue_capacity=65536
+    )
+)]
+pub fn init(
+    path: PathBuf,
+    data_path: Option<PathBuf>,
+    catalog_backend: &str,
+    catalog_path: Option<PathBuf>,
+    metric_queue_capacity: usize,
+) -> PyResult<PyClient> {
+    let _ = (
+        data_path,
+        catalog_backend,
+        catalog_path,
+        metric_queue_capacity,
+    );
     NativeClient::open(path)
         .map(PyClient::new)
         .map_err(runtime_error)

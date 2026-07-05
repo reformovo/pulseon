@@ -27,8 +27,21 @@ RunClosedError = _pulseon.RunClosedError
 StorageError = _pulseon.StorageError
 
 
-def init(path: str | os.PathLike[str]) -> Client:
-    return _pulseon.init(path)
+def init(
+    path: str | os.PathLike[str],
+    *,
+    data_path: str | os.PathLike[str] | None = None,
+    catalog_backend: str = "duckdb",
+    catalog_path: str | os.PathLike[str] | None = None,
+    metric_queue_capacity: int = 65536,
+) -> Client:
+    return _pulseon.init(
+        path,
+        data_path=data_path,
+        catalog_backend=catalog_backend,
+        catalog_path=catalog_path,
+        metric_queue_capacity=metric_queue_capacity,
+    )
 
 
 __all__ = [

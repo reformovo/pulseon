@@ -15,6 +15,20 @@ def test_init_returns_client(tmp_path: pathlib.Path) -> None:
     assert isinstance(client, pulseon.Client)
 
 
+def test_init_accepts_v2_configuration_keywords(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(
+        tmp_path / "pulseon",
+        data_path=tmp_path / "custom-data",
+        catalog_backend="duckdb",
+        catalog_path=tmp_path / "catalog.ducklake",
+        metric_queue_capacity=1024,
+    )
+
+    assert isinstance(client, pulseon.Client)
+
+
 def test_client_creates_project_and_run(tmp_path: pathlib.Path) -> None:
     import pulseon
 
