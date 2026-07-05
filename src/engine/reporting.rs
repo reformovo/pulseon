@@ -60,6 +60,9 @@ impl MetricReporter {
         step: Option<Step>,
         value_f64: f64,
     ) -> Result<(), EngineError> {
+        let Some(sender) = self.sender() else {
+            return Err(EngineError::ClientClosed);
+        };
         if self.inner.diagnostics.is_writer_failed() {
             return Err(EngineError::MetricWriterFailed {
                 message: self
@@ -75,12 +78,6 @@ impl MetricReporter {
             step,
             value_f64,
         };
-        let sender = match self.sender() {
-            Some(sender) => sender,
-            None => {
-                return Ok(());
-            }
-        };
         self.inner.diagnostics.increment_pending();
         match sender.try_send(report) {
             Ok(()) => {
@@ -94,7 +91,7 @@ impl MetricReporter {
             }
             Err(TrySendError::Disconnected(_)) => {
                 self.inner.diagnostics.decrement_pending();
-                Ok(())
+                Err(EngineError::ClientClosed)
             }
         }
     }
@@ -104,30 +101,57 @@ impl MetricReporter {
     }
 
     pub fn drain_for(&self, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
+        self.drain(Some(timeout)).is_ok()
+    }
+
+    pub fn drain(&self, timeout: Option<Duration>) -> Result<(), EngineError> {
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
         while self.inner.diagnostics.pending_reports() > 0 {
-            if Instant::now() >= deadline {
-                return false;
+            if self.inner.diagnostics.is_writer_failed() {
+                return Err(EngineError::MetricWriterFailed {
+                    message: self
+                        .inner
+                        .diagnostics
+                        .last_write_error()
+                        .unwrap_or_else(|| "metric writer failed".to_owned()),
+                });
+            }
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return Err(EngineError::MetricDrainTimeout);
             }
             std::thread::sleep(Duration::from_millis(1));
         }
-        true
+        if self.inner.diagnostics.is_writer_failed() {
+            return Err(EngineError::MetricWriterFailed {
+                message: self
+                    .inner
+                    .diagnostics
+                    .last_write_error()
+                    .unwrap_or_else(|| "metric writer failed".to_owned()),
+            });
+        }
+        Ok(())
     }
 
     pub fn shutdown_for(&self, timeout: Duration) -> bool {
-        let drained = self.drain_for(timeout);
+        self.shutdown(Some(timeout)).is_ok()
+    }
+
+    pub fn shutdown(&self, timeout: Option<Duration>) -> Result<(), EngineError> {
+        let drain_result = self.drain(timeout);
+        if matches!(drain_result, Err(EngineError::MetricDrainTimeout)) {
+            return drain_result;
+        }
         if let Some(sender) = take_mutex_value(&self.inner.sender) {
             drop(sender);
         }
-        if let Some(worker) = take_mutex_value(&self.inner.worker)
-            && drained
-        {
+        if let Some(worker) = take_mutex_value(&self.inner.worker) {
             let _ = worker.join();
         }
-        if drained {
+        if drain_result.is_ok() {
             self.inner.diagnostics.set_writer_closed();
         }
-        drained
+        drain_result
     }
 
     #[cfg(test)]
@@ -318,7 +342,6 @@ fn metric_worker(
             Err(error) => {
                 diagnostics.set_last_write_error(error.to_string());
                 diagnostics.set_writer_failed();
-                diagnostics.decrement_pending_by(batch_len);
                 return Err(EngineError::MetricWriterFailed {
                     message: error.to_string(),
                 });
@@ -522,6 +545,22 @@ mod tests {
         let reporter = MetricReporter::blocked_for_test(1);
 
         assert!(reporter.shutdown_for(Duration::from_millis(1)));
+        let result = reporter.report_metric(
+            RunId::from_string("run-1"),
+            MetricKey::from_string("train/loss"),
+            None,
+            0.25,
+        );
+
+        assert!(matches!(result, Err(EngineError::ClientClosed)));
+        let diagnostics = reporter.diagnostics();
+        assert_eq!(diagnostics.pending_reports, 0);
+        assert_eq!(diagnostics.writer_state, "closed");
+    }
+
+    #[test]
+    fn shutdown_timeout_keeps_admission_open() {
+        let reporter = MetricReporter::blocked_for_test(2);
         reporter
             .report_metric(
                 RunId::from_string("run-1"),
@@ -529,11 +568,63 @@ mod tests {
                 None,
                 0.25,
             )
-            .expect("closed reporter should retain current shutdown behavior");
+            .expect("report should enter the queue");
+
+        let shutdown = reporter.shutdown(Duration::from_millis(1).into());
+
+        assert!(matches!(shutdown, Err(EngineError::MetricDrainTimeout)));
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.125,
+            )
+            .expect("shutdown timeout should leave admission open");
 
         let diagnostics = reporter.diagnostics();
-        assert_eq!(diagnostics.pending_reports, 0);
-        assert_eq!(diagnostics.writer_state, "closed");
+        assert_eq!(diagnostics.pending_reports, 2);
+        assert_eq!(diagnostics.writer_state, "running");
+    }
+
+    #[test]
+    fn shutdown_after_writer_failure_releases_sender_without_closing_diagnostics() {
+        let reporter = MetricReporter::blocked_for_test(1);
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.25,
+            )
+            .expect("report should enter the queue");
+        reporter
+            .inner
+            .diagnostics
+            .set_last_write_error("append metric batch failed".to_owned());
+        reporter.inner.diagnostics.set_writer_failed();
+
+        let shutdown = reporter.shutdown(None);
+        let repeated_shutdown = reporter.shutdown(None);
+        let log_after_shutdown = reporter.report_metric(
+            RunId::from_string("run-1"),
+            MetricKey::from_string("train/loss"),
+            None,
+            0.125,
+        );
+
+        assert!(matches!(
+            shutdown,
+            Err(EngineError::MetricWriterFailed { .. })
+        ));
+        assert!(matches!(
+            repeated_shutdown,
+            Err(EngineError::MetricWriterFailed { .. })
+        ));
+        assert!(matches!(log_after_shutdown, Err(EngineError::ClientClosed)));
+        let diagnostics = reporter.diagnostics();
+        assert_eq!(diagnostics.pending_reports, 1);
+        assert_eq!(diagnostics.writer_state, "failed");
     }
 
     #[test]

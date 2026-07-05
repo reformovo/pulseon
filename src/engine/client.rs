@@ -213,8 +213,8 @@ impl NativeClient {
         self.finalize_run(run_id, RunStatus::Failed)
     }
 
-    pub fn shutdown(&self) -> bool {
-        self.reporter.shutdown_for(REPORTER_DRAIN_TIMEOUT)
+    pub fn shutdown(&self, timeout: Option<Duration>) -> Result<(), EngineError> {
+        self.reporter.shutdown(timeout)
     }
 
     pub fn run_handle(&self, run: Run) -> NativeRun {

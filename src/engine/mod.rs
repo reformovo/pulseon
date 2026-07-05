@@ -40,6 +40,10 @@ pub enum EngineError {
     MetricQueueFull,
     #[error("metric writer failed: {message}")]
     MetricWriterFailed { message: String },
+    #[error("metric drain timed out")]
+    MetricDrainTimeout,
+    #[error("client is closed")]
+    ClientClosed,
     #[error("DuckDB LTTB extension is unavailable: {message}")]
     LttbExtensionUnavailable { message: String },
     #[error("invalid stored run status: {status}")]

@@ -17,19 +17,30 @@ def test_client_shutdown_closes_logging_and_context_manager(
     project = client.create_project("local training", project_id="project-1")
     run = client.create_run(project.project_id, "baseline", run_id="run-1")
 
-    assert client.shutdown()
+    assert client.shutdown() is None
     diagnostics = client.diagnostics()
     assert diagnostics.pending_reports == 0
     assert diagnostics.writer_state == "closed"
     assert diagnostics.last_write_error is None
 
-    run.log("train/loss", 0, 0.25)
+    with pytest.raises(pulseon.ClientClosedError):
+        run.log("train/loss", 0, 0.25)
     assert client.diagnostics().writer_state == "closed"
 
     with pulseon.init(root_path) as context_client:
         selected_project = context_client.get_project(project.project_id)
 
         assert selected_project.project_id == project.project_id
+
+
+def test_context_manager_preserves_user_exception(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    with pytest.raises(ValueError, match="user failure"):
+        with pulseon.init(tmp_path / "pulseon"):
+            raise ValueError("user failure")
 
 
 def test_client_diagnostics_fields_are_read_only(tmp_path: pathlib.Path) -> None:
