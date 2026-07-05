@@ -28,4 +28,10 @@ def test_run_log_requires_explicit_step(tmp_path: pathlib.Path) -> None:
     assert diagnostics.last_flush_run_id is None
     assert diagnostics.last_flush_status == "none"
     assert diagnostics.last_flush_error is None
-    assert not hasattr(diagnostics, "dropped_reports")
+    for removed_field in (
+        "accepted_reports",
+        "dropped_reports",
+        "failed_reports",
+        "writer_drained",
+    ):
+        assert not hasattr(diagnostics, removed_field)

@@ -46,6 +46,12 @@ def test_client_diagnostics_fields_are_read_only(tmp_path: pathlib.Path) -> None
     assert diagnostics.last_flush_run_id is None
     assert diagnostics.last_flush_status == "none"
     assert diagnostics.last_flush_error is None
-    assert not hasattr(diagnostics, "dropped_reports")
+    for removed_field in (
+        "accepted_reports",
+        "dropped_reports",
+        "failed_reports",
+        "writer_drained",
+    ):
+        assert not hasattr(diagnostics, removed_field)
     with pytest.raises(AttributeError):
         setattr(diagnostics, "pending_reports", 1)
