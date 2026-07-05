@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyRuntimeError;
@@ -398,15 +398,48 @@ pub fn init(
     catalog_path: Option<PathBuf>,
     metric_queue_capacity: usize,
 ) -> PyResult<PyClient> {
-    let _ = (
-        data_path,
+    validate_init_config(
+        data_path.as_deref(),
         catalog_backend,
-        catalog_path,
+        catalog_path.as_deref(),
         metric_queue_capacity,
-    );
+    )?;
     NativeClient::open(path)
         .map(PyClient::new)
         .map_err(runtime_error)
+}
+
+fn validate_init_config(
+    data_path: Option<&Path>,
+    catalog_backend: &str,
+    catalog_path: Option<&Path>,
+    metric_queue_capacity: usize,
+) -> PyResult<()> {
+    if !(1..=1_048_576).contains(&metric_queue_capacity) {
+        return Err(InvalidConfigurationError::new_err(
+            "metric_queue_capacity must be between 1 and 1048576",
+        ));
+    }
+    if !matches!(catalog_backend, "duckdb" | "sqlite") {
+        return Err(InvalidConfigurationError::new_err(format!(
+            "unsupported catalog_backend: {catalog_backend}"
+        )));
+    }
+    if data_path.is_some_and(is_uri_path) {
+        return Err(InvalidConfigurationError::new_err(
+            "data_path must be a local filesystem path",
+        ));
+    }
+    if catalog_path.is_some_and(is_uri_path) {
+        return Err(InvalidConfigurationError::new_err(
+            "catalog_path must be a local filesystem path",
+        ));
+    }
+    Ok(())
+}
+
+fn is_uri_path(path: &Path) -> bool {
+    path.to_string_lossy().contains("://")
 }
 
 fn runtime_error(error: crate::engine::EngineError) -> PyErr {
