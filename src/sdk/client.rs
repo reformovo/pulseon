@@ -17,36 +17,34 @@ create_exception!(
     PyRuntimeError,
     "Base class for PulseOn SDK errors."
 );
-create_exception!(
-    pulseon._pulseon,
-    DuplicateRunError,
-    PulseOnError,
+
+macro_rules! sdk_exception {
+    ($name:ident, $message:literal) => {
+        create_exception!(pulseon._pulseon, $name, PulseOnError, $message);
+    };
+}
+
+sdk_exception!(MetricQueueFullError, "The metric queue is full.");
+sdk_exception!(MetricWriterFailedError, "The metric writer failed.");
+sdk_exception!(MetricDrainTimeoutError, "Metric drain timed out.");
+sdk_exception!(MetricFlushError, "Metric flush failed.");
+sdk_exception!(MetricFlushTimeoutError, "Metric flush timed out.");
+sdk_exception!(RunClosedError, "The run is closed for metric reporting.");
+sdk_exception!(ClientClosedError, "The client is closed.");
+sdk_exception!(
+    InvalidRunStateError,
+    "The run state does not allow this operation."
+);
+sdk_exception!(
+    RunAlreadyExistsError,
     "A run with the requested run_id already exists."
 );
-create_exception!(
-    pulseon._pulseon,
-    MissingProjectError,
-    PulseOnError,
-    "The requested project does not exist."
+sdk_exception!(
+    RunAlreadyActiveError,
+    "The requested run already has an active writer."
 );
-create_exception!(
-    pulseon._pulseon,
-    MissingRunError,
-    PulseOnError,
-    "The requested run does not exist."
-);
-create_exception!(
-    pulseon._pulseon,
-    DuckLakeUnavailableError,
-    PulseOnError,
-    "DuckLake could not be loaded or used."
-);
-create_exception!(
-    pulseon._pulseon,
-    QueryError,
-    PulseOnError,
-    "A metric query failed."
-);
+sdk_exception!(InvalidConfigurationError, "PulseOn configuration is invalid.");
+sdk_exception!(StorageError, "A storage operation failed.");
 
 #[pyclass(name = "Client", module = "pulseon._pulseon", unsendable)]
 pub struct PyClient {
@@ -392,23 +390,25 @@ pub fn init(path: PathBuf) -> PyResult<PyClient> {
 fn runtime_error(error: crate::engine::EngineError) -> PyErr {
     let message = error.to_string();
     match error {
-        crate::engine::EngineError::RunAlreadyExists { .. } => DuplicateRunError::new_err(message),
-        crate::engine::EngineError::ProjectNotFound { .. } => MissingProjectError::new_err(message),
-        crate::engine::EngineError::RunNotFound { .. } => MissingRunError::new_err(message),
-        crate::engine::EngineError::LttbExtensionUnavailable { .. }
-        | crate::engine::EngineError::MetricQueryMaxPointsTooLarge { .. } => {
-            QueryError::new_err(message)
+        crate::engine::EngineError::RunAlreadyExists { .. } => {
+            RunAlreadyExistsError::new_err(message)
         }
-        crate::engine::EngineError::DuckDb(source) if is_ducklake_error(&source) => {
-            DuckLakeUnavailableError::new_err(message)
+        crate::engine::EngineError::InvalidRunTransition { .. } => {
+            InvalidRunStateError::new_err(message)
         }
-        crate::engine::EngineError::DuckDb(_) => QueryError::new_err(message),
+        crate::engine::EngineError::DuckDb(_)
+        | crate::engine::EngineError::Io(_)
+        | crate::engine::EngineError::ProjectAlreadyExists { .. }
+        | crate::engine::EngineError::ProjectNotFound { .. }
+        | crate::engine::EngineError::RunNotFound { .. }
+        | crate::engine::EngineError::LttbExtensionUnavailable { .. } => {
+            StorageError::new_err(message)
+        }
+        crate::engine::EngineError::MetricQueryMaxPointsTooLarge { .. } => {
+            PulseOnError::new_err(message)
+        }
         _ => PulseOnError::new_err(message),
     }
-}
-
-fn is_ducklake_error(error: &duckdb::Error) -> bool {
-    error.to_string().to_lowercase().contains("ducklake")
 }
 
 fn status_as_string(status: RunStatus) -> String {

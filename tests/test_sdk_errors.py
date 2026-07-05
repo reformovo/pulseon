@@ -19,16 +19,26 @@ def test_client_raises_actionable_sdk_errors(
     project = client.create_project("local training", project_id="project-1")
     run = client.create_run(project.project_id, "baseline", run_id="run-1")
 
-    assert issubclass(pulseon.DuplicateRunError, pulseon.PulseOnError)
-    assert issubclass(pulseon.MissingProjectError, pulseon.PulseOnError)
-    assert issubclass(pulseon.MissingRunError, pulseon.PulseOnError)
-    assert issubclass(pulseon.DuckLakeUnavailableError, pulseon.PulseOnError)
-    assert issubclass(pulseon.QueryError, pulseon.PulseOnError)
-    with pytest.raises(pulseon.DuplicateRunError):
+    error_types = [
+        pulseon.MetricQueueFullError,
+        pulseon.MetricWriterFailedError,
+        pulseon.MetricDrainTimeoutError,
+        pulseon.MetricFlushError,
+        pulseon.MetricFlushTimeoutError,
+        pulseon.RunClosedError,
+        pulseon.ClientClosedError,
+        pulseon.InvalidRunStateError,
+        pulseon.RunAlreadyExistsError,
+        pulseon.RunAlreadyActiveError,
+        pulseon.InvalidConfigurationError,
+        pulseon.StorageError,
+    ]
+    assert all(issubclass(error_type, pulseon.PulseOnError) for error_type in error_types)
+    with pytest.raises(pulseon.RunAlreadyExistsError):
         client.create_run(project.project_id, "duplicate", run_id=run.run_id)
-    with pytest.raises(pulseon.MissingProjectError):
+    with pytest.raises(pulseon.StorageError):
         client.create_run("missing-project", "baseline")
-    with pytest.raises(pulseon.MissingRunError):
+    with pytest.raises(pulseon.StorageError):
         client.get_run("missing-run")
 
     monkeypatch.setenv(
@@ -50,5 +60,5 @@ def test_client_raises_actionable_sdk_errors(
         "train/loss",
         expected_count=3,
     )
-    with pytest.raises(pulseon.QueryError):
+    with pytest.raises(pulseon.PulseOnError):
         query_client.query_metric(query_run.run_id, "train/loss", max_points=2)
