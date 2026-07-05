@@ -776,6 +776,71 @@ mod tests {
     }
 
     #[test]
+    fn admission_close_waits_for_in_flight_log_gate_before_rejecting_late_logs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let lock_path = std::env::temp_dir().join(format!("pulseon-lock-{}", uuid::Uuid::new_v4()));
+        let lock_file = File::options()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)?;
+        let active_run = Arc::new(ActiveRun::open(lock_file));
+        let run_id = RunId::from_string("run-admission-race");
+        let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let (logged_sender, logged_receiver) = std::sync::mpsc::channel();
+        let in_flight = Arc::clone(&active_run);
+        let in_flight_run_id = run_id.clone();
+        let log_thread = std::thread::spawn(move || {
+            let result = in_flight.with_open_admission(&in_flight_run_id, || {
+                entered_sender
+                    .send(())
+                    .expect("test should observe in-flight log gate");
+                release_receiver
+                    .recv()
+                    .expect("test should release in-flight log gate");
+                Ok(())
+            });
+            logged_sender
+                .send(result)
+                .expect("test should observe log result");
+        });
+        entered_receiver.recv()?;
+        let barrier = Arc::clone(&active_run);
+        let (closed_sender, closed_receiver) = std::sync::mpsc::channel();
+        let close_thread = std::thread::spawn(move || {
+            barrier
+                .close_admission()
+                .expect("close barrier should acquire admission gate");
+            closed_sender
+                .send(())
+                .expect("test should observe close barrier");
+        });
+
+        assert!(
+            closed_receiver
+                .recv_timeout(Duration::from_millis(10))
+                .is_err(),
+            "close barrier should wait for the in-flight admission gate",
+        );
+        release_sender.send(())?;
+        let log_result = logged_receiver.recv()?;
+        close_thread
+            .join()
+            .expect("close barrier thread should join");
+        log_thread.join().expect("log thread should join");
+        let late_log = active_run.with_open_admission(&run_id, || Ok(()));
+
+        assert!(log_result.is_ok());
+        assert!(
+            matches!(late_log, Err(EngineError::RunClosed { .. })),
+            "expected log after close barrier to raise RunClosed, got {late_log:?}",
+        );
+        std::fs::remove_file(lock_path)?;
+        Ok(())
+    }
+
+    #[test]
     fn finish_run_releases_writer_lock_after_terminal_state()
     -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
