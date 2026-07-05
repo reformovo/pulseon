@@ -11,6 +11,9 @@ use crate::model::metric::{MetricKey, Step};
 use crate::model::run::RunId;
 
 const DEFAULT_METRIC_BUFFER_CAPACITY: usize = 65_536;
+const WRITER_RUNNING: u8 = 0;
+const WRITER_FAILED: u8 = 1;
+const WRITER_CLOSED: u8 = 2;
 
 #[derive(Clone)]
 pub struct MetricReporter {
@@ -30,7 +33,7 @@ impl MetricReporter {
         let worker = std::thread::spawn(move || {
             let result = metric_worker(connection, receiver, worker_diagnostics);
             if result.is_err() {
-                failure_diagnostics.increment_failed();
+                failure_diagnostics.set_writer_failed();
             }
         });
 
@@ -59,7 +62,6 @@ impl MetricReporter {
         let sender = match self.sender() {
             Some(sender) => sender,
             None => {
-                self.inner.diagnostics.increment_failed();
                 return Ok(());
             }
         };
@@ -71,12 +73,11 @@ impl MetricReporter {
             }
             Err(TrySendError::Full(_)) => {
                 self.inner.diagnostics.decrement_pending();
-                self.inner.diagnostics.increment_dropped();
+                self.inner.diagnostics.increment_queue_full();
                 Err(EngineError::MetricQueueFull)
             }
             Err(TrySendError::Disconnected(_)) => {
                 self.inner.diagnostics.decrement_pending();
-                self.inner.diagnostics.increment_failed();
                 Ok(())
             }
         }
@@ -106,6 +107,9 @@ impl MetricReporter {
             && drained
         {
             let _ = worker.join();
+        }
+        if drained {
+            self.inner.diagnostics.set_writer_closed();
         }
         drained
     }
@@ -149,34 +153,47 @@ impl Drop for MetricReporterInner {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MetricReporterDiagnostics {
-    pub accepted_reports: u64,
-    pub dropped_reports: u64,
-    pub failed_reports: u64,
     pub pending_reports: u64,
-    pub writer_drained: bool,
+    pub queue_full_errors: u64,
+    pub persisted_reports: u64,
+    pub writer_state: &'static str,
     pub last_write_error: Option<String>,
+    pub last_flush_run_id: Option<String>,
+    pub last_flush_status: &'static str,
+    pub last_flush_error: Option<String>,
 }
 
 #[derive(Default)]
 struct MetricReporterDiagnosticsInner {
-    accepted_reports: AtomicU64,
-    dropped_reports: AtomicU64,
-    failed_reports: AtomicU64,
     pending_reports: AtomicU64,
+    queue_full_errors: AtomicU64,
+    persisted_reports: AtomicU64,
+    writer_state: AtomicU64,
     last_write_error: Mutex<Option<String>>,
 }
 
 impl MetricReporterDiagnosticsInner {
     fn increment_accepted(&self) {
-        self.accepted_reports.fetch_add(1, Ordering::Relaxed);
+        self.writer_state
+            .store(WRITER_RUNNING.into(), Ordering::Relaxed);
     }
 
-    fn increment_dropped(&self) {
-        self.dropped_reports.fetch_add(1, Ordering::Relaxed);
+    fn increment_queue_full(&self) {
+        self.queue_full_errors.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn increment_failed(&self) {
-        self.failed_reports.fetch_add(1, Ordering::Relaxed);
+    fn increment_persisted(&self) {
+        self.persisted_reports.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn set_writer_failed(&self) {
+        self.writer_state
+            .store(WRITER_FAILED.into(), Ordering::Relaxed);
+    }
+
+    fn set_writer_closed(&self) {
+        self.writer_state
+            .store(WRITER_CLOSED.into(), Ordering::Relaxed);
     }
 
     fn set_last_write_error(&self, message: String) {
@@ -199,17 +216,25 @@ impl MetricReporterDiagnosticsInner {
 
     fn snapshot(&self) -> MetricReporterDiagnostics {
         let pending_reports = self.pending_reports();
+        let writer_state = match self.writer_state.load(Ordering::Relaxed) as u8 {
+            WRITER_FAILED => "failed",
+            WRITER_CLOSED => "closed",
+            _ if pending_reports == 0 => "drained",
+            _ => "running",
+        };
         MetricReporterDiagnostics {
-            accepted_reports: self.accepted_reports.load(Ordering::Relaxed),
-            dropped_reports: self.dropped_reports.load(Ordering::Relaxed),
-            failed_reports: self.failed_reports.load(Ordering::Relaxed),
             pending_reports,
-            writer_drained: pending_reports == 0,
+            queue_full_errors: self.queue_full_errors.load(Ordering::Relaxed),
+            persisted_reports: self.persisted_reports.load(Ordering::Relaxed),
+            writer_state,
             last_write_error: self
                 .last_write_error
                 .lock()
                 .ok()
                 .and_then(|last_write_error| last_write_error.clone()),
+            last_flush_run_id: None,
+            last_flush_status: "none",
+            last_flush_error: None,
         }
     }
 }
@@ -235,6 +260,9 @@ fn metric_worker(
         let result = write_metric_report(&connection, &report);
         if let Err(error) = &result {
             diagnostics.set_last_write_error(error.to_string());
+            diagnostics.set_writer_failed();
+        } else {
+            diagnostics.increment_persisted();
         }
         diagnostics.decrement_pending();
         result?;
@@ -285,10 +313,9 @@ mod tests {
 
         assert!(matches!(result, Err(EngineError::MetricQueueFull)));
         let diagnostics = reporter.diagnostics();
-        assert_eq!(diagnostics.accepted_reports, 1);
-        assert_eq!(diagnostics.dropped_reports, 1);
+        assert_eq!(diagnostics.queue_full_errors, 1);
         assert_eq!(diagnostics.pending_reports, 1);
-        assert!(!diagnostics.writer_drained);
+        assert_eq!(diagnostics.writer_state, "running");
     }
 
     #[test]
@@ -321,7 +348,9 @@ mod tests {
             )
             .expect("closed reporter should retain current shutdown behavior");
 
-        assert_eq!(reporter.diagnostics().failed_reports, 1);
+        let diagnostics = reporter.diagnostics();
+        assert_eq!(diagnostics.pending_reports, 0);
+        assert_eq!(diagnostics.writer_state, "closed");
     }
 
     #[test]
@@ -331,7 +360,10 @@ mod tests {
         let diagnostics = reporter.diagnostics();
 
         assert_eq!(diagnostics.pending_reports, 0);
-        assert!(diagnostics.writer_drained);
+        assert_eq!(diagnostics.writer_state, "drained");
         assert_eq!(diagnostics.last_write_error, None);
+        assert_eq!(diagnostics.last_flush_status, "none");
+        assert_eq!(diagnostics.last_flush_run_id, None);
+        assert_eq!(diagnostics.last_flush_error, None);
     }
 }

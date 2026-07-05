@@ -20,6 +20,12 @@ def test_run_log_requires_explicit_step(tmp_path: pathlib.Path) -> None:
     diagnostics = client.diagnostics()
 
     assert isinstance(diagnostics, pulseon.Diagnostics)
-    assert diagnostics.accepted_reports >= 1
-    assert diagnostics.dropped_reports == 0
-    assert diagnostics.failed_reports == 0
+    assert diagnostics.pending_reports >= 0
+    assert diagnostics.queue_full_errors == 0
+    assert diagnostics.persisted_reports >= 0
+    assert diagnostics.writer_state in {"running", "drained"}
+    assert diagnostics.last_write_error is None
+    assert diagnostics.last_flush_run_id is None
+    assert diagnostics.last_flush_status == "none"
+    assert diagnostics.last_flush_error is None
+    assert not hasattr(diagnostics, "dropped_reports")
