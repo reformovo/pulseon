@@ -738,6 +738,77 @@ mod tests {
     }
 
     #[test]
+    fn finish_run_drains_reports_and_closes_existing_run_handle()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-close-admission")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-close-admission")),
+        )?;
+        let run_handle = client.run_handle(run.clone());
+        run_handle.log_metric_at_step("train/loss", 0, 0.25)?;
+
+        let finished = client.finish_run(&run.run_id)?;
+        let late_log = run_handle.log_metric_at_step("train/loss", 1, 0.125);
+        let points = client.query_metric(
+            &run.run_id,
+            &MetricKey::from_string("train/loss"),
+            None,
+            None,
+            None,
+        )?;
+
+        assert_eq!(finished.status, RunStatus::Finished);
+        assert_eq!(points.len(), 1);
+        assert!(
+            matches!(late_log, Err(EngineError::RunClosed { .. })),
+            "expected late log to raise RunClosed, got {late_log:?}",
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finish_run_releases_writer_lock_after_terminal_state()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-terminal-lock")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-terminal-lock")),
+        )?;
+        let lock_path = root_path
+            .join(".pulseon")
+            .join("locks")
+            .join("runs")
+            .join("run-terminal-lock.lock");
+
+        client.finish_run(&run.run_id)?;
+        let lock_file = File::options().read(true).write(true).open(lock_path)?;
+        let lock_result = lock_file.try_lock();
+
+        assert!(
+            lock_result.is_ok(),
+            "expected terminal finalization to release writer lock, got {lock_result:?}",
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
     fn run_writer_lock_rejects_second_active_client() -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));

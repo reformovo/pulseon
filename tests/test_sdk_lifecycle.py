@@ -277,3 +277,22 @@ def test_client_finalizes_runs_as_finished_or_failed(
     assert failed.status == "failed"
     assert failed.finished_at is not None
     assert orphan_runs == []
+
+
+def test_finalization_closes_run_for_late_logging(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run.log("train/loss", 0, 0.25)
+
+    finished = client.finish_run(run.run_id)
+
+    with pytest.raises(pulseon.RunClosedError, match="run-1"):
+        run.log("train/loss", 1, 0.125)
+    points = client.query_metric(run.run_id, "train/loss")
+    assert finished.status == "finished"
+    assert [point.value_f64 for point in points] == [0.25]

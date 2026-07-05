@@ -84,7 +84,7 @@ exception priority.
 - [x] Add one active writer client per run using OS advisory run-writer locks.
 - [x] Make `create_run(...)` distinct from `resume_run(...)` for existing run
   IDs and terminal runs.
-- [ ] Close per-run admission before finalization drain so late `run.log(...)`
+- [x] Close per-run admission before finalization drain so late `run.log(...)`
   calls raise `RunClosedError`.
 - [ ] Keep shutdown as client teardown, not run finalization.
 
