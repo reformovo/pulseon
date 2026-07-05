@@ -442,6 +442,43 @@ mod tests {
     }
 
     #[test]
+    fn query_metric_excludes_queued_reports_until_they_are_persisted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        let client = NativeClient {
+            _root_path: root_path.clone(),
+            reporter: MetricReporter::blocked_for_test(1),
+            connection,
+        };
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-queued")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-queued")),
+        )?;
+        let run_handle = client.run_handle(run);
+
+        run_handle.log_metric_at_step("train/loss", 0, 0.25)?;
+        let points = client.query_metric(
+            &run_handle.run_id,
+            &MetricKey::from_string("train/loss"),
+            None,
+            None,
+            None,
+        )?;
+
+        assert_eq!(points, []);
+        assert_eq!(client.diagnostics().pending_reports, 1);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
     fn finish_run_updates_status_and_rejects_second_transition()
     -> Result<(), Box<dyn std::error::Error>> {
         let root_path =

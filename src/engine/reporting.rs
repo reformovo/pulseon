@@ -115,7 +115,7 @@ impl MetricReporter {
     }
 
     #[cfg(test)]
-    fn blocked_for_test(capacity: usize) -> Self {
+    pub(crate) fn blocked_for_test(capacity: usize) -> Self {
         let (sender, receiver) = mpsc::sync_channel(capacity);
         // Keep the receiver alive without draining it to simulate a blocked writer.
         std::mem::forget(receiver);
