@@ -809,6 +809,41 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_tears_down_client_without_finalizing_running_run()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-shutdown-running")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-shutdown-running")),
+        )?;
+        let run_handle = client.run_handle(run.clone());
+
+        client.shutdown(None)?;
+        let log_after_shutdown = run_handle.log_metric_at_step("train/loss", 0, 0.25);
+        let reopened_client = NativeClient::open(&root_path)?;
+        let reopened_run = reopened_client.get_run(&run.run_id)?;
+        let resumed_run = reopened_client.resume_run(&run.run_id)?;
+
+        assert!(
+            matches!(log_after_shutdown, Err(EngineError::ClientClosed)),
+            "expected closed client error after shutdown, got {log_after_shutdown:?}",
+        );
+        assert_eq!(reopened_run.status, RunStatus::Running);
+        assert!(reopened_run.finished_at.is_none());
+        assert_eq!(resumed_run.run_id, run.run_id);
+        reopened_client.shutdown(None)?;
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
     fn run_writer_lock_rejects_second_active_client() -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));

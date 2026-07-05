@@ -86,7 +86,7 @@ exception priority.
   IDs and terminal runs.
 - [x] Close per-run admission before finalization drain so late `run.log(...)`
   calls raise `RunClosedError`.
-- [ ] Keep shutdown as client teardown, not run finalization.
+- [x] Keep shutdown as client teardown, not run finalization.
 
 Exit gate: tests prove active-run lock conflicts, crash-leftover lock-file
 behavior where practical, terminal-run resume rejection, finalization/logging

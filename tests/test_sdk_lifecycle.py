@@ -296,3 +296,25 @@ def test_finalization_closes_run_for_late_logging(
     points = client.query_metric(run.run_id, "train/loss")
     assert finished.status == "finished"
     assert [point.value_f64 for point in points] == [0.25]
+
+
+def test_shutdown_does_not_finalize_running_runs(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+
+    client.shutdown()
+
+    with pytest.raises(pulseon.ClientClosedError):
+        run.log("train/loss", 0, 0.25)
+    reopened_client = pulseon.init(root_path)
+    running_run = reopened_client.get_run(run.run_id)
+    resumed_run = reopened_client.resume_run(run.run_id)
+    assert running_run.status == "running"
+    assert running_run.finished_at is None
+    assert resumed_run.run_id == run.run_id
