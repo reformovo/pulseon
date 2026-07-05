@@ -112,6 +112,54 @@ def test_client_resumes_existing_run_for_logging(tmp_path: pathlib.Path) -> None
     assert [point.value_f64 for point in points] == [0.25]
 
 
+def test_active_run_lock_conflict_and_release_after_shutdown(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    first_client = pulseon.init(root_path)
+    project = first_client.create_project("local training", project_id="project-1")
+    run = first_client.create_run(project.project_id, "baseline", run_id="run-1")
+    second_client = pulseon.init(root_path)
+
+    with pytest.raises(pulseon.RunAlreadyActiveError, match="run-1"):
+        second_client.resume_run(run.run_id)
+
+    first_client.shutdown()
+    resumed = second_client.resume_run(run.run_id)
+
+    assert resumed.run_id == run.run_id
+
+
+def test_leftover_lock_file_does_not_block_resume(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    first_client = pulseon.init(root_path)
+    project = first_client.create_project("local training", project_id="project-1")
+    run = first_client.create_run(
+        project.project_id,
+        "baseline",
+        run_id="run/leftover lock",
+    )
+    first_client.shutdown()
+    lock_file = (
+        root_path
+        / ".pulseon"
+        / "locks"
+        / "runs"
+        / "run%2Fleftover%20lock.lock"
+    )
+
+    resumed = pulseon.init(root_path).resume_run(run.run_id)
+
+    assert lock_file.is_file()
+    assert resumed.run_id == run.run_id
+
+
 def test_client_lists_project_runs_for_summary_queries(
     tmp_path: pathlib.Path,
 ) -> None:

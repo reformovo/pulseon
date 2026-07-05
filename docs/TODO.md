@@ -81,7 +81,7 @@ exception priority.
 
 #### Phase 4: Run Admission, Locks, And Finalization
 
-- [ ] Add one active writer client per run using OS advisory run-writer locks.
+- [x] Add one active writer client per run using OS advisory run-writer locks.
 - [ ] Make `create_run(...)` distinct from `resume_run(...)` for existing run
   IDs and terminal runs.
 - [ ] Close per-run admission before finalization drain so late `run.log(...)`
