@@ -151,8 +151,10 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
-    pub fn shutdown(&self) -> bool {
-        self._inner.shutdown()
+    #[pyo3(signature = (timeout=None))]
+    pub fn shutdown(&self, timeout: Option<f64>) -> PyResult<()> {
+        let timeout = timeout.map(duration_from_seconds).transpose()?;
+        self._inner.shutdown(timeout).map_err(runtime_error)
     }
 
     pub fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -161,12 +163,16 @@ impl PyClient {
 
     pub fn __exit__(
         &self,
-        _exc_type: &Bound<'_, PyAny>,
+        exc_type: &Bound<'_, PyAny>,
         _exc_value: &Bound<'_, PyAny>,
         _traceback: &Bound<'_, PyAny>,
-    ) -> bool {
-        self.shutdown();
-        false
+    ) -> PyResult<bool> {
+        let user_exception_active = !exc_type.is_none();
+        match self._inner.shutdown(None) {
+            Ok(()) => Ok(false),
+            Err(_) if user_exception_active => Ok(false),
+            Err(error) => Err(runtime_error(error)),
+        }
     }
 
     pub fn diagnostics(&self) -> PyDiagnostics {
@@ -453,6 +459,15 @@ fn is_uri_path(path: &Path) -> bool {
     path.to_string_lossy().contains("://")
 }
 
+fn duration_from_seconds(seconds: f64) -> PyResult<std::time::Duration> {
+    if seconds < 0.0 || !seconds.is_finite() {
+        return Err(InvalidConfigurationError::new_err(
+            "shutdown timeout must be a finite non-negative number",
+        ));
+    }
+    Ok(std::time::Duration::from_secs_f64(seconds))
+}
+
 fn runtime_error(error: crate::engine::EngineError) -> PyErr {
     let message = error.to_string();
     match error {
@@ -474,6 +489,11 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
             PulseOnError::new_err(message)
         }
         crate::engine::EngineError::MetricQueueFull => MetricQueueFullError::new_err(message),
+        crate::engine::EngineError::MetricWriterFailed { .. } => {
+            MetricWriterFailedError::new_err(message)
+        }
+        crate::engine::EngineError::MetricDrainTimeout => MetricDrainTimeoutError::new_err(message),
+        crate::engine::EngineError::ClientClosed => ClientClosedError::new_err(message),
         _ => PulseOnError::new_err(message),
     }
 }
