@@ -319,6 +319,53 @@ mod tests {
     }
 
     #[test]
+    fn report_metric_can_succeed_after_queue_full_error() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let reporter = MetricReporter {
+            inner: Arc::new(MetricReporterInner {
+                sender: Mutex::new(Some(sender)),
+                diagnostics: Arc::new(MetricReporterDiagnosticsInner::default()),
+                worker: Mutex::new(None),
+            }),
+        };
+
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.25,
+            )
+            .expect("first report should enter the queue");
+        assert!(matches!(
+            reporter.report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.125,
+            ),
+            Err(EngineError::MetricQueueFull)
+        ));
+
+        receiver
+            .try_recv()
+            .expect("queued report should be available");
+        reporter.inner.diagnostics.decrement_pending();
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.0625,
+            )
+            .expect("later report should enter the queue after capacity is freed");
+
+        let diagnostics = reporter.diagnostics();
+        assert_eq!(diagnostics.queue_full_errors, 1);
+        assert_eq!(diagnostics.pending_reports, 1);
+    }
+
+    #[test]
     fn drain_for_returns_false_when_pending_report_is_not_written() {
         let reporter = MetricReporter::blocked_for_test(1);
         reporter
