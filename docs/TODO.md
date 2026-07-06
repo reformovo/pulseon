@@ -168,7 +168,7 @@ the roadmap.
 
 #### Phase 7: Batch Persistence And Aggregate Repair
 
-- [ ] Add a reproducible persistence benchmark that reports setup,
+- [x] Add a reproducible persistence benchmark that reports setup,
   admission-only logging, background writer drain, shutdown, and finalization
   timings across repeated runs.
 - [ ] Replace per-report writer inserts with true batch-oriented DuckLake
