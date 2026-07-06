@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
@@ -6,8 +7,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::engine::EngineError;
-use crate::engine::time::timestamp_from_millis;
-use crate::engine::write::NativeWriteStore;
+use crate::engine::time::{timestamp_as_rfc3339, timestamp_from_millis};
+use crate::engine::write::percent_encode_metric_key;
 use crate::model::metric::{MetricKey, Step};
 use crate::model::run::RunId;
 
@@ -382,6 +383,16 @@ struct MetricReport {
     value_f64: f64,
 }
 
+struct MetricPointBatchRow {
+    run_id: String,
+    metric_key: String,
+    metric_key_encoded: String,
+    step: i64,
+    timestamp: String,
+    value_f64: f64,
+    ingested_at: String,
+}
+
 fn take_mutex_value<T>(mutex: &Mutex<Option<T>>) -> Option<T> {
     let mut guard: MutexGuard<'_, Option<T>> = mutex.lock().ok()?;
     guard.take()
@@ -410,11 +421,10 @@ fn metric_worker(
                 diagnostics.decrement_pending_by(batch_len);
             }
             Err(error) => {
-                diagnostics.set_last_write_error(error.to_string());
+                let message = sanitize_metric_write_error(&error);
+                diagnostics.set_last_write_error(message.clone());
                 diagnostics.set_writer_failed();
-                return Err(EngineError::MetricWriterFailed {
-                    message: error.to_string(),
-                });
+                return Err(EngineError::MetricWriterFailed { message });
             }
         }
     }
@@ -471,7 +481,7 @@ fn retry_metric_batch_write(
                 return Ok(next_millis);
             }
             Err(error) if retry_count < WRITER_MAX_RETRIES => {
-                diagnostics.set_last_write_error(error.to_string());
+                diagnostics.set_last_write_error(sanitize_metric_write_error(&error));
                 diagnostics.set_writer_retrying();
                 sleep(backoff);
                 retry_count += 1;
@@ -490,35 +500,112 @@ fn write_metric_batch(
     let connection = connection
         .lock()
         .map_err(|_| EngineError::ConnectionLockPoisoned)?;
-    let store = NativeWriteStore::new(&connection);
+    let mut next_steps = HashMap::new();
+    let mut rows = Vec::with_capacity(batch.len());
     let mut ingested_at_millis = next_ingested_at_millis.max(chrono::Utc::now().timestamp_millis());
     for report in batch {
-        match report.step {
-            Some(step) => {
-                let timestamp = timestamp_from_millis("timestamp", ingested_at_millis)?;
-                let ingested_at = timestamp_from_millis("ingested_at", ingested_at_millis)?;
-                store.log_metric_at_step_with_timestamps(
-                    &report.run_id,
-                    &report.metric_key,
-                    step,
-                    report.value_f64,
-                    timestamp,
-                    ingested_at,
-                )?;
-            }
-            None => {
-                store.log_metric(&report.run_id, &report.metric_key, report.value_f64)?;
-            }
-        }
+        let step = assign_batch_step(&connection, &mut next_steps, report)?;
+        let timestamp = timestamp_from_millis("timestamp", ingested_at_millis)?;
+        let ingested_at = timestamp_from_millis("ingested_at", ingested_at_millis)?;
+        rows.push(MetricPointBatchRow {
+            run_id: report.run_id.as_str().to_owned(),
+            metric_key: report.metric_key.as_str().to_owned(),
+            metric_key_encoded: percent_encode_metric_key(report.metric_key.as_str()),
+            step: step.value(),
+            timestamp: timestamp_as_rfc3339(timestamp),
+            value_f64: report.value_f64,
+            ingested_at: timestamp_as_rfc3339(ingested_at),
+        });
         ingested_at_millis += 1;
     }
+    append_metric_point_rows(&connection, &rows)?;
     Ok(ingested_at_millis)
+}
+
+fn sanitize_metric_write_error(error: &EngineError) -> String {
+    match error {
+        EngineError::DuckDb(_) => "append metric batch failed".to_owned(),
+        EngineError::Storage { operation, .. } => {
+            format!("metric writer storage operation failed while {operation}")
+        }
+        _ => error.to_string(),
+    }
+}
+
+fn assign_batch_step(
+    connection: &duckdb::Connection,
+    next_steps: &mut HashMap<(RunId, MetricKey), i64>,
+    report: &MetricReport,
+) -> Result<Step, EngineError> {
+    let key = (report.run_id.clone(), report.metric_key.clone());
+    let next_step = match next_steps.get(&key) {
+        Some(next_step) => *next_step,
+        None => {
+            let loaded = load_next_metric_step(connection, &report.run_id, &report.metric_key)?;
+            next_steps.insert(key.clone(), loaded);
+            loaded
+        }
+    };
+    let step = report.step.unwrap_or_else(|| Step::new(next_step));
+    next_steps.insert(key, next_step.max(step.value().saturating_add(1)));
+    Ok(step)
+}
+
+fn load_next_metric_step(
+    connection: &duckdb::Connection,
+    run_id: &RunId,
+    metric_key: &MetricKey,
+) -> Result<i64, EngineError> {
+    connection
+        .query_row(
+            "SELECT coalesce(max(step) + 1, 0)
+             FROM dl.metric_points
+             WHERE run_id = ?
+               AND metric_key = ?",
+            (run_id.as_str(), metric_key.as_str()),
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+fn append_metric_point_rows(
+    connection: &duckdb::Connection,
+    rows: &[MetricPointBatchRow],
+) -> Result<(), EngineError> {
+    let mut appender = connection.appender_with_columns_to_catalog_and_db(
+        "metric_points",
+        "dl",
+        "main",
+        &[
+            "run_id",
+            "metric_key",
+            "metric_key_encoded",
+            "step",
+            "timestamp",
+            "value_f64",
+            "ingested_at",
+        ],
+    )?;
+    for row in rows {
+        appender.append_row(duckdb::params![
+            row.run_id.as_str(),
+            row.metric_key.as_str(),
+            row.metric_key_encoded.as_str(),
+            row.step,
+            row.timestamp.as_str(),
+            row.value_f64,
+            row.ingested_at.as_str(),
+        ])?;
+    }
+    appender.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::bootstrap::open_native_connection;
+    use crate::engine::write::NativeWriteStore;
     use crate::model::types::ProjectId;
 
     #[test]
@@ -816,6 +903,23 @@ mod tests {
     }
 
     #[test]
+    fn retry_metric_batch_write_sanitizes_duckdb_errors() {
+        let diagnostics = MetricReporterDiagnosticsInner::default();
+
+        let result = retry_metric_batch_write(
+            || Err(EngineError::DuckDb(duckdb::Error::InvalidQuery)),
+            &diagnostics,
+            |_| {},
+        );
+
+        assert!(matches!(result, Err(EngineError::DuckDb(_))));
+        assert_eq!(
+            diagnostics.snapshot().last_write_error.as_deref(),
+            Some("append metric batch failed"),
+        );
+    }
+
+    #[test]
     fn collect_metric_batch_stops_at_report_threshold() {
         let (sender, receiver) = mpsc::sync_channel(METRIC_BATCH_MAX_REPORTS + 1);
         for step in 0..=METRIC_BATCH_MAX_REPORTS {
@@ -835,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn write_metric_batch_assigns_ingested_at_in_enqueue_order()
+    fn write_metric_batch_appends_rows_and_assigns_ingested_at_in_enqueue_order()
     -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-reporter-{}", uuid::Uuid::new_v4()));
@@ -877,6 +981,42 @@ mod tests {
         assert_eq!(stored[2].1, stored[1].1 + 1);
         assert_eq!(next_ingested_at_millis, stored[2].1 + 1);
         assert!(stored[0].1 >= first_ingested_at_millis);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn write_metric_batch_does_not_refresh_aggregates_before_accounting()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-reporter-{}", uuid::Uuid::new_v4()));
+        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        {
+            let connection = connection.lock().expect("test connection lock");
+            connection.execute(
+                "INSERT INTO __ducklake_metadata_dl.pulseon_projects (project_id, name, created_at)
+                 VALUES ('project-1', 'local training', now())",
+                [],
+            )?;
+            NativeWriteStore::new(&connection).create_run(
+                &ProjectId::from_string("project-1"),
+                "baseline",
+                Some(RunId::from_string("run-1")),
+            )?;
+        }
+
+        write_metric_batch(&connection, &[metric_report(0)], 1_700_000_000_000)?;
+
+        let connection = connection.lock().expect("test connection lock");
+        let aggregate_count: u64 = connection.query_row(
+            "SELECT count(*)
+             FROM __ducklake_metadata_dl.pulseon_metric_aggregates
+             WHERE run_id = 'run-1'
+               AND metric_key = 'train/loss'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(aggregate_count, 0);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }

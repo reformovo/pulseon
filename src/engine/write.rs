@@ -159,6 +159,34 @@ impl<'connection> NativeWriteStore<'connection> {
         self.refresh_metric_aggregate(run_id, metric_key)
     }
 
+    pub fn rebuild_metric_aggregates_for_run(&self, run_id: &RunId) -> Result<(), EngineError> {
+        self.connection.execute(
+            "DELETE FROM __ducklake_metadata_dl.pulseon_metric_aggregates
+             WHERE run_id = ?",
+            [run_id.as_str()],
+        )?;
+        self.connection.execute(
+            "INSERT INTO __ducklake_metadata_dl.pulseon_metric_aggregates
+                 (run_id, metric_key, effective_count, last_step, last_value_f64,
+                  min_value_f64, max_value_f64)
+             SELECT run_id, metric_key, count(*), arg_max(step, step), arg_max(value_f64, step),
+                    min(value_f64), max(value_f64)
+             FROM (
+                 SELECT *,
+                        row_number() OVER (
+                            PARTITION BY run_id, metric_key, step
+                            ORDER BY ingested_at DESC, rowid DESC
+                        ) AS write_rank
+                 FROM dl.metric_points
+                 WHERE run_id = ?
+             )
+             WHERE write_rank = 1
+             GROUP BY run_id, metric_key",
+            [run_id.as_str()],
+        )?;
+        Ok(())
+    }
+
     fn run_exists(&self, run_id: &RunId) -> Result<bool, EngineError> {
         let count: i64 = self.connection.query_row(
             "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs WHERE run_id = ?",
@@ -219,7 +247,7 @@ impl<'connection> NativeWriteStore<'connection> {
     }
 }
 
-fn percent_encode_metric_key(value: &str) -> String {
+pub(crate) fn percent_encode_metric_key(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
         match byte {

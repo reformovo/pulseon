@@ -7,7 +7,7 @@ import pathlib
 from tests import helpers
 
 
-def test_client_queries_metric_points_and_summaries(
+def test_client_queries_metric_points_and_terminal_summaries(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
@@ -24,6 +24,7 @@ def test_client_queries_metric_points_and_summaries(
         "train/loss",
         expected_count=2,
     )
+    client.finish_run(run.run_id)
     summaries = client.query_metric_summaries([run.run_id], "train/loss")
     diagnostics = client.diagnostics()
 
@@ -41,7 +42,7 @@ def test_client_queries_metric_points_and_summaries(
     assert diagnostics.last_write_error is None
 
 
-def test_client_discovers_metrics_from_aggregate_state(
+def test_active_run_point_queries_do_not_depend_on_aggregate_state(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
@@ -64,6 +65,25 @@ def test_client_discovers_metrics_from_aggregate_state(
         expected_count=1,
     )
 
+    points = client.query_metric(run.run_id, "train/loss")
+    metrics = client.list_metrics(run.run_id)
+
+    assert [point.value_f64 for point in points] == [0.25]
+    assert metrics == []
+
+
+def test_terminal_run_metric_discovery_uses_rebuilt_aggregate_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run.log("eval/accuracy", 0, 0.8)
+    run.log("train/loss", 0, 0.25)
+
+    client.finish_run(run.run_id)
     metrics = client.list_metrics(run.run_id)
 
     assert [metric.metric_key for metric in metrics] == [
