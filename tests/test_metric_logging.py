@@ -6,8 +6,12 @@ import pathlib
 
 import pytest
 
+from tests import helpers
 
-def test_run_log_requires_explicit_step(tmp_path: pathlib.Path) -> None:
+
+def test_v2_api_contract_requires_explicit_step_and_reports_diagnostics(
+    tmp_path: pathlib.Path,
+) -> None:
     import pulseon
 
     client = pulseon.init(tmp_path / "pulseon")
@@ -28,10 +32,7 @@ def test_run_log_requires_explicit_step(tmp_path: pathlib.Path) -> None:
     assert diagnostics.last_flush_run_id is None
     assert diagnostics.last_flush_status == "none"
     assert diagnostics.last_flush_error is None
-    for removed_field in (
-        "accepted_reports",
-        "dropped_reports",
-        "failed_reports",
-        "writer_drained",
-    ):
+    for field in helpers.V2_DIAGNOSTIC_FIELDS:
+        assert hasattr(diagnostics, field)
+    for removed_field in helpers.V2_REMOVED_DIAGNOSTIC_FIELDS:
         assert not hasattr(diagnostics, removed_field)
