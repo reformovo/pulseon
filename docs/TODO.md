@@ -123,6 +123,33 @@ Exit gate: correctness gates pass, the benchmark result and environment are
 recorded, and any deferred SQLite or S3-compatible storage scope is explicit in
 the roadmap.
 
+#### Phase 7: Batch Persistence And Aggregate Repair
+
+- [ ] Add a reproducible persistence benchmark that reports setup,
+  admission-only logging, background writer drain, shutdown, and finalization
+  timings across repeated runs.
+- [ ] Replace per-report writer inserts with true batch-oriented DuckLake
+  appends for `metric_points`, preserving enqueue order and writer-assigned
+  strictly increasing `ingested_at` values within each batch.
+- [ ] Keep writer retry and diagnostics semantics batch-aware: count reports as
+  persisted only after the DuckLake batch append succeeds, preserve pending
+  reports on failed batches, and keep `last_write_error` sanitized.
+- [ ] Remove per-report `metric_aggregates` refresh from the background writer;
+  active-run aggregate/index state may be dirty while metric reporting is in
+  progress.
+- [ ] Refresh or rebuild `metric_aggregates` once after finalization drain
+  completes and all reports admitted before the close barrier are persisted.
+- [ ] Keep active-run point queries reading persisted `metric_points` directly;
+  do not make query freshness depend on `metric_aggregates` during active
+  reporting.
+- [ ] Record before/after benchmark results and update release notes with the
+  measured backlog drain and finalization timings.
+
+Exit gate: a 1,000-report same-key backlog drain no longer spends tens of
+seconds in shutdown, correctness gates still pass, aggregate summaries are
+fresh after run finalization, and query paths still read persisted
+`metric_points` without merging queued in-memory reports.
+
 ### V2 Metric Reporting Contract
 
 - [ ] Replace silent drop-on-full behavior with a Python-visible
