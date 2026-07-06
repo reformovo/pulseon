@@ -185,7 +185,7 @@ the roadmap.
 - [x] Keep active-run point queries reading persisted `metric_points` directly;
   do not make query freshness depend on `metric_aggregates` during active
   reporting.
-- [ ] Record before/after benchmark results and update release notes with the
+- [x] Record before/after benchmark results and update release notes with the
   measured backlog drain and finalization timings.
 
 Exit gate: a 1,000-report same-key backlog drain no longer spends tens of
