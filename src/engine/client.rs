@@ -655,15 +655,6 @@ pub struct NativeRun {
 }
 
 impl NativeRun {
-    pub fn log_metric(&self, metric_key: &str, value_f64: f64) -> Result<(), EngineError> {
-        self.reporter.report_metric(
-            self.run_id.clone(),
-            MetricKey::from_string(metric_key),
-            None,
-            value_f64,
-        )
-    }
-
     pub fn log_metric_at_step(
         &self,
         metric_key: &str,
@@ -674,7 +665,7 @@ impl NativeRun {
             self.reporter.report_metric(
                 self.run_id.clone(),
                 MetricKey::from_string(metric_key),
-                Some(Step::new(step)),
+                Step::new(step),
                 value_f64,
             )
         })

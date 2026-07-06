@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
@@ -63,7 +62,7 @@ impl MetricReporter {
         &self,
         run_id: RunId,
         metric_key: MetricKey,
-        step: Option<Step>,
+        step: Step,
         value_f64: f64,
     ) -> Result<(), EngineError> {
         let sender = self
@@ -419,7 +418,7 @@ impl MetricReporterDiagnosticsInner {
 struct MetricReport {
     run_id: RunId,
     metric_key: MetricKey,
-    step: Option<Step>,
+    step: Step,
     value_f64: f64,
     enqueue_sequence: u64,
 }
@@ -544,18 +543,16 @@ fn write_metric_batch(
     let connection = connection
         .lock()
         .map_err(|_| EngineError::ConnectionLockPoisoned)?;
-    let mut next_steps = HashMap::new();
     let mut rows = Vec::with_capacity(batch.len());
     let mut ingested_at_millis = next_ingested_at_millis.max(chrono::Utc::now().timestamp_millis());
     for report in batch {
-        let step = assign_batch_step(&connection, &mut next_steps, report)?;
         let timestamp = timestamp_from_millis("timestamp", ingested_at_millis)?;
         let ingested_at = timestamp_from_millis("ingested_at", ingested_at_millis)?;
         rows.push(MetricPointBatchRow {
             run_id: report.run_id.as_str().to_owned(),
             metric_key: report.metric_key.as_str().to_owned(),
             metric_key_encoded: percent_encode_metric_key(report.metric_key.as_str()),
-            step: step.value(),
+            step: report.step.value(),
             timestamp: timestamp_as_rfc3339(timestamp),
             value_f64: report.value_f64,
             ingested_at: timestamp_as_rfc3339(ingested_at),
@@ -574,42 +571,6 @@ fn sanitize_metric_write_error(error: &EngineError) -> String {
         }
         _ => error.to_string(),
     }
-}
-
-fn assign_batch_step(
-    connection: &duckdb::Connection,
-    next_steps: &mut HashMap<(RunId, MetricKey), i64>,
-    report: &MetricReport,
-) -> Result<Step, EngineError> {
-    let key = (report.run_id.clone(), report.metric_key.clone());
-    let next_step = match next_steps.get(&key) {
-        Some(next_step) => *next_step,
-        None => {
-            let loaded = load_next_metric_step(connection, &report.run_id, &report.metric_key)?;
-            next_steps.insert(key.clone(), loaded);
-            loaded
-        }
-    };
-    let step = report.step.unwrap_or_else(|| Step::new(next_step));
-    next_steps.insert(key, next_step.max(step.value().saturating_add(1)));
-    Ok(step)
-}
-
-fn load_next_metric_step(
-    connection: &duckdb::Connection,
-    run_id: &RunId,
-    metric_key: &MetricKey,
-) -> Result<i64, EngineError> {
-    connection
-        .query_row(
-            "SELECT coalesce(max(step) + 1, 0)
-             FROM dl.metric_points
-             WHERE run_id = ?
-               AND metric_key = ?",
-            (run_id.as_str(), metric_key.as_str()),
-            |row| row.get(0),
-        )
-        .map_err(Into::into)
 }
 
 fn append_metric_point_rows(
@@ -654,7 +615,7 @@ mod tests {
 
     #[test]
     fn metric_report_struct_footprint_matches_capacity_planning() {
-        assert_eq!(std::mem::size_of::<MetricReport>(), 80);
+        assert_eq!(std::mem::size_of::<MetricReport>(), 72);
         assert_eq!(std::mem::align_of::<MetricReport>(), 8);
     }
 
@@ -666,14 +627,14 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(0),
                 0.25,
             )
             .expect("first report should enter the queue");
         let result = reporter.report_metric(
             RunId::from_string("run-1"),
             MetricKey::from_string("train/loss"),
-            None,
+            Step::new(1),
             0.125,
         );
 
@@ -700,7 +661,7 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(0),
                 0.25,
             )
             .expect("first report should enter the queue");
@@ -708,7 +669,7 @@ mod tests {
             reporter.report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(1),
                 0.125,
             ),
             Err(EngineError::MetricQueueFull)
@@ -723,7 +684,7 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(2),
                 0.0625,
             )
             .expect("later report should enter the queue after capacity is freed");
@@ -744,7 +705,7 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(0),
                 0.25,
             )
             .expect("report should enter the queue");
@@ -760,7 +721,7 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(0),
                 0.25,
             )
             .expect("first report should enter the queue");
@@ -769,7 +730,7 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(1),
                 0.125,
             )
             .expect("later report should enter the queue");
@@ -791,7 +752,7 @@ mod tests {
         let result = reporter.report_metric(
             RunId::from_string("run-1"),
             MetricKey::from_string("train/loss"),
-            None,
+            Step::new(0),
             0.25,
         );
 
@@ -808,7 +769,7 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(0),
                 0.25,
             )
             .expect("report should enter the queue");
@@ -820,7 +781,7 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(1),
                 0.125,
             )
             .expect("shutdown timeout should leave admission open");
@@ -843,7 +804,7 @@ mod tests {
                 let result = logging_reporter.report_metric(
                     RunId::from_string("run-1"),
                     MetricKey::from_string("train/loss"),
-                    Some(Step::new(step)),
+                    Step::new(step),
                     step as f64,
                 );
                 if result.is_ok() && !sent_started {
@@ -876,7 +837,7 @@ mod tests {
             .report_metric(
                 RunId::from_string("run-1"),
                 MetricKey::from_string("train/loss"),
-                None,
+                Step::new(0),
                 0.25,
             )
             .expect("report should enter the queue");
@@ -891,7 +852,7 @@ mod tests {
         let log_after_shutdown = reporter.report_metric(
             RunId::from_string("run-1"),
             MetricKey::from_string("train/loss"),
-            None,
+            Step::new(1),
             0.125,
         );
 
@@ -935,7 +896,7 @@ mod tests {
         let result = reporter.report_metric(
             RunId::from_string("run-1"),
             MetricKey::from_string("train/loss"),
-            Some(Step::new(0)),
+            Step::new(0),
             0.25,
         );
 
@@ -1144,9 +1105,7 @@ mod tests {
         MetricReport {
             run_id: RunId::from_string("run-1"),
             metric_key: MetricKey::from_string("train/loss"),
-            step: Some(Step::new(
-                i64::try_from(step).expect("test step should fit i64"),
-            )),
+            step: Step::new(i64::try_from(step).expect("test step should fit i64")),
             value_f64: step as f64,
             enqueue_sequence: u64::try_from(step + 1).expect("test step should fit u64"),
         }

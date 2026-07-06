@@ -666,7 +666,7 @@ focused tests, and the relevant verification gate.
 - [x] Delete Python tests that depend on `context_shutdown_timeout`, or rewrite
   them to exercise explicit bounded APIs instead of adding another hidden
   public hook.
-- [ ] Tighten the Rust metric reporter to require explicit `Step` values.
+- [x] Tighten the Rust metric reporter to require explicit `Step` values.
   Replace `MetricReport.step: Option<Step>` with `Step`, remove
   `assign_batch_step(...)` and `load_next_metric_step(...)`, and keep
   `run.log(key, step, value)` as the only Python-facing logging path.
