@@ -694,12 +694,12 @@ focused tests, and the relevant verification gate.
 
 ### Cleanup Exit Gate
 
-- [ ] No public Python API remains outside the v2 contract unless it is
+- [x] No public Python API remains outside the v2 contract unless it is
   explicitly documented as intentional.
-- [ ] No automatic-step metric logging path remains in production Rust code.
-- [ ] README, ADRs, catalog/data boundary docs, `_pulseon.pyi`, and tests agree
+- [x] No automatic-step metric logging path remains in production Rust code.
+- [x] README, ADRs, catalog/data boundary docs, `_pulseon.pyi`, and tests agree
   on the supported v2 surface.
-- [ ] `cargo check`, `cargo test`, `uv run pyright`, and `uv run pytest` pass.
+- [x] `cargo check`, `cargo test`, `uv run pyright`, and `uv run pytest` pass.
 
 ## Post-V2 Backlog
 
