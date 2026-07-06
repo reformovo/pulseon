@@ -34,7 +34,6 @@ def init(
     catalog_backend: str = "duckdb",
     catalog_path: str | os.PathLike[str] | None = None,
     metric_queue_capacity: int = 65536,
-    context_shutdown_timeout: float | None = None,
 ) -> Client:
     return _pulseon.init(
         path,
@@ -42,7 +41,6 @@ def init(
         catalog_backend=catalog_backend,
         catalog_path=catalog_path,
         metric_queue_capacity=metric_queue_capacity,
-        context_shutdown_timeout=context_shutdown_timeout,
     )
 
 

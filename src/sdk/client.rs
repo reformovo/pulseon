@@ -53,15 +53,11 @@ sdk_exception!(StorageError, "A storage operation failed.");
 #[pyclass(name = "Client", module = "pulseon._pulseon", unsendable)]
 pub struct PyClient {
     _inner: NativeClient,
-    context_shutdown_timeout: Option<Duration>,
 }
 
 impl PyClient {
-    fn new(inner: NativeClient, context_shutdown_timeout: Option<Duration>) -> Self {
-        Self {
-            _inner: inner,
-            context_shutdown_timeout,
-        }
+    fn new(inner: NativeClient) -> Self {
+        Self { _inner: inner }
     }
 }
 
@@ -194,7 +190,7 @@ impl PyClient {
         _traceback: &Bound<'_, PyAny>,
     ) -> PyResult<bool> {
         let user_exception_active = !exc_type.is_none();
-        match self._inner.shutdown(self.context_shutdown_timeout) {
+        match self._inner.shutdown(None) {
             Ok(()) => Ok(false),
             Err(error) if user_exception_active => {
                 attach_exception_context(exc_value, runtime_error(error));
@@ -434,8 +430,7 @@ impl From<MetricAggregate> for PyMetricSummary {
         data_path=None,
         catalog_backend="duckdb",
         catalog_path=None,
-        metric_queue_capacity=65536,
-        context_shutdown_timeout=None
+        metric_queue_capacity=65536
     )
 )]
 pub fn init(
@@ -444,11 +439,7 @@ pub fn init(
     catalog_backend: &str,
     catalog_path: Option<PathBuf>,
     metric_queue_capacity: i64,
-    context_shutdown_timeout: Option<f64>,
 ) -> PyResult<PyClient> {
-    let context_shutdown_timeout = context_shutdown_timeout
-        .map(|seconds| duration_from_seconds("context_shutdown_timeout", seconds))
-        .transpose()?;
     let metric_queue_capacity = validate_init_config(
         data_path.as_deref(),
         catalog_backend,
@@ -456,7 +447,7 @@ pub fn init(
         metric_queue_capacity,
     )?;
     NativeClient::open_with_storage_config(path, catalog_path, data_path, metric_queue_capacity)
-        .map(|client| PyClient::new(client, context_shutdown_timeout))
+        .map(PyClient::new)
         .map_err(runtime_error)
 }
 

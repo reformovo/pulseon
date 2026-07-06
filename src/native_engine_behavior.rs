@@ -152,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn log_metric_assigns_next_step_per_run_and_metric_key() -> Result<(), Box<dyn Error>> {
+    fn log_metric_at_step_stores_explicit_steps() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
@@ -162,8 +162,8 @@ mod tests {
         let metric_key = MetricKey::from_string("train/loss");
 
         // When
-        let first = store.log_metric(&run.run_id, &metric_key, 0.25)?;
-        let second = store.log_metric(&run.run_id, &metric_key, 0.125)?;
+        let first = store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
+        let second = store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.125)?;
 
         // Then
         assert_eq!(first.step.value(), 0);
@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn log_metric_stores_ingested_at_for_metric_points() -> Result<(), Box<dyn Error>> {
+    fn log_metric_at_step_stores_ingested_at_for_metric_points() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
@@ -201,7 +201,7 @@ mod tests {
         let metric_key = MetricKey::from_string("train/loss");
 
         // When
-        let point = store.log_metric(&run.run_id, &metric_key, 0.25)?;
+        let point = store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
 
         // Then
         assert!(point.ingested_at >= point.timestamp);
@@ -352,6 +352,7 @@ mod tests {
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.5)?;
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.125)?;
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(2), 0.375)?;
+        store.rebuild_metric_aggregates_for_run(&run.run_id)?;
 
         // When
         let aggregate = query.metric_aggregate(&run.run_id, &metric_key)?;
@@ -381,6 +382,8 @@ mod tests {
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(0), 0.4)?;
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(1), 0.2)?;
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(2), 0.1)?;
+        store.rebuild_metric_aggregates_for_run(&run_a.run_id)?;
+        store.rebuild_metric_aggregates_for_run(&run_b.run_id)?;
 
         // When
         let summaries = query
@@ -411,7 +414,8 @@ mod tests {
     }
 
     #[test]
-    fn repair_metric_aggregate_refreshes_stale_old_step_overwrite() -> Result<(), Box<dyn Error>> {
+    fn rebuild_metric_aggregates_refreshes_stale_old_step_overwrite() -> Result<(), Box<dyn Error>>
+    {
         // Given
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
@@ -422,6 +426,7 @@ mod tests {
         let metric_key = MetricKey::from_string("train/loss");
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.5)?;
+        store.rebuild_metric_aggregates_for_run(&run.run_id)?;
         connection.execute(
             "INSERT INTO dl.metric_points VALUES
                  ('run-1', 'train/loss', 'train%2Floss', 0, now(), 0.125, now())",
@@ -430,7 +435,7 @@ mod tests {
         let stale = query.metric_aggregate(&run.run_id, &metric_key)?;
 
         // When
-        store.repair_metric_aggregate(&run.run_id, &metric_key)?;
+        store.rebuild_metric_aggregates_for_run(&run.run_id)?;
         let repaired = query.metric_aggregate(&run.run_id, &metric_key)?;
 
         // Then

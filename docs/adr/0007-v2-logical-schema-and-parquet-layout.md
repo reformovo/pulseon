@@ -39,6 +39,11 @@ contract. Its value uses RFC 3986 percent-encoding over UTF-8 bytes: unreserved
 ASCII characters `[A-Za-z0-9._~-]` remain literal and all other bytes are
 encoded as uppercase `%XX`.
 
+That value is the logical column value. DuckLake may escape physical
+Hive-style partition directory values again when writing paths, so the logical
+value `train%2Floss` can appear on disk as
+`metric_key_encoded=train%252Floss/`.
+
 `metric_aggregates` may be built or refreshed after run finalization rather
 than maintained during active metric reporting. During active runs, fresh
 queries read persisted `metric_points` through DuckLake.
@@ -65,16 +70,17 @@ for the current process's most recent terminal-run flush attempt; they are not
 stored as long-lived catalog state.
 
 Normal `finish_run(...)` and `fail_run(...)` paths must close metric admission
-for the run, drain reports admitted before that close barrier, and only then
+for the run, drain through the current client's enqueue barrier, and only then
 flush inline metric data. Later `run.log(...)` calls for the run raise
 `RunClosedError`. The boundary is the Rust admission gate order, not Python
 call start time: reports admitted before the close barrier are drained; reports
-that reach admission after the barrier fail. If drain fails or times out,
-PulseOn must not write terminal run state or proceed to the flush step. This
-guarantees that, on the normal API path, there are no queued reports for the run
-before flush begins. It does not cover process crash, `SIGKILL`, power loss, or
-reports that were only queued and not yet persisted before finalization
-started.
+that reach admission after the barrier fail. The drain is intentionally
+client-wide because the writer owns one ordered queue per client. If drain
+fails or times out, PulseOn must not write terminal run state or proceed to the
+flush step. This guarantees that, on the normal API path, reports admitted by
+the client before the close barrier are persisted before flush begins. It does
+not cover process crash, `SIGKILL`, power loss, or reports that were only
+queued and not yet persisted before finalization started.
 
 V2 does not support concurrent writer clients for the same run. A local
 run-writer lock is required before a client can create or resume a writable
