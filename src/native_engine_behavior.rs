@@ -44,7 +44,7 @@ mod tests {
 
     fn insert_project(connection: &duckdb::Connection) -> Result<(), duckdb::Error> {
         connection.execute(
-            "INSERT INTO dl.projects VALUES (?1, ?2, now())",
+            "INSERT INTO __ducklake_metadata_dl.pulseon_projects VALUES (?1, ?2, now())",
             duckdb::params![PROJECT_ID, PROJECT_NAME],
         )?;
         Ok(())
@@ -57,16 +57,29 @@ mod tests {
         let connection = dataset.connection();
 
         // Then
-        let table_count: i64 = connection.query_row(
-            "SELECT count(*)
-             FROM information_schema.tables
-             WHERE table_catalog = 'dl'
-               AND table_schema = 'main'
-               AND table_name IN ('projects', 'runs', 'metric_points', 'metric_aggregates')",
+        let project_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_projects",
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(table_count, 4);
+        let run_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs",
+            [],
+            |row| row.get(0),
+        )?;
+        let aggregate_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_metric_aggregates",
+            [],
+            |row| row.get(0),
+        )?;
+        let point_count: i64 =
+            connection.query_row("SELECT count(*) FROM dl.metric_points", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(
+            (project_count, run_count, aggregate_count, point_count),
+            (0, 0, 0, 0),
+        );
         seed_minimal_v1_data(connection)?;
 
         let metric_total: f64 = connection.query_row(
@@ -100,8 +113,11 @@ mod tests {
         // Then
         assert_ne!(generated.run_id, supplied.run_id);
         assert_eq!(supplied.run_id.as_str(), "run-user-1");
-        let run_count: i64 =
-            connection.query_row("SELECT count(*) FROM dl.runs", [], |row| row.get(0))?;
+        let run_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs",
+            [],
+            |row| row.get(0),
+        )?;
         assert_eq!(run_count, 2);
         Ok(())
     }
@@ -126,8 +142,11 @@ mod tests {
             Err(crate::engine::EngineError::RunAlreadyExists { .. })
         ));
         assert_eq!(resumed, created);
-        let run_count: i64 =
-            connection.query_row("SELECT count(*) FROM dl.runs", [], |row| row.get(0))?;
+        let run_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs",
+            [],
+            |row| row.get(0),
+        )?;
         assert_eq!(run_count, 1);
         Ok(())
     }
@@ -149,17 +168,25 @@ mod tests {
         // Then
         assert_eq!(first.step.value(), 0);
         assert_eq!(second.step.value(), 1);
-        let stored: Vec<(i64, f64, bool)> = connection
+        let stored: Vec<(i64, f64, String, bool)> = connection
             .prepare(
-                "SELECT step, value_f64, ingested_at IS NOT NULL
+                "SELECT step, value_f64, metric_key_encoded, ingested_at IS NOT NULL
                  FROM dl.metric_points
                  WHERE run_id = 'run-1'
                    AND metric_key = 'train/loss'
                  ORDER BY step",
             )?
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
             .collect::<Result<_, _>>()?;
-        assert_eq!(stored, vec![(0, 0.25, true), (1, 0.125, true)]);
+        assert_eq!(
+            stored,
+            vec![
+                (0, 0.25, "train%2Floss".to_owned(), true),
+                (1, 0.125, "train%2Floss".to_owned(), true),
+            ]
+        );
         Ok(())
     }
 
@@ -286,14 +313,14 @@ mod tests {
             "CREATE MACRO lttb(x, y, n) AS [
                  list({x: x, y: y} ORDER BY x)[1],
                  list({x: x, y: y} ORDER BY x)[len(list({x: x, y: y} ORDER BY x))]];
-             INSERT INTO dl.projects VALUES ('project-1', 'local training', now());
-             INSERT INTO dl.runs VALUES
+             INSERT INTO __ducklake_metadata_dl.pulseon_projects VALUES ('project-1', 'local training', now());
+             INSERT INTO __ducklake_metadata_dl.pulseon_runs VALUES
                  ('run-1', 'project-1', 'metrics', 'running', now(), now(), NULL);
              INSERT INTO dl.metric_points VALUES
-                 ('run-1', 'train/loss', 0, now(), 0.5, now()),
-                 ('run-1', 'train/loss', 1, now(), 0.25, now()),
-                 ('run-1', 'train/loss', 2, now(), 0.125, now()),
-                 ('run-1', 'train/loss', 3, now(), 0.0625, now());",
+                 ('run-1', 'train/loss', 'train%2Floss', 0, now(), 0.5, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 1, now(), 0.25, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 2, now(), 0.125, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 3, now(), 0.0625, now());",
         )?;
         let query = NativeQueryStore::new(connection);
         let run_id = RunId::from_string("run-1");
@@ -397,7 +424,7 @@ mod tests {
         store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.5)?;
         connection.execute(
             "INSERT INTO dl.metric_points VALUES
-                 ('run-1', 'train/loss', 0, now(), 0.125, now())",
+                 ('run-1', 'train/loss', 'train%2Floss', 0, now(), 0.125, now())",
             [],
         )?;
         let stale = query.metric_aggregate(&run.run_id, &metric_key)?;

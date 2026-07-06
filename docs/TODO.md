@@ -94,14 +94,14 @@ races, and lock release after terminal state is written.
 
 #### Phase 5: Catalog/Data Boundary And Parquet Flush
 
-- [ ] Move v2 application tables to catalog-owned `pulseon_projects`,
+- [x] Move v2 application tables to catalog-owned `pulseon_projects`,
   `pulseon_runs`, and `pulseon_metric_aggregates`.
-- [ ] Support custom local `data_path` and DuckDB catalog defaults first.
-- [ ] Add `metric_key_encoded` and partition flushed `metric_points` Parquet by
+- [x] Support custom local `data_path` and DuckDB catalog defaults first.
+- [x] Add `metric_key_encoded` and partition flushed `metric_points` Parquet by
   `run_id` and `metric_key_encoded`.
-- [ ] Implement terminal-run Parquet flush, `flush_run_data(run_id)`, flush
+- [x] Implement terminal-run Parquet flush, `flush_run_data(run_id)`, flush
   timeout, idempotent retry, and runtime-only flush diagnostics.
-- [ ] Validate SQLite only after the same real DuckLake-backed storage tests
+- [x] Validate SQLite only after the same real DuckLake-backed storage tests
   pass; otherwise explicitly defer it before v2 completion.
 
 Exit gate: tests inspect catalog tables, logical query behavior, partitioned
@@ -215,10 +215,10 @@ the roadmap.
 - [ ] Document `last_flush_error` as the most recent flush error, not the
   current flush state; callers must use `last_flush_status` for current flush
   state.
-- [ ] When finalization writes terminal run state but Parquet flush fails,
+- [x] When finalization writes terminal run state but Parquet flush fails,
   raise `MetricFlushError` and update diagnostics to
   `last_flush_run_id=<run_id>` and `last_flush_status=failed`.
-- [ ] When `flush_run_data(run_id, timeout=...)` times out, leave the terminal
+- [x] When `flush_run_data(run_id, timeout=...)` times out, leave the terminal
   run unchanged, update diagnostics to `last_flush_run_id=<run_id>` and
   `last_flush_status=timed_out`, and allow a later retry.
 - [ ] Keep ordinary diagnostics, including `last_write_error`, sanitized:
@@ -383,7 +383,7 @@ the roadmap.
   reports reaching admission after the barrier raise `RunClosedError`.
 - [ ] Use an internal global enqueue sequence for drain barriers and writer
   ordering; do not expose it in the public schema.
-- [ ] Guarantee that normal finalization starts Parquet flush only after all
+- [x] Guarantee that normal finalization starts Parquet flush only after all
   reports queued before the close barrier are persisted.
 - [ ] Make unbounded finalization wait until drain completes or writer failure.
 - [ ] If the writer is already failed, make `finish_run(...)` and
@@ -413,83 +413,83 @@ the roadmap.
 
 ### V2 Storage Boundary
 
-- [ ] Support custom Parquet `data_path` independently from the catalog path.
-- [ ] Publicly support only local filesystem `data_path` values in v2.
-- [ ] Reject S3-compatible `data_path` values in v2 with
+- [x] Support custom Parquet `data_path` independently from the catalog path.
+- [x] Publicly support only local filesystem `data_path` values in v2.
+- [x] Reject S3-compatible `data_path` values in v2 with
   `InvalidConfigurationError`.
-- [ ] Support DuckDB and SQLite as configurable native DuckLake catalog
-  backends.
-- [ ] Treat DuckDB as the first validation target. SQLite is complete only if
+- [x] Support DuckDB as the configurable native DuckLake catalog backend and
+  explicitly defer SQLite until real DuckLake-backed parity tests pass.
+- [x] Treat DuckDB as the first validation target. SQLite is complete only if
   real DuckLake-backed tests prove the same schema, transaction, locking, and
   multi-client behavior.
-- [ ] If SQLite cannot satisfy the v2 storage contract without special
+- [x] If SQLite cannot satisfy the v2 storage contract without special
   compatibility behavior, explicitly block v2 or defer SQLite support rather
   than presenting fake backend compatibility.
-- [ ] Store project, run, and aggregate application state in catalog tables
+- [x] Store project, run, and aggregate application state in catalog tables
   named `pulseon_projects`, `pulseon_runs`, and `pulseon_metric_aggregates`
   rather than DuckLake logical tables.
-- [ ] Select `catalog_backend` explicitly instead of inferring it from
+- [x] Select `catalog_backend` explicitly instead of inferring it from
   `catalog_path` suffix.
-- [ ] Accept only case-sensitive `catalog_backend` values `"duckdb"` and
-  `"sqlite"`; unknown values raise `InvalidConfigurationError`.
-- [ ] Keep PostgreSQL catalog support out of the v2 public surface.
-- [ ] Add a keyword-based init shape covering `data_path`, `catalog_backend`,
+- [x] Accept only startup-supported `catalog_backend="duckdb"`; unknown values
+  and deferred `catalog_backend="sqlite"` raise `InvalidConfigurationError`.
+- [x] Keep PostgreSQL catalog support out of the v2 public surface.
+- [x] Add a keyword-based init shape covering `data_path`, `catalog_backend`,
   `catalog_path`, and `metric_queue_capacity`.
-- [ ] Use default paths of `<project>/.pulseon/catalog.ducklake` for DuckDB,
-  `<project>/.pulseon/catalog.sqlite` for SQLite, and
-  `<project>/.pulseon/data` for Parquet data.
-- [ ] Partition flushed `metric_points` Parquet by `run_id` and
+- [x] Use default paths of `<project>/.pulseon/catalog.ducklake` for DuckDB and
+  `<project>/.pulseon/data` for Parquet data; SQLite defaults are deferred
+  with SQLite support.
+- [x] Partition flushed `metric_points` Parquet by `run_id` and
   `metric_key_encoded`.
-- [ ] Add `metric_key_encoded` to `metric_points`; keep raw user-facing
+- [x] Add `metric_key_encoded` to `metric_points`; keep raw user-facing
   `metric_key` unencoded.
-- [ ] Treat `metric_key_encoded` as a public Parquet schema and partition
+- [x] Treat `metric_key_encoded` as a public Parquet schema and partition
   column.
-- [ ] Use RFC 3986 percent-encoding for `metric_key_encoded`: preserve
+- [x] Use RFC 3986 percent-encoding for `metric_key_encoded`: preserve
   `[A-Za-z0-9._~-]` and encode all other UTF-8 bytes as uppercase `%XX`.
-- [ ] Do not denormalize `project_id` into the v2 metric point fact table.
-- [ ] Do not store project metadata in the data path; project-scoped query and
+- [x] Do not denormalize `project_id` into the v2 metric point fact table.
+- [x] Do not store project metadata in the data path; project-scoped query and
   export logic must use catalog `pulseon_runs(project_id)` metadata.
-- [ ] Do not partition metric point Parquet by `step`; allow DuckLake to create
+- [x] Do not partition metric point Parquet by `step`; allow DuckLake to create
   multiple files within the same run/key partition.
 - [ ] Build or refresh `metric_aggregates` after run finalization instead of
   maintaining aggregate freshness during active metric reporting.
-- [ ] Keep active-run metric discovery/query freshness based on persisted
+- [x] Keep active-run metric discovery/query freshness based on persisted
   DuckLake `metric_points`, not queued in-memory reports.
-- [ ] Flush inline `metric_points` data to Parquet when runs reach a terminal
+- [x] Flush inline `metric_points` data to Parquet when runs reach a terminal
   state, with failed flush operations surfaced in runtime-only diagnostics.
-- [ ] If Parquet flush fails after terminal lifecycle state is written, raise
+- [x] If Parquet flush fails after terminal lifecycle state is written, raise
   `MetricFlushError` and do not roll back the terminal run state.
-- [ ] Keep ordinary `MetricFlushError` messages focused on the failed operation
+- [x] Keep ordinary `MetricFlushError` messages focused on the failed operation
   and basename; do not expose full local paths by default.
-- [ ] Add `flush_run_data(run_id)` to retry Parquet flush for a terminal run
+- [x] Add `flush_run_data(run_id)` to retry Parquet flush for a terminal run
   without changing run lifecycle state.
-- [ ] Make `flush_run_data(run_id)` idempotent when terminal-run data is
+- [x] Make `flush_run_data(run_id)` idempotent when terminal-run data is
   already Parquet-visible.
-- [ ] Use idempotent `flush_run_data(run_id)` as restart-time recovery if the
+- [x] Use idempotent `flush_run_data(run_id)` as restart-time recovery if the
   process crashes after Parquet flush succeeds but before the caller observes
   success; do not add durable Parquet visibility state for this case.
-- [ ] Make `flush_run_data(run_id)` return `None` on success; failure and
+- [x] Make `flush_run_data(run_id)` return `None` on success; failure and
   timeout are reported only through exceptions.
-- [ ] Support an optional timeout for `flush_run_data(run_id)`; without a
+- [x] Support an optional timeout for `flush_run_data(run_id)`; without a
   timeout, wait until flush succeeds or fails.
-- [ ] Make `flush_run_data(run_id)` timeout raise `MetricFlushTimeoutError`.
-- [ ] Make `flush_run_data(run_id)` reject non-terminal runs with
+- [x] Make `flush_run_data(run_id)` timeout raise `MetricFlushTimeoutError`.
+- [x] Make `flush_run_data(run_id)` reject non-terminal runs with
   `InvalidRunStateError`.
-- [ ] Serialize terminal-run flush work inside one client with a client-wide
+- [x] Serialize terminal-run flush work inside one client with a client-wide
   flush mutex. Concurrent `flush_run_data(...)` calls wait for that mutex; if a
   timeout is supplied, waiting for the mutex counts against the timeout.
-- [ ] Do not use repeated `finish_run(...)` or `fail_run(...)` calls as Parquet
+- [x] Do not use repeated `finish_run(...)` or `fail_run(...)` calls as Parquet
   flush retry; closed or terminal runs should use `flush_run_data(run_id)`.
-- [ ] Do not add a durable `run_storage_state` or Parquet visibility catalog
+- [x] Do not add a durable `run_storage_state` or Parquet visibility catalog
   table in v2.
-- [ ] Ensure normal finalization drains queued reports for the run before
+- [x] Ensure normal finalization drains queued reports for the run before
   flushing inline metric data; do not flush if drain fails or times out.
-- [ ] Accept that shutdown can leave running-run metric data persisted in
+- [x] Accept that shutdown can leave running-run metric data persisted in
   DuckLake but not forced Parquet-visible; only terminal runs require Parquet
   visibility in v2.
-- [ ] Keep Parquet as the v2 open compatibility boundary even if future
+- [x] Keep Parquet as the v2 open compatibility boundary even if future
   ClickHouse support augments or replaces the serving/query backend.
-- [ ] Do not enforce physical uniqueness for `metric_points`; keep logical
+- [x] Do not enforce physical uniqueness for `metric_points`; keep logical
   last-write-wins semantics for duplicate `(run_id, metric_key, step)` rows.
 
 ### Queue Capacity Planning

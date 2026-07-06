@@ -151,6 +151,15 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
+    #[pyo3(signature = (run_id, timeout=None))]
+    pub fn flush_run_data(&self, run_id: &str, timeout: Option<f64>) -> PyResult<()> {
+        let run_id = RunId::from_string(run_id);
+        let timeout = timeout.map(duration_from_seconds).transpose()?;
+        self._inner
+            .flush_run_data(&run_id, timeout)
+            .map_err(runtime_error)
+    }
+
     #[pyo3(signature = (timeout=None))]
     pub fn shutdown(&self, timeout: Option<f64>) -> PyResult<()> {
         let timeout = timeout.map(duration_from_seconds).transpose()?;
@@ -421,7 +430,7 @@ pub fn init(
         catalog_path.as_deref(),
         metric_queue_capacity,
     )?;
-    NativeClient::open_with_metric_queue_capacity(path, metric_queue_capacity)
+    NativeClient::open_with_storage_config(path, catalog_path, data_path, metric_queue_capacity)
         .map(PyClient::new)
         .map_err(runtime_error)
 }
@@ -437,7 +446,12 @@ fn validate_init_config(
             "metric_queue_capacity must be between 1 and 1048576",
         ));
     }
-    if !matches!(catalog_backend, "duckdb" | "sqlite") {
+    if catalog_backend == "sqlite" {
+        return Err(InvalidConfigurationError::new_err(
+            "catalog_backend='sqlite' is deferred until real DuckLake-backed SQLite tests pass",
+        ));
+    }
+    if catalog_backend != "duckdb" {
         return Err(InvalidConfigurationError::new_err(format!(
             "unsupported catalog_backend: {catalog_backend}"
         )));
@@ -496,6 +510,8 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
             MetricWriterFailedError::new_err(message)
         }
         crate::engine::EngineError::MetricDrainTimeout => MetricDrainTimeoutError::new_err(message),
+        crate::engine::EngineError::MetricFlush { .. } => MetricFlushError::new_err(message),
+        crate::engine::EngineError::MetricFlushTimeout => MetricFlushTimeoutError::new_err(message),
         crate::engine::EngineError::ClientClosed => ClientClosedError::new_err(message),
         _ => PulseOnError::new_err(message),
     }

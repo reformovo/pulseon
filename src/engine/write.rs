@@ -31,7 +31,7 @@ impl<'connection> NativeWriteStore<'connection> {
 
         let now = current_timestamp("created_at")?;
         self.connection.execute(
-            "INSERT INTO dl.runs
+            "INSERT INTO __ducklake_metadata_dl.pulseon_runs
                  (run_id, project_id, name, status, created_at, started_at, finished_at)
              VALUES (?, ?, ?, ?, ?, ?, NULL)",
             (
@@ -59,7 +59,7 @@ impl<'connection> NativeWriteStore<'connection> {
         let result = self.connection.query_row(
             "SELECT run_id, project_id, name, status, epoch_ms(created_at), epoch_ms(started_at),
                     epoch_ms(finished_at)
-             FROM dl.runs
+             FROM __ducklake_metadata_dl.pulseon_runs
              WHERE run_id = ?",
             [run_id.as_str()],
             |row| {
@@ -127,11 +127,12 @@ impl<'connection> NativeWriteStore<'connection> {
     ) -> Result<MetricPoint, EngineError> {
         self.connection.execute(
             "INSERT INTO dl.metric_points
-                 (run_id, metric_key, step, timestamp, value_f64, ingested_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
+                 (run_id, metric_key, metric_key_encoded, step, timestamp, value_f64, ingested_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id.as_str(),
                 metric_key.as_str(),
+                percent_encode_metric_key(metric_key.as_str()),
                 step.value(),
                 timestamp_as_rfc3339(timestamp),
                 value_f64,
@@ -160,7 +161,7 @@ impl<'connection> NativeWriteStore<'connection> {
 
     fn run_exists(&self, run_id: &RunId) -> Result<bool, EngineError> {
         let count: i64 = self.connection.query_row(
-            "SELECT count(*) FROM dl.runs WHERE run_id = ?",
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs WHERE run_id = ?",
             [run_id.as_str()],
             |row| row.get(0),
         )?;
@@ -189,13 +190,13 @@ impl<'connection> NativeWriteStore<'connection> {
         metric_key: &MetricKey,
     ) -> Result<(), EngineError> {
         self.connection.execute(
-            "DELETE FROM dl.metric_aggregates
+            "DELETE FROM __ducklake_metadata_dl.pulseon_metric_aggregates
              WHERE run_id = ?
                AND metric_key = ?",
             (run_id.as_str(), metric_key.as_str()),
         )?;
         self.connection.execute(
-            "INSERT INTO dl.metric_aggregates
+            "INSERT INTO __ducklake_metadata_dl.pulseon_metric_aggregates
                  (run_id, metric_key, effective_count, last_step, last_value_f64,
                   min_value_f64, max_value_f64)
              SELECT run_id, metric_key, count(*), arg_max(step, step), arg_max(value_f64, step),
@@ -215,5 +216,36 @@ impl<'connection> NativeWriteStore<'connection> {
             (run_id.as_str(), metric_key.as_str()),
         )?;
         Ok(())
+    }
+}
+
+fn percent_encode_metric_key(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'~' | b'-' => {
+                encoded.push(char::from(byte));
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_encode_metric_key_preserves_unreserved_ascii() {
+        assert_eq!(percent_encode_metric_key("AZaz09._~-"), "AZaz09._~-");
+    }
+
+    #[test]
+    fn percent_encode_metric_key_encodes_path_and_utf8_bytes() {
+        assert_eq!(
+            percent_encode_metric_key("train/loss 零"),
+            "train%2Floss%20%E9%9B%B6"
+        );
     }
 }

@@ -56,7 +56,7 @@ impl<'connection> NativeQueryStore<'connection> {
         let stored = self.connection.query_row(
             "SELECT run_id, metric_key, effective_count, last_step, last_value_f64,
                     min_value_f64, max_value_f64
-             FROM dl.metric_aggregates
+             FROM __ducklake_metadata_dl.pulseon_metric_aggregates
              WHERE run_id = ?
                AND metric_key = ?",
             (run_id.as_str(), metric_key.as_str()),
@@ -94,7 +94,7 @@ impl<'connection> NativeQueryStore<'connection> {
              SELECT summary.run_id, summary.metric_key, summary.effective_count,
                     summary.last_step, summary.last_value_f64, summary.min_value_f64,
                     summary.max_value_f64
-             FROM dl.metric_aggregates AS summary
+             FROM __ducklake_metadata_dl.pulseon_metric_aggregates AS summary
              JOIN requested ON summary.run_id = requested.run_id
              WHERE summary.metric_key = ?
              ORDER BY requested.ordinal"

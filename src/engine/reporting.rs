@@ -21,6 +21,10 @@ const WRITER_RUNNING: u8 = 0;
 const WRITER_RETRYING: u8 = 1;
 const WRITER_FAILED: u8 = 2;
 const WRITER_CLOSED: u8 = 3;
+const FLUSH_RUNNING: u8 = 1;
+const FLUSH_SUCCEEDED: u8 = 2;
+const FLUSH_FAILED: u8 = 3;
+const FLUSH_TIMED_OUT: u8 = 4;
 
 #[derive(Clone)]
 pub struct MetricReporter {
@@ -98,6 +102,22 @@ impl MetricReporter {
 
     pub fn diagnostics(&self) -> MetricReporterDiagnostics {
         self.inner.diagnostics.snapshot()
+    }
+
+    pub(crate) fn set_flush_running(&self, run_id: &RunId) {
+        self.inner.diagnostics.set_flush_running(run_id);
+    }
+
+    pub(crate) fn set_flush_succeeded(&self, run_id: &RunId) {
+        self.inner.diagnostics.set_flush_succeeded(run_id);
+    }
+
+    pub(crate) fn set_flush_failed(&self, run_id: &RunId, message: String) {
+        self.inner.diagnostics.set_flush_failed(run_id, message);
+    }
+
+    pub(crate) fn set_flush_timed_out(&self, run_id: &RunId) {
+        self.inner.diagnostics.set_flush_timed_out(run_id);
     }
 
     pub fn drain_for(&self, timeout: Duration) -> bool {
@@ -210,6 +230,9 @@ struct MetricReporterDiagnosticsInner {
     persisted_reports: AtomicU64,
     writer_state: AtomicU64,
     last_write_error: Mutex<Option<String>>,
+    last_flush_run_id: Mutex<Option<String>>,
+    last_flush_status: AtomicU64,
+    last_flush_error: Mutex<Option<String>>,
 }
 
 impl MetricReporterDiagnosticsInner {
@@ -249,6 +272,39 @@ impl MetricReporterDiagnosticsInner {
     fn set_last_write_error(&self, message: String) {
         if let Ok(mut last_write_error) = self.last_write_error.lock() {
             *last_write_error = Some(message);
+        }
+    }
+
+    fn set_flush_running(&self, run_id: &RunId) {
+        self.set_last_flush_run_id(run_id);
+        self.last_flush_status
+            .store(FLUSH_RUNNING.into(), Ordering::Relaxed);
+    }
+
+    fn set_flush_succeeded(&self, run_id: &RunId) {
+        self.set_last_flush_run_id(run_id);
+        self.last_flush_status
+            .store(FLUSH_SUCCEEDED.into(), Ordering::Relaxed);
+    }
+
+    fn set_flush_failed(&self, run_id: &RunId, message: String) {
+        self.set_last_flush_run_id(run_id);
+        if let Ok(mut last_flush_error) = self.last_flush_error.lock() {
+            *last_flush_error = Some(message);
+        }
+        self.last_flush_status
+            .store(FLUSH_FAILED.into(), Ordering::Relaxed);
+    }
+
+    fn set_flush_timed_out(&self, run_id: &RunId) {
+        self.set_last_flush_run_id(run_id);
+        self.last_flush_status
+            .store(FLUSH_TIMED_OUT.into(), Ordering::Relaxed);
+    }
+
+    fn set_last_flush_run_id(&self, run_id: &RunId) {
+        if let Ok(mut last_flush_run_id) = self.last_flush_run_id.lock() {
+            *last_flush_run_id = Some(run_id.as_str().to_owned());
         }
     }
 
@@ -298,9 +354,23 @@ impl MetricReporterDiagnosticsInner {
                 .lock()
                 .ok()
                 .and_then(|last_write_error| last_write_error.clone()),
-            last_flush_run_id: None,
-            last_flush_status: "none",
-            last_flush_error: None,
+            last_flush_run_id: self
+                .last_flush_run_id
+                .lock()
+                .ok()
+                .and_then(|last_flush_run_id| last_flush_run_id.clone()),
+            last_flush_status: match self.last_flush_status.load(Ordering::Relaxed) as u8 {
+                FLUSH_RUNNING => "running",
+                FLUSH_SUCCEEDED => "succeeded",
+                FLUSH_FAILED => "failed",
+                FLUSH_TIMED_OUT => "timed_out",
+                _ => "none",
+            },
+            last_flush_error: self
+                .last_flush_error
+                .lock()
+                .ok()
+                .and_then(|last_flush_error| last_flush_error.clone()),
         }
     }
 }
@@ -767,7 +837,7 @@ mod tests {
         {
             let connection = connection.lock().expect("test connection lock");
             connection.execute(
-                "INSERT INTO dl.projects (project_id, name, created_at)
+                "INSERT INTO __ducklake_metadata_dl.pulseon_projects (project_id, name, created_at)
                  VALUES ('project-1', 'local training', now())",
                 [],
             )?;

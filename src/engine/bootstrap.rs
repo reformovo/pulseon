@@ -1,14 +1,49 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::engine::EngineError;
 
+pub(crate) struct NativeStorageConfig {
+    catalog_path: PathBuf,
+    data_path: PathBuf,
+}
+
+impl NativeStorageConfig {
+    pub(crate) fn duckdb(
+        root_path: &Path,
+        catalog_path: Option<PathBuf>,
+        data_path: Option<PathBuf>,
+    ) -> Self {
+        let pulseon_path = root_path.join(".pulseon");
+        Self {
+            catalog_path: catalog_path.unwrap_or_else(|| pulseon_path.join("catalog.ducklake")),
+            data_path: data_path.unwrap_or_else(|| pulseon_path.join("data")),
+        }
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn open_native_connection(root_path: &Path) -> Result<duckdb::Connection, EngineError> {
-    let catalog_path = root_path.join("catalog.ducklake");
-    let data_path = root_path.join("data");
-    std::fs::create_dir_all(&data_path)?;
+    open_native_connection_with_config(NativeStorageConfig::duckdb(root_path, None, None))
+}
+
+pub(crate) fn open_native_connection_with_config(
+    config: NativeStorageConfig,
+) -> Result<duckdb::Connection, EngineError> {
+    if let Some(catalog_parent) = config.catalog_path.parent() {
+        std::fs::create_dir_all(catalog_parent).map_err(|source| EngineError::Storage {
+            operation: "creating catalog directory",
+            name: path_basename(catalog_parent),
+            source,
+        })?;
+    }
+    std::fs::create_dir_all(&config.data_path).map_err(|source| EngineError::Storage {
+        operation: "creating data directory",
+        name: path_basename(&config.data_path),
+        source,
+    })?;
 
     let connection = open_duckdb_connection()?;
-    attach_ducklake(&connection, &catalog_path, &data_path)?;
+    attach_ducklake(&connection, &config.catalog_path, &config.data_path)?;
     create_v1_tables(&connection)?;
     Ok(connection)
 }
@@ -38,12 +73,12 @@ fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
 
 pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {
     connection.execute_batch(
-        "CREATE TABLE IF NOT EXISTS dl.projects (
+        "CREATE TABLE IF NOT EXISTS __ducklake_metadata_dl.pulseon_projects (
              project_id VARCHAR NOT NULL,
              name VARCHAR NOT NULL,
              created_at TIMESTAMPTZ NOT NULL
          );
-         CREATE TABLE IF NOT EXISTS dl.runs (
+         CREATE TABLE IF NOT EXISTS __ducklake_metadata_dl.pulseon_runs (
              run_id VARCHAR NOT NULL,
              project_id VARCHAR NOT NULL,
              name VARCHAR NOT NULL,
@@ -55,12 +90,14 @@ pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), En
          CREATE TABLE IF NOT EXISTS dl.metric_points (
              run_id VARCHAR NOT NULL,
              metric_key VARCHAR NOT NULL,
+             metric_key_encoded VARCHAR NOT NULL,
              step BIGINT NOT NULL,
              timestamp TIMESTAMPTZ NOT NULL,
              value_f64 DOUBLE NOT NULL,
              ingested_at TIMESTAMPTZ NOT NULL
          );
-         CREATE TABLE IF NOT EXISTS dl.metric_aggregates (
+         ALTER TABLE dl.metric_points SET PARTITIONED BY (run_id, metric_key_encoded);
+         CREATE TABLE IF NOT EXISTS __ducklake_metadata_dl.pulseon_metric_aggregates (
              run_id VARCHAR NOT NULL,
              metric_key VARCHAR NOT NULL,
              effective_count UBIGINT NOT NULL,
@@ -77,6 +114,13 @@ fn sql_string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+fn path_basename(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("storage path")
+        .to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +128,31 @@ mod tests {
     #[test]
     fn sql_string_literal_escapes_single_quotes() {
         assert_eq!(sql_string_literal("canary's/data"), "'canary''s/data'");
+    }
+
+    #[test]
+    fn create_v1_tables_partitions_metric_points_by_run_and_encoded_key()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-bootstrap-{}", uuid::Uuid::new_v4()));
+        let connection = open_native_connection(&root_path)?;
+
+        let partition_columns: Vec<String> = connection
+            .prepare(
+                "SELECT columns.column_name
+                 FROM __ducklake_metadata_dl.ducklake_partition_column AS partitions
+                 JOIN __ducklake_metadata_dl.ducklake_column AS columns
+                   ON columns.column_id = partitions.column_id
+                 JOIN __ducklake_metadata_dl.ducklake_table AS tables
+                   ON tables.table_id = columns.table_id
+                 WHERE tables.table_name = 'metric_points'
+                 ORDER BY partitions.partition_key_index",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+
+        assert_eq!(partition_columns, ["run_id", "metric_key_encoded"]);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
     }
 }
