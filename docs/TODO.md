@@ -182,7 +182,7 @@ the roadmap.
   progress.
 - [x] Refresh or rebuild `metric_aggregates` once after finalization drain
   completes and all reports admitted before the close barrier are persisted.
-- [ ] Keep active-run point queries reading persisted `metric_points` directly;
+- [x] Keep active-run point queries reading persisted `metric_points` directly;
   do not make query freshness depend on `metric_aggregates` during active
   reporting.
 - [ ] Record before/after benchmark results and update release notes with the
