@@ -110,7 +110,7 @@ DuckDB-backed recovery paths.
 
 #### Phase 6: Performance And Release Hardening
 
-- [ ] Add a reproducible local benchmark command for explicit-step
+- [x] Add a reproducible local benchmark command for explicit-step
   `run.log(...)` throughput.
 - [ ] Measure the actual `MetricReport` memory footprint and update queue
   capacity planning.
