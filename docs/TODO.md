@@ -657,13 +657,13 @@ focused tests, and the relevant verification gate.
 
 ### Cleanup Tasks
 
-- [ ] Remove the public `context_shutdown_timeout` initialization keyword from
+- [x] Remove the public `context_shutdown_timeout` initialization keyword from
   `pulseon.init(...)`, `_pulseon.pyi`, README examples, and Python wrapper
   forwarding. Context-manager exit should use the ordinary unbounded shutdown
   path; bounded drain behavior remains available through explicit
   `client.shutdown(timeout=...)`, `finish_run(..., timeout=...)`, and
   `fail_run(..., timeout=...)`.
-- [ ] Delete Python tests that depend on `context_shutdown_timeout`, or rewrite
+- [x] Delete Python tests that depend on `context_shutdown_timeout`, or rewrite
   them to exercise explicit bounded APIs instead of adding another hidden
   public hook.
 - [ ] Tighten the Rust metric reporter to require explicit `Step` values.
@@ -687,7 +687,7 @@ focused tests, and the relevant verification gate.
   `metric_key_encoded` directories. The logical column value remains RFC 3986
   percent-encoding, while Hive-style partition directory names may escape `%`
   again on disk.
-- [ ] Fix README wording that currently implies DuckDB/SQLite catalog options
+- [x] Fix README wording that currently implies DuckDB/SQLite catalog options
   are both supported. It should say DuckDB is supported in v2 and SQLite is
   deferred until real DuckLake-backed parity tests pass.
 

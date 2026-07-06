@@ -9,7 +9,8 @@ Current focus: plan and implement the 0.1.0a2 native loop:
 - start or resume a run
 - log explicit-step numeric metrics through a bounded async queue
 - query metric series and summaries locally
-- support local DuckDB/SQLite DuckLake catalog options
+- support local DuckDB DuckLake catalog storage
+- defer SQLite catalog support until real DuckLake-backed parity tests pass
 - keep the v2 public data path local-filesystem only
 - keep Parquet as the long-term compatibility boundary
 
@@ -24,7 +25,6 @@ client = pulseon.init(
     catalog_backend="duckdb",
     catalog_path=None,
     metric_queue_capacity=65536,
-    context_shutdown_timeout=None,
 )
 project = client.create_project("local training")
 run = client.create_run(project.project_id, "baseline")
