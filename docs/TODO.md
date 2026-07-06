@@ -24,7 +24,7 @@ until the same DuckLake-backed behavior tests pass against it.
 
 #### Phase 0: Contract Lock
 
-- [ ] Convert the v2 roadmap into testable issue-sized work without changing
+- [x] Convert the v2 roadmap into testable issue-sized work without changing
   runtime behavior.
 - [ ] Add or update test names/fixtures that will own the v2 API, diagnostics,
   queue, writer, storage-layout, locking, finalization, and flush contracts.
@@ -33,6 +33,19 @@ until the same DuckLake-backed behavior tests pass against it.
 
 Exit gate: no product behavior changes yet; `cargo test`, `uv run pyright`, and
 `uv run pytest` still pass on the v1 implementation.
+
+Phase 0 contract-lock notes:
+
+- Phases 1-6 are the issue-sized v2 implementation slices. Each phase keeps an
+  independently reviewable exit gate and owns a bounded public/API, writer,
+  lifecycle, storage, or release-hardening surface.
+- The detailed contract checklists below remain acceptance criteria for those
+  slices. A checked phase item must be backed by Rust or Python behavior tests,
+  public typing/docs where relevant, and the source contract document named at
+  the top of this roadmap.
+- Phase 7 is intentionally outside phase 0 and phase 1-6 completion. It tracks
+  batch persistence and aggregate repair work discovered after the first v2
+  implementation pass.
 
 #### Phase 1: Public API Break And Configuration
 
