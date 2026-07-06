@@ -109,6 +109,11 @@ and `metric_key_encoded`. The encoding uses RFC 3986 percent-encoding over
 UTF-8 bytes: unreserved ASCII characters `[A-Za-z0-9._~-]` remain literal and
 all other bytes are encoded as uppercase `%XX`.
 
+`metric_key_encoded` is the logical column value. DuckLake may escape partition
+directory values again when it writes Hive-style `column=value/` paths, so a
+logical key value such as `train%2Floss` can appear on disk under
+`metric_key_encoded=train%252Floss/`.
+
 V2 does not partition by `step`. Very long metric series may produce multiple
 Parquet files in one run/key partition, but not additional step-based directory
 levels.
@@ -191,12 +196,14 @@ must use explicit APIs. Report counters and `writer_state` are runtime-only
 current-client state. They are not catalog state, not durable history, and are
 not restored when another process opens the same project.
 
-Normal finalization must drain queued reports for the run before the flush
-step. Finalization first closes metric admission for the run, so later
-`run.log(...)` calls for that run raise `RunClosedError` instead of creating
-new queued reports during drain or flush. PulseOn then waits until all reports
-queued before the close barrier are persisted, and only then writes terminal run
-state and flushes inline data to Parquet.
+Normal finalization must drain through the current client's enqueue barrier
+before the flush step. Finalization first closes metric admission for the run,
+so later `run.log(...)` calls for that run raise `RunClosedError` instead of
+creating new queued reports during drain or flush. PulseOn then waits until all
+reports admitted by the client before that close barrier are persisted, and
+only then writes terminal run state and flushes inline data to Parquet. This
+client-wide barrier is intentional: the writer owns one ordered queue per
+client, not independent per-run queues.
 
 If drain fails or times out, PulseOn must not proceed to terminal state or
 flush. This guarantees that, on the normal API path, the run has no queued

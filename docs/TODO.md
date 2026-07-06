@@ -552,8 +552,9 @@ fresh after run finalization, and query paths still read persisted
   flush retry; closed or terminal runs should use `flush_run_data(run_id)`.
 - [x] Do not add a durable `run_storage_state` or Parquet visibility catalog
   table in v2.
-- [x] Ensure normal finalization drains queued reports for the run before
-  flushing inline metric data; do not flush if drain fails or times out.
+- [x] Ensure normal finalization closes run admission and drains through the
+  current client's enqueue barrier before flushing inline metric data; do not
+  flush if drain fails or times out.
 - [x] Accept that shutdown can leave running-run metric data persisted in
   DuckLake but not forced Parquet-visible; only terminal runs require Parquet
   visibility in v2.
@@ -678,12 +679,12 @@ focused tests, and the relevant verification gate.
   `metric_aggregates` per report. Keep only helpers that are still necessary
   for query/storage tests; otherwise delete them and move tests to persisted
   batch data plus finalization-time aggregate rebuild.
-- [ ] Align finalization drain wording with implementation. Either document the
+- [x] Align finalization drain wording with implementation. Either document the
   current client-wide enqueue barrier as intentional, or narrow the
   implementation to a run-scoped drain barrier; do not leave docs saying
   "drain queued reports for the run" while the code waits on all reports in the
   client.
-- [ ] Document DuckLake's physical partition path escaping for
+- [x] Document DuckLake's physical partition path escaping for
   `metric_key_encoded` directories. The logical column value remains RFC 3986
   percent-encoding, while Hive-style partition directory names may escape `%`
   again on disk.

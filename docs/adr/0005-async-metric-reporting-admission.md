@@ -52,15 +52,17 @@ Python call. The writer must assign strictly increasing `ingested_at` values in
 enqueue order, including within one batch, so last-write-wins follows persisted
 batch order without adding a separate public `ingest_seq` column.
 
-Run finalization closes metric admission for that run before draining queued
-reports and writing the terminal run state. After the close barrier, later
-`run.log(...)` calls for that run raise `RunClosedError` instead of creating new
-queued reports. The runtime uses an internal global enqueue sequence for drain
-barriers and writer ordering; it is not part of the public catalog or Parquet
-schema. Finalization/logging races are resolved by the order in which calls
-enter the Rust admission gate, not by Python call start time: a `run.log(...)`
-call admitted before the close barrier is drained; a call that reaches
-admission after the barrier raises `RunClosedError`. If `finish_run(...)` or
+Run finalization closes metric admission for that run before draining through
+the current client's enqueue barrier and writing the terminal run state. After
+the close barrier, later `run.log(...)` calls for that run raise
+`RunClosedError` instead of creating new queued reports. The runtime uses an
+internal global enqueue sequence for drain barriers and writer ordering; it is
+not part of the public catalog or Parquet schema. Finalization/logging races
+are resolved by the order in which calls enter the Rust admission gate, not by
+Python call start time: a `run.log(...)` call admitted before the close barrier
+is drained; a call that reaches admission after the barrier raises
+`RunClosedError`. The drain barrier is client-wide by design because one writer
+queue owns enqueue order for the client. If `finish_run(...)` or
 `fail_run(...)` is called without an explicit timeout, it waits until drain
 completes or the writer fails. If a bounded finalization times out while
 draining, it raises a drain-timeout error and does not write the terminal run
