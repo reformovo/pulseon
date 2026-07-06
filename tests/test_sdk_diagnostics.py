@@ -6,8 +6,10 @@ import pathlib
 
 import pytest
 
+from tests import helpers
 
-def test_client_shutdown_closes_logging_and_context_manager(
+
+def test_v2_shutdown_contract_closes_logging_and_preserves_diagnostics(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
@@ -43,7 +45,9 @@ def test_context_manager_preserves_user_exception(
             raise ValueError("user failure")
 
 
-def test_client_diagnostics_fields_are_read_only(tmp_path: pathlib.Path) -> None:
+def test_v2_diagnostics_contract_fields_are_read_only(
+    tmp_path: pathlib.Path,
+) -> None:
     import pulseon
 
     client = pulseon.init(tmp_path / "pulseon")
@@ -57,12 +61,9 @@ def test_client_diagnostics_fields_are_read_only(tmp_path: pathlib.Path) -> None
     assert diagnostics.last_flush_run_id is None
     assert diagnostics.last_flush_status == "none"
     assert diagnostics.last_flush_error is None
-    for removed_field in (
-        "accepted_reports",
-        "dropped_reports",
-        "failed_reports",
-        "writer_drained",
-    ):
+    for field in helpers.V2_DIAGNOSTIC_FIELDS:
+        assert hasattr(diagnostics, field)
+    for removed_field in helpers.V2_REMOVED_DIAGNOSTIC_FIELDS:
         assert not hasattr(diagnostics, removed_field)
     with pytest.raises(AttributeError):
         setattr(diagnostics, "pending_reports", 1)

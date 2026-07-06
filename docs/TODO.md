@@ -24,15 +24,58 @@ until the same DuckLake-backed behavior tests pass against it.
 
 #### Phase 0: Contract Lock
 
-- [ ] Convert the v2 roadmap into testable issue-sized work without changing
+- [x] Convert the v2 roadmap into testable issue-sized work without changing
   runtime behavior.
-- [ ] Add or update test names/fixtures that will own the v2 API, diagnostics,
+- [x] Add or update test names/fixtures that will own the v2 API, diagnostics,
   queue, writer, storage-layout, locking, finalization, and flush contracts.
-- [ ] Keep `docs/catalog-data-boundary.md`, ADR 0005, ADR 0006, ADR 0007,
+- [x] Keep `docs/catalog-data-boundary.md`, ADR 0005, ADR 0006, ADR 0007,
   `docs/glossary.md`, and this roadmap in sync as terms are sharpened.
 
 Exit gate: no product behavior changes yet; `cargo test`, `uv run pyright`, and
 `uv run pytest` still pass on the v1 implementation.
+
+Phase 0 contract-lock notes:
+
+- Phases 1-6 are the issue-sized v2 implementation slices. Each phase keeps an
+  independently reviewable exit gate and owns a bounded public/API, writer,
+  lifecycle, storage, or release-hardening surface.
+- The detailed contract checklists below remain acceptance criteria for those
+  slices. A checked phase item must be backed by Rust or Python behavior tests,
+  public typing/docs where relevant, and the source contract document named at
+  the top of this roadmap.
+- Phase 7 is intentionally outside phase 0 and phase 1-6 completion. It tracks
+  batch persistence and aggregate repair work discovered after the first v2
+  implementation pass.
+
+V2 contract test ownership:
+
+- Public API and configuration: `tests/test_metric_logging.py`,
+  `tests/test_sdk_lifecycle.py`, `tests/test_sdk_errors.py`, and
+  `python/pulseon/_pulseon.pyi`.
+- Diagnostics shape: `tests/helpers.py` owns the shared field lists;
+  `tests/test_sdk_diagnostics.py` and `tests/test_metric_logging.py` assert the
+  Python-facing object shape.
+- Queue and writer behavior: Rust tests in `src/engine/reporting.rs` own
+  queue-full, retry, drain, shutdown, batch-threshold, and `ingested_at`
+  contracts.
+- Storage layout, locking, finalization, and flush behavior: Rust tests in
+  `src/engine/client.rs` own catalog/data layout, run-writer locks, close
+  barriers, finalization drain, Parquet partitioning, and flush diagnostics;
+  Python lifecycle tests cover the public SDK surface.
+
+V2 documentation sync audit:
+
+- `docs/catalog-data-boundary.md`, ADR 0006, and ADR 0007 now use the same v2
+  catalog backend boundary: DuckDB is validated first, SQLite is named but
+  deferred, and PostgreSQL remains future shared-catalog work.
+- `docs/glossary.md` records the v2 product terms that carry phase 1-6
+  behavior: terminal run, run finalization, run-writer lock, queued report,
+  accepted report, persisted metric point, reporting diagnostics, and flush
+  diagnostics.
+- ADR 0005, ADR 0006, and ADR 0007 remain accepted decision records and match
+  the roadmap's phase 1-6 scope. The phase 7 backlog remains explicit for true
+  batch persistence and aggregate repair instead of being retroactively folded
+  into phase 0.
 
 #### Phase 1: Public API Break And Configuration
 

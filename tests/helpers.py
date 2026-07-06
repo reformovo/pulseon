@@ -8,6 +8,26 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pulseon
 
+V2_DIAGNOSTIC_FIELDS = (
+    "pending_reports",
+    "queue_full_errors",
+    "persisted_reports",
+    "writer_state",
+    "last_write_error",
+    "last_flush_run_id",
+    "last_flush_status",
+    "last_flush_error",
+)
+
+V2_REMOVED_DIAGNOSTIC_FIELDS = (
+    "accepted_reports",
+    "queued_reports",
+    "dropped_reports",
+    "failed_reports",
+    "enqueued_reports",
+    "writer_drained",
+)
+
 
 def wait_for_metric_points(
     client: pulseon.Client,
