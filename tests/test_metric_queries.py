@@ -24,24 +24,18 @@ def test_client_queries_metric_points_and_summaries(
         "train/loss",
         expected_count=2,
     )
-    summaries = client.query_metric_summaries([run.run_id], "train/loss")
     diagnostics = client.diagnostics()
 
     assert [point.step for point in points] == [0, 1]
     assert [point.value_f64 for point in points] == [0.25, 0.125]
     assert isinstance(points[0], pulseon.MetricPoint)
-    assert len(summaries) == 1
-    assert isinstance(summaries[0], pulseon.MetricSummary)
-    assert summaries[0].effective_count == 2
-    assert summaries[0].last_step == 1
-    assert summaries[0].last_value_f64 == 0.125
     assert diagnostics.pending_reports == 0
     assert diagnostics.persisted_reports >= 2
     assert diagnostics.writer_state == "drained"
     assert diagnostics.last_write_error is None
 
 
-def test_client_discovers_metrics_from_aggregate_state(
+def test_active_run_metric_discovery_can_lag_persisted_points(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
@@ -66,12 +60,7 @@ def test_client_discovers_metrics_from_aggregate_state(
 
     metrics = client.list_metrics(run.run_id)
 
-    assert [metric.metric_key for metric in metrics] == [
-        "eval/accuracy",
-        "train/loss",
-    ]
-    assert [metric.effective_count for metric in metrics] == [1, 1]
-    assert isinstance(metrics[0], pulseon.MetricSummary)
+    assert metrics == []
 
 
 def test_client_query_metric_applies_range_filters_and_short_max_points(

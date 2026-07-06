@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::engine::EngineError;
 use crate::engine::time::{timestamp_as_rfc3339, timestamp_from_millis};
-use crate::engine::write::{NativeWriteStore, percent_encode_metric_key};
+use crate::engine::write::percent_encode_metric_key;
 use crate::model::metric::{MetricKey, Step};
 use crate::model::run::RunId;
 
@@ -419,12 +419,6 @@ fn metric_worker(
                 next_ingested_at_millis = next_millis;
                 diagnostics.increment_persisted_by(batch_len);
                 diagnostics.decrement_pending_by(batch_len);
-                if let Err(error) = refresh_metric_batch_aggregates(&connection, &batch) {
-                    let message = sanitize_metric_write_error(&error);
-                    diagnostics.set_last_write_error(message.clone());
-                    diagnostics.set_writer_failed();
-                    return Err(EngineError::MetricWriterFailed { message });
-                }
             }
             Err(error) => {
                 let message = sanitize_metric_write_error(&error);
@@ -528,20 +522,6 @@ fn write_metric_batch(
     Ok(ingested_at_millis)
 }
 
-fn refresh_metric_batch_aggregates(
-    connection: &Arc<Mutex<duckdb::Connection>>,
-    batch: &[MetricReport],
-) -> Result<(), EngineError> {
-    let connection = connection
-        .lock()
-        .map_err(|_| EngineError::ConnectionLockPoisoned)?;
-    let store = NativeWriteStore::new(&connection);
-    for report in batch {
-        store.repair_metric_aggregate(&report.run_id, &report.metric_key)?;
-    }
-    Ok(())
-}
-
 fn sanitize_metric_write_error(error: &EngineError) -> String {
     match error {
         EngineError::DuckDb(_) => "append metric batch failed".to_owned(),
@@ -625,6 +605,7 @@ fn append_metric_point_rows(
 mod tests {
     use super::*;
     use crate::engine::bootstrap::open_native_connection;
+    use crate::engine::write::NativeWriteStore;
     use crate::model::types::ProjectId;
 
     #[test]

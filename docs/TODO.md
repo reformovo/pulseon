@@ -177,7 +177,7 @@ the roadmap.
 - [x] Keep writer retry and diagnostics semantics batch-aware: count reports as
   persisted only after the DuckLake batch append succeeds, preserve pending
   reports on failed batches, and keep `last_write_error` sanitized.
-- [ ] Remove per-report `metric_aggregates` refresh from the background writer;
+- [x] Remove per-report `metric_aggregates` refresh from the background writer;
   active-run aggregate/index state may be dirty while metric reporting is in
   progress.
 - [ ] Refresh or rebuild `metric_aggregates` once after finalization drain
