@@ -28,7 +28,7 @@ until the same DuckLake-backed behavior tests pass against it.
   runtime behavior.
 - [x] Add or update test names/fixtures that will own the v2 API, diagnostics,
   queue, writer, storage-layout, locking, finalization, and flush contracts.
-- [ ] Keep `docs/catalog-data-boundary.md`, ADR 0005, ADR 0006, ADR 0007,
+- [x] Keep `docs/catalog-data-boundary.md`, ADR 0005, ADR 0006, ADR 0007,
   `docs/glossary.md`, and this roadmap in sync as terms are sharpened.
 
 Exit gate: no product behavior changes yet; `cargo test`, `uv run pyright`, and
@@ -62,6 +62,20 @@ V2 contract test ownership:
   `src/engine/client.rs` own catalog/data layout, run-writer locks, close
   barriers, finalization drain, Parquet partitioning, and flush diagnostics;
   Python lifecycle tests cover the public SDK surface.
+
+V2 documentation sync audit:
+
+- `docs/catalog-data-boundary.md`, ADR 0006, and ADR 0007 now use the same v2
+  catalog backend boundary: DuckDB is validated first, SQLite is named but
+  deferred, and PostgreSQL remains future shared-catalog work.
+- `docs/glossary.md` records the v2 product terms that carry phase 1-6
+  behavior: terminal run, run finalization, run-writer lock, queued report,
+  accepted report, persisted metric point, reporting diagnostics, and flush
+  diagnostics.
+- ADR 0005, ADR 0006, and ADR 0007 remain accepted decision records and match
+  the roadmap's phase 1-6 scope. The phase 7 backlog remains explicit for true
+  batch persistence and aggregate repair instead of being retroactively folded
+  into phase 0.
 
 #### Phase 1: Public API Break And Configuration
 

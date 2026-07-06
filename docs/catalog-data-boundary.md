@@ -21,9 +21,10 @@ data area / object storage
   partitioned metric_points Parquet files
 ```
 
-For local native mode, the catalog database may be backed by a DuckDB catalog
-file or SQLite. PostgreSQL is a future shared-catalog option. Object storage is
-for the data area, not for the catalog database file itself.
+For local native mode, the v2 catalog database is backed by a DuckDB catalog
+file. SQLite remains a named but deferred backend until real DuckLake-backed
+parity tests pass. PostgreSQL is a future shared-catalog option. Object storage
+is for the data area, not for the catalog database file itself.
 
 The default project-local store is:
 

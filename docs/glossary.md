@@ -7,6 +7,11 @@ release.
 ## Product Terms
 - **Project**: Lightweight namespace for related runs; metadata stays minimal.
 - **Run**: One training execution with user-supplied or generated `run_id`.
+- **Terminal run**: A run whose lifecycle state is `finished` or `failed`.
+  Terminal runs are queryable, but they cannot be resumed for metric reporting.
+- **Run finalization**: The explicit transition that closes metric admission
+  for one run, drains reports admitted before the close barrier, writes a
+  terminal lifecycle state, and then attempts terminal-run Parquet visibility.
 - **Metric key**: User-facing metric name; path escaping is storage detail.
 - **Metric series**: All points for one `(run_id, metric_key)` pair.
 - **Metric point**: One numeric observation in a metric series.
@@ -32,13 +37,17 @@ release.
 - **Flush diagnostics**: Runtime-only client diagnostics for the current
   process's latest terminal-run data flush attempt. They are not catalog state
   and are not recoverable after process restart.
+- **Run-writer lock**: Local OS advisory lock that allows only one active
+  writer client to hold a writable handle for a run. Lock files are runtime
+  state, not catalog tables.
 
 ## Storage Terms
 - **PulseOn logical schema**: Product-owned project, run, metric, point, and
   summary schema.
 - **Parquet schema**: The open compatibility boundary for native metric data.
 - **Catalog backend**: The database engine DuckLake uses for metadata in native
-  mode, such as DuckDB or SQLite.
+  mode. V2 validates DuckDB first; SQLite is named but deferred until real
+  DuckLake-backed parity tests pass.
 - **Data path**: The local filesystem location where DuckLake writes Parquet
   data files.
 - **Catalog path**: The local path or connection target used for DuckLake
