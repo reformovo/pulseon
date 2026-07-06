@@ -110,18 +110,45 @@ DuckDB-backed recovery paths.
 
 #### Phase 6: Performance And Release Hardening
 
-- [ ] Add a reproducible local benchmark command for explicit-step
+- [x] Add a reproducible local benchmark command for explicit-step
   `run.log(...)` throughput.
-- [ ] Measure the actual `MetricReport` memory footprint and update queue
+- [x] Measure the actual `MetricReport` memory footprint and update queue
   capacity planning.
-- [ ] Prove the 100k calls-per-second one-Python-thread target on a recorded
+- [x] Prove the 100k calls-per-second one-Python-thread target on a recorded
   local environment.
-- [ ] Re-run full Rust/Python verification and update release notes before
+- [x] Re-run full Rust/Python verification and update release notes before
   cutting `0.1.0a2`.
 
 Exit gate: correctness gates pass, the benchmark result and environment are
 recorded, and any deferred SQLite or S3-compatible storage scope is explicit in
 the roadmap.
+
+#### Phase 7: Batch Persistence And Aggregate Repair
+
+- [ ] Add a reproducible persistence benchmark that reports setup,
+  admission-only logging, background writer drain, shutdown, and finalization
+  timings across repeated runs.
+- [ ] Replace per-report writer inserts with true batch-oriented DuckLake
+  appends for `metric_points`, preserving enqueue order and writer-assigned
+  strictly increasing `ingested_at` values within each batch.
+- [ ] Keep writer retry and diagnostics semantics batch-aware: count reports as
+  persisted only after the DuckLake batch append succeeds, preserve pending
+  reports on failed batches, and keep `last_write_error` sanitized.
+- [ ] Remove per-report `metric_aggregates` refresh from the background writer;
+  active-run aggregate/index state may be dirty while metric reporting is in
+  progress.
+- [ ] Refresh or rebuild `metric_aggregates` once after finalization drain
+  completes and all reports admitted before the close barrier are persisted.
+- [ ] Keep active-run point queries reading persisted `metric_points` directly;
+  do not make query freshness depend on `metric_aggregates` during active
+  reporting.
+- [ ] Record before/after benchmark results and update release notes with the
+  measured backlog drain and finalization timings.
+
+Exit gate: a 1,000-report same-key backlog drain no longer spends tens of
+seconds in shutdown, correctness gates still pass, aggregate summaries are
+fresh after run finalization, and query paths still read persisted
+`metric_points` without merging queued in-memory reports.
 
 ### V2 Metric Reporting Contract
 
@@ -494,16 +521,21 @@ the roadmap.
 
 ### Queue Capacity Planning
 
-These estimates are planning guardrails. The implementation must measure the
-actual `MetricReport` footprint and update the table before declaring the v2
-performance target met.
+These measurements are planning guardrails, not a stable ABI promise. On the
+current Rust implementation, `std::mem::size_of::<MetricReport>()` is 72 bytes
+with 8-byte alignment. That struct footprint includes the two owned `String`
+headers for `run_id` and `metric_key`, but it excludes each string's heap
+buffer, allocator metadata, and bounded-channel storage overhead. The planning
+range below uses a conservative 128-192 bytes per queued report for typical
+short local run IDs and metric keys; unusually long metric keys increase memory
+use beyond this range.
 
-| Queue capacity | Approx burst at 100k/s | Estimated memory range |
-| --- | ---: | ---: |
-| 16,384 reports | 164 ms | 3-8 MiB |
-| 65,536 reports | 655 ms | 12-32 MiB |
-| 262,144 reports | 2.6 s | 48-128 MiB |
-| 1,048,576 reports | 10.5 s | 192-512 MiB |
+| Queue capacity | Approx burst at 100k/s | Struct payload floor | Planning memory range |
+| --- | ---: | ---: | ---: |
+| 16,384 reports | 164 ms | 1.1 MiB | 2-3 MiB |
+| 65,536 reports | 655 ms | 4.5 MiB | 8-12 MiB |
+| 262,144 reports | 2.6 s | 18.0 MiB | 32-48 MiB |
+| 1,048,576 reports | 10.5 s | 72.0 MiB | 128-192 MiB |
 
 Acceptance: v2 exposes explicit queue-full failures instead of silent loss,
 keeps `run.log(...)` hot-path work bounded, proves the explicit-step 100k/s
@@ -519,6 +551,20 @@ The benchmark command should live under `scripts/`, for example
 `uv run python scripts/bench_log_throughput.py`. CI should keep correctness
 tests for queue behavior, writer state, storage layout, and API errors, but it
 should not fail based on timing-sensitive throughput numbers.
+
+Recorded local result on 2026-07-06:
+
+- Command: `uv run python scripts/bench_log_throughput.py --reports 100000`
+- Benchmark mode: admission-only explicit-step `run.log(...)`; the parent
+  process cleans the temporary project directory and the child process skips
+  Rust teardown so durable writer drain is not included in the hot-path timing.
+- Environment: macOS-26.3 arm64, CPython 3.13.2, Rust extension built by
+  `uv run`/maturin in the local development environment.
+- Result: 100,000 calls in 0.05564875000072789 seconds, or
+  1,796,985.5567050832 calls per second.
+- Diagnostics immediately after the timed loop: `pending_reports=100000`,
+  `queue_full_errors=0`, `persisted_reports=0`, `writer_state=running`,
+  `last_write_error=None`.
 
 ## Post-V2 Backlog
 
