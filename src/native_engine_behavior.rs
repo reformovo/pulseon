@@ -152,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn log_metric_assigns_next_step_per_run_and_metric_key() -> Result<(), Box<dyn Error>> {
+    fn log_metric_at_step_stores_explicit_steps() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
@@ -162,8 +162,8 @@ mod tests {
         let metric_key = MetricKey::from_string("train/loss");
 
         // When
-        let first = store.log_metric(&run.run_id, &metric_key, 0.25)?;
-        let second = store.log_metric(&run.run_id, &metric_key, 0.125)?;
+        let first = store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
+        let second = store.log_metric_at_step(&run.run_id, &metric_key, Step::new(1), 0.125)?;
 
         // Then
         assert_eq!(first.step.value(), 0);
@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn log_metric_stores_ingested_at_for_metric_points() -> Result<(), Box<dyn Error>> {
+    fn log_metric_at_step_stores_ingested_at_for_metric_points() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
@@ -201,7 +201,7 @@ mod tests {
         let metric_key = MetricKey::from_string("train/loss");
 
         // When
-        let point = store.log_metric(&run.run_id, &metric_key, 0.25)?;
+        let point = store.log_metric_at_step(&run.run_id, &metric_key, Step::new(0), 0.25)?;
 
         // Then
         assert!(point.ingested_at >= point.timestamp);

@@ -670,7 +670,7 @@ focused tests, and the relevant verification gate.
   Replace `MetricReport.step: Option<Step>` with `Step`, remove
   `assign_batch_step(...)` and `load_next_metric_step(...)`, and keep
   `run.log(key, step, value)` as the only Python-facing logging path.
-- [ ] Remove stale internal automatic-step APIs from `NativeRun` and
+- [x] Remove stale internal automatic-step APIs from `NativeRun` and
   `NativeWriteStore`, including `log_metric(...)` and `next_metric_step(...)`.
   Update native tests to use explicit-step batch/client paths rather than the
   old synchronous compatibility helpers.

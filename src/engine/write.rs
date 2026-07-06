@@ -87,16 +87,6 @@ impl<'connection> NativeWriteStore<'connection> {
         stored.into_run()
     }
 
-    pub fn log_metric(
-        &self,
-        run_id: &RunId,
-        metric_key: &MetricKey,
-        value_f64: f64,
-    ) -> Result<MetricPoint, EngineError> {
-        let step = self.next_metric_step(run_id, metric_key)?;
-        self.log_metric_at_step(run_id, metric_key, step, value_f64)
-    }
-
     pub fn log_metric_at_step(
         &self,
         run_id: &RunId,
@@ -194,22 +184,6 @@ impl<'connection> NativeWriteStore<'connection> {
             |row| row.get(0),
         )?;
         Ok(count > 0)
-    }
-
-    fn next_metric_step(
-        &self,
-        run_id: &RunId,
-        metric_key: &MetricKey,
-    ) -> Result<Step, EngineError> {
-        let next: i64 = self.connection.query_row(
-            "SELECT coalesce(max(step) + 1, 0)
-             FROM dl.metric_points
-             WHERE run_id = ?
-               AND metric_key = ?",
-            (run_id.as_str(), metric_key.as_str()),
-            |row| row.get(0),
-        )?;
-        Ok(Step::new(next))
     }
 
     fn refresh_metric_aggregate(
