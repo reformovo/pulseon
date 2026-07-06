@@ -451,7 +451,7 @@ fresh after run finalization, and query paths still read persisted
 - [x] Resolve finalization/logging races by Rust admission gate order, not
   Python call start time. Reports admitted before the close barrier drain;
   reports reaching admission after the barrier raise `RunClosedError`.
-- [ ] Use an internal global enqueue sequence for drain barriers and writer
+- [x] Use an internal global enqueue sequence for drain barriers and writer
   ordering; do not expose it in the public schema.
 - [x] Guarantee that normal finalization starts Parquet flush only after all
   reports queued before the close barrier are persisted.
@@ -573,7 +573,7 @@ V2 TODO audit notes from 2026-07-06:
 ### Queue Capacity Planning
 
 These measurements are planning guardrails, not a stable ABI promise. On the
-current Rust implementation, `std::mem::size_of::<MetricReport>()` is 72 bytes
+current Rust implementation, `std::mem::size_of::<MetricReport>()` is 80 bytes
 with 8-byte alignment. That struct footprint includes the two owned `String`
 headers for `run_id` and `metric_key`, but it excludes each string's heap
 buffer, allocator metadata, and bounded-channel storage overhead. The planning
@@ -583,10 +583,10 @@ use beyond this range.
 
 | Queue capacity | Approx burst at 100k/s | Struct payload floor | Planning memory range |
 | --- | ---: | ---: | ---: |
-| 16,384 reports | 164 ms | 1.1 MiB | 2-3 MiB |
-| 65,536 reports | 655 ms | 4.5 MiB | 8-12 MiB |
-| 262,144 reports | 2.6 s | 18.0 MiB | 32-48 MiB |
-| 1,048,576 reports | 10.5 s | 72.0 MiB | 128-192 MiB |
+| 16,384 reports | 164 ms | 1.3 MiB | 2-3 MiB |
+| 65,536 reports | 655 ms | 5.0 MiB | 8-12 MiB |
+| 262,144 reports | 2.6 s | 20.0 MiB | 32-48 MiB |
+| 1,048,576 reports | 10.5 s | 80.0 MiB | 128-192 MiB |
 
 Acceptance: v2 exposes explicit queue-full failures instead of silent loss,
 keeps `run.log(...)` hot-path work bounded, proves the explicit-step 100k/s
