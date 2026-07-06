@@ -171,7 +171,7 @@ the roadmap.
 - [x] Add a reproducible persistence benchmark that reports setup,
   admission-only logging, background writer drain, shutdown, and finalization
   timings across repeated runs.
-- [ ] Replace per-report writer inserts with true batch-oriented DuckLake
+- [x] Replace per-report writer inserts with true batch-oriented DuckLake
   appends for `metric_points`, preserving enqueue order and writer-assigned
   strictly increasing `ingested_at` values within each batch.
 - [ ] Keep writer retry and diagnostics semantics batch-aware: count reports as

@@ -219,7 +219,7 @@ impl<'connection> NativeWriteStore<'connection> {
     }
 }
 
-fn percent_encode_metric_key(value: &str) -> String {
+pub(crate) fn percent_encode_metric_key(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
         match byte {
