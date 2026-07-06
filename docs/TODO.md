@@ -112,7 +112,7 @@ DuckDB-backed recovery paths.
 
 - [x] Add a reproducible local benchmark command for explicit-step
   `run.log(...)` throughput.
-- [ ] Measure the actual `MetricReport` memory footprint and update queue
+- [x] Measure the actual `MetricReport` memory footprint and update queue
   capacity planning.
 - [ ] Prove the 100k calls-per-second one-Python-thread target on a recorded
   local environment.
@@ -494,16 +494,21 @@ the roadmap.
 
 ### Queue Capacity Planning
 
-These estimates are planning guardrails. The implementation must measure the
-actual `MetricReport` footprint and update the table before declaring the v2
-performance target met.
+These measurements are planning guardrails, not a stable ABI promise. On the
+current Rust implementation, `std::mem::size_of::<MetricReport>()` is 72 bytes
+with 8-byte alignment. That struct footprint includes the two owned `String`
+headers for `run_id` and `metric_key`, but it excludes each string's heap
+buffer, allocator metadata, and bounded-channel storage overhead. The planning
+range below uses a conservative 128-192 bytes per queued report for typical
+short local run IDs and metric keys; unusually long metric keys increase memory
+use beyond this range.
 
-| Queue capacity | Approx burst at 100k/s | Estimated memory range |
-| --- | ---: | ---: |
-| 16,384 reports | 164 ms | 3-8 MiB |
-| 65,536 reports | 655 ms | 12-32 MiB |
-| 262,144 reports | 2.6 s | 48-128 MiB |
-| 1,048,576 reports | 10.5 s | 192-512 MiB |
+| Queue capacity | Approx burst at 100k/s | Struct payload floor | Planning memory range |
+| --- | ---: | ---: | ---: |
+| 16,384 reports | 164 ms | 1.1 MiB | 2-3 MiB |
+| 65,536 reports | 655 ms | 4.5 MiB | 8-12 MiB |
+| 262,144 reports | 2.6 s | 18.0 MiB | 32-48 MiB |
+| 1,048,576 reports | 10.5 s | 72.0 MiB | 128-192 MiB |
 
 Acceptance: v2 exposes explicit queue-full failures instead of silent loss,
 keeps `run.log(...)` hot-path work bounded, proves the explicit-step 100k/s

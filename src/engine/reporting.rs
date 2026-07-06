@@ -522,6 +522,12 @@ mod tests {
     use crate::model::types::ProjectId;
 
     #[test]
+    fn metric_report_struct_footprint_matches_capacity_planning() {
+        assert_eq!(std::mem::size_of::<MetricReport>(), 72);
+        assert_eq!(std::mem::align_of::<MetricReport>(), 8);
+    }
+
+    #[test]
     fn report_metric_returns_queue_full_when_buffer_is_full() {
         let reporter = MetricReporter::blocked_for_test(1);
 
