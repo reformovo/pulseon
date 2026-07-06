@@ -304,8 +304,8 @@ impl NativeClient {
                 self.reporter.set_flush_succeeded(run_id);
                 Ok(())
             }
-            Err(source) => {
-                let message = format!("flush metric_points failed: {source}");
+            Err(_source) => {
+                let message = "flush metric_points failed".to_owned();
                 self.reporter.set_flush_failed(run_id, message.clone());
                 Err(EngineError::MetricFlush { message })
             }
@@ -1139,7 +1139,10 @@ mod tests {
             Some("run-flush-failure"),
         );
         assert_eq!(diagnostics.last_flush_status, "failed");
-        assert!(diagnostics.last_flush_error.is_some());
+        assert_eq!(
+            diagnostics.last_flush_error.as_deref(),
+            Some("flush metric_points failed"),
+        );
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }
