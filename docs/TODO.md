@@ -459,7 +459,7 @@ fresh after run finalization, and query paths still read persisted
 - [x] If the writer is already failed, make `finish_run(...)` and
   `fail_run(...)` raise `MetricWriterFailedError`; do not write terminal run
   state and do not flush.
-- [ ] Make bounded finalization timeout raise `MetricDrainTimeoutError` without
+- [x] Make bounded finalization timeout raise `MetricDrainTimeoutError` without
   writing terminal run state.
 - [ ] Keep the run-writer lock after finalization drain timeout because the run
   remains writable by the current client.
