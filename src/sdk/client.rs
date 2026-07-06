@@ -151,6 +151,15 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
+    #[pyo3(signature = (run_id, timeout=None))]
+    pub fn flush_run_data(&self, run_id: &str, timeout: Option<f64>) -> PyResult<()> {
+        let run_id = RunId::from_string(run_id);
+        let timeout = timeout.map(duration_from_seconds).transpose()?;
+        self._inner
+            .flush_run_data(&run_id, timeout)
+            .map_err(runtime_error)
+    }
+
     #[pyo3(signature = (timeout=None))]
     pub fn shutdown(&self, timeout: Option<f64>) -> PyResult<()> {
         let timeout = timeout.map(duration_from_seconds).transpose()?;
@@ -496,6 +505,8 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
             MetricWriterFailedError::new_err(message)
         }
         crate::engine::EngineError::MetricDrainTimeout => MetricDrainTimeoutError::new_err(message),
+        crate::engine::EngineError::MetricFlush { .. } => MetricFlushError::new_err(message),
+        crate::engine::EngineError::MetricFlushTimeout => MetricFlushTimeoutError::new_err(message),
         crate::engine::EngineError::ClientClosed => ClientClosedError::new_err(message),
         _ => PulseOnError::new_err(message),
     }

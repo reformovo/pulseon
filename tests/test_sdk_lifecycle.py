@@ -318,6 +318,63 @@ def test_finalization_closes_run_for_late_logging(
     assert [point.value_f64 for point in points] == [0.25]
 
 
+def test_finish_run_flushes_partitioned_parquet_and_updates_diagnostics(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run.log("train/loss", 0, 0.25)
+
+    finished = client.finish_run(run.run_id)
+    diagnostics = client.diagnostics()
+    partition_path = (
+        root_path
+        / ".pulseon"
+        / "data"
+        / "main"
+        / "metric_points"
+        / "run_id=run-1"
+        / "metric_key_encoded=train%252Floss"
+    )
+
+    assert finished.status == "finished"
+    assert diagnostics.last_flush_run_id == "run-1"
+    assert diagnostics.last_flush_status == "succeeded"
+    assert any(partition_path.glob("*.parquet"))
+
+
+def test_flush_run_data_retries_terminal_run_visibility(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    client.finish_run(run.run_id)
+
+    client.flush_run_data(run.run_id)
+    diagnostics = client.diagnostics()
+
+    assert diagnostics.last_flush_run_id == "run-1"
+    assert diagnostics.last_flush_status == "succeeded"
+
+
+def test_flush_run_data_rejects_running_runs(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+
+    with pytest.raises(pulseon.InvalidRunStateError, match="running -> flushed"):
+        client.flush_run_data(run.run_id)
+
+
 def test_shutdown_does_not_finalize_running_runs(
     tmp_path: pathlib.Path,
 ) -> None:

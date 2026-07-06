@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::time::{Duration, Instant};
 
 use crate::engine::EngineError;
 use crate::engine::bootstrap::{NativeStorageConfig, open_native_connection_with_config};
@@ -19,6 +20,7 @@ pub struct NativeClient {
     reporter: MetricReporter,
     connection: Arc<Mutex<duckdb::Connection>>,
     active_runs: Arc<Mutex<HashMap<RunId, Arc<ActiveRun>>>>,
+    flush_lock: Arc<Mutex<()>>,
 }
 
 impl NativeClient {
@@ -51,6 +53,7 @@ impl NativeClient {
             reporter,
             connection,
             active_runs: Arc::new(Mutex::new(HashMap::new())),
+            flush_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -251,6 +254,64 @@ impl NativeClient {
         self.finalize_run(run_id, RunStatus::Failed)
     }
 
+    pub fn flush_run_data(
+        &self,
+        run_id: &RunId,
+        timeout: Option<Duration>,
+    ) -> Result<(), EngineError> {
+        let run = self.get_run(run_id)?;
+        if run.status == RunStatus::Running {
+            return Err(EngineError::InvalidRunTransition {
+                run_id: run_id.as_str().to_owned(),
+                from: run_status_value(run.status),
+                to: "flushed",
+            });
+        }
+
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
+        self.reporter.set_flush_running(run_id);
+        let _flush_guard = match self.acquire_flush_lock(deadline) {
+            Ok(guard) => guard,
+            Err(error) => {
+                self.reporter.set_flush_timed_out(run_id);
+                return Err(error);
+            }
+        };
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            self.reporter.set_flush_timed_out(run_id);
+            return Err(EngineError::MetricFlushTimeout);
+        }
+
+        let connection = self.connection()?;
+        let flush_interrupt = install_flush_interrupt(&connection, deadline);
+        let result = connection.execute_batch(
+            "CALL ducklake_flush_inlined_data('dl', table_name => 'metric_points');",
+        );
+        if let Some(flush_interrupt) = &flush_interrupt {
+            flush_interrupt.mark_completed();
+        }
+        drop(connection);
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline)
+            || flush_interrupt
+                .as_ref()
+                .is_some_and(FlushInterrupt::timed_out)
+        {
+            self.reporter.set_flush_timed_out(run_id);
+            return Err(EngineError::MetricFlushTimeout);
+        }
+        match result {
+            Ok(()) => {
+                self.reporter.set_flush_succeeded(run_id);
+                Ok(())
+            }
+            Err(source) => {
+                let message = format!("flush metric_points failed: {source}");
+                self.reporter.set_flush_failed(run_id, message.clone());
+                Err(EngineError::MetricFlush { message })
+            }
+        }
+    }
+
     pub fn shutdown(&self, timeout: Option<Duration>) -> Result<(), EngineError> {
         let result = self.reporter.shutdown(timeout);
         if !matches!(result, Err(EngineError::MetricDrainTimeout)) {
@@ -379,6 +440,7 @@ impl NativeClient {
             active_run.mark_terminal()?;
             active_run.release_lock();
             self.release_run_writer(run_id);
+            self.flush_run_data(run_id, None)?;
             return self.get_run(run_id);
         }
 
@@ -395,6 +457,30 @@ impl NativeClient {
         self.connection
             .lock()
             .map_err(|_| EngineError::ConnectionLockPoisoned)
+    }
+
+    fn acquire_flush_lock(
+        &self,
+        deadline: Option<Instant>,
+    ) -> Result<MutexGuard<'_, ()>, EngineError> {
+        let Some(deadline) = deadline else {
+            return self
+                .flush_lock
+                .lock()
+                .map_err(|_| EngineError::ConnectionLockPoisoned);
+        };
+        loop {
+            match self.flush_lock.try_lock() {
+                Ok(guard) => return Ok(guard),
+                Err(TryLockError::Poisoned(_)) => return Err(EngineError::ConnectionLockPoisoned),
+                Err(TryLockError::WouldBlock) => {
+                    if Instant::now() >= deadline {
+                        return Err(EngineError::MetricFlushTimeout);
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+        }
     }
 
     fn acquire_run_writer(&self, run_id: &RunId) -> Result<Arc<ActiveRun>, EngineError> {
@@ -459,6 +545,45 @@ impl NativeClient {
             }
         }
     }
+}
+
+struct FlushInterrupt {
+    completed: Arc<AtomicBool>,
+    timed_out: Arc<AtomicBool>,
+}
+
+impl FlushInterrupt {
+    fn mark_completed(&self) {
+        self.completed.store(true, Ordering::Relaxed);
+    }
+
+    fn timed_out(&self) -> bool {
+        self.timed_out.load(Ordering::Relaxed)
+    }
+}
+
+fn install_flush_interrupt(
+    connection: &duckdb::Connection,
+    deadline: Option<Instant>,
+) -> Option<FlushInterrupt> {
+    let deadline = deadline?;
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let completed = Arc::new(AtomicBool::new(false));
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let timer_completed = Arc::clone(&completed);
+    let timer_timed_out = Arc::clone(&timed_out);
+    let interrupt = connection.interrupt_handle();
+    std::thread::spawn(move || {
+        std::thread::sleep(remaining);
+        if !timer_completed.load(Ordering::Relaxed) {
+            timer_timed_out.store(true, Ordering::Relaxed);
+            interrupt.interrupt();
+        }
+    });
+    Some(FlushInterrupt {
+        completed,
+        timed_out,
+    })
 }
 
 const fn run_status_value(status: RunStatus) -> &'static str {
@@ -613,6 +738,23 @@ mod tests {
     use super::*;
     use crate::engine::bootstrap::open_native_connection;
 
+    fn partition_contains_parquet(path: &Path) -> std::io::Result<bool> {
+        if !path.is_dir() {
+            return Ok(false);
+        }
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            if entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "parquet")
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     #[test]
     fn open_initializes_ducklake_dataset() -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
@@ -714,6 +856,7 @@ mod tests {
             reporter: MetricReporter::blocked_for_test(1),
             connection,
             active_runs: Arc::new(Mutex::new(HashMap::new())),
+            flush_lock: Arc::new(Mutex::new(())),
         };
         let project = client.create_project(
             "local training",
@@ -811,6 +954,137 @@ mod tests {
             matches!(late_log, Err(EngineError::RunClosed { .. })),
             "expected late log to raise RunClosed, got {late_log:?}",
         );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finish_run_flushes_metric_points_to_partitioned_parquet()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-flush")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-flush")),
+        )?;
+        let run_handle = client.run_handle(run.clone());
+        run_handle.log_metric_at_step("train/loss", 0, 0.25)?;
+
+        let finished = client.finish_run(&run.run_id)?;
+        let diagnostics = client.diagnostics();
+        let partition_path = root_path
+            .join(".pulseon")
+            .join("data")
+            .join("main")
+            .join("metric_points")
+            .join("run_id=run-flush")
+            .join("metric_key_encoded=train%252Floss");
+
+        assert_eq!(finished.status, RunStatus::Finished);
+        assert_eq!(diagnostics.last_flush_run_id.as_deref(), Some("run-flush"));
+        assert_eq!(diagnostics.last_flush_status, "succeeded");
+        assert!(
+            partition_contains_parquet(&partition_path)?,
+            "expected partitioned parquet under {}",
+            partition_path.display(),
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn flush_run_data_is_idempotent_for_terminal_runs() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-flush-idempotent")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-flush-idempotent")),
+        )?;
+
+        client.finish_run(&run.run_id)?;
+        client.flush_run_data(&run.run_id, None)?;
+        let diagnostics = client.diagnostics();
+
+        assert_eq!(
+            diagnostics.last_flush_run_id.as_deref(),
+            Some("run-flush-idempotent"),
+        );
+        assert_eq!(diagnostics.last_flush_status, "succeeded");
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn flush_run_data_rejects_running_runs() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-flush-running")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-flush-running")),
+        )?;
+
+        let flush = client.flush_run_data(&run.run_id, None);
+
+        assert!(
+            matches!(
+                flush,
+                Err(EngineError::InvalidRunTransition {
+                    from: "running",
+                    to: "flushed",
+                    ..
+                })
+            ),
+            "expected running-run flush to raise invalid transition, got {flush:?}",
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn flush_run_data_timeout_updates_runtime_diagnostics() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-flush-timeout")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-flush-timeout")),
+        )?;
+        client.finish_run(&run.run_id)?;
+        let _held_flush_lock = client.flush_lock.lock().expect("test flush lock");
+
+        let flush = client.flush_run_data(&run.run_id, Some(Duration::from_millis(1)));
+        let diagnostics = client.diagnostics();
+
+        assert!(matches!(flush, Err(EngineError::MetricFlushTimeout)));
+        assert_eq!(
+            diagnostics.last_flush_run_id.as_deref(),
+            Some("run-flush-timeout"),
+        );
+        assert_eq!(diagnostics.last_flush_status, "timed_out");
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }

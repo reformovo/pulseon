@@ -46,6 +46,10 @@ pub enum EngineError {
     MetricWriterFailed { message: String },
     #[error("metric drain timed out")]
     MetricDrainTimeout,
+    #[error("metric flush failed: {message}")]
+    MetricFlush { message: String },
+    #[error("metric flush timed out")]
+    MetricFlushTimeout,
     #[error("client is closed")]
     ClientClosed,
     #[error("storage operation failed while {operation}: {name}")]
