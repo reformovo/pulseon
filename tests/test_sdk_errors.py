@@ -62,3 +62,21 @@ def test_client_raises_actionable_sdk_errors(
     )
     with pytest.raises(pulseon.PulseOnError):
         query_client.query_metric(query_run.run_id, "train/loss", max_points=2)
+
+
+def test_ducklake_attach_storage_error_is_sanitized(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    catalog_path = tmp_path / "private" / "catalog.ducklake"
+    data_path = tmp_path / "secret-data"
+    catalog_path.mkdir(parents=True)
+
+    with pytest.raises(pulseon.StorageError) as error_info:
+        pulseon.init(root_path, catalog_path=catalog_path, data_path=data_path)
+
+    message = str(error_info.value)
+    assert "attaching DuckLake catalog" in message
+    assert "catalog.ducklake" in message
+    assert "secret-data" in message
+    assert str(tmp_path) not in message

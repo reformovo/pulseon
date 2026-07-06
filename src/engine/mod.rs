@@ -59,6 +59,13 @@ pub enum EngineError {
         #[source]
         source: std::io::Error,
     },
+    #[error("storage operation failed while {operation}: {name}")]
+    StorageDuckDb {
+        operation: &'static str,
+        name: String,
+        #[source]
+        source: duckdb::Error,
+    },
     #[error("DuckDB LTTB extension is unavailable: {message}")]
     LttbExtensionUnavailable { message: String },
     #[error("invalid stored run status: {status}")]

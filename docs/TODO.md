@@ -581,7 +581,7 @@ V2 post-review contract gaps from 2026-07-06:
   `create_project(...)`, `create_run(...)`, `resume_run(...)`,
   `finish_run(...)`, `fail_run(...)`, and `flush_run_data(...)`; diagnostics
   and read/query paths remain callable according to the v2 contract.
-- [ ] Sanitize DuckLake `ATTACH` startup failures before mapping them to
+- [x] Sanitize DuckLake `ATTACH` startup failures before mapping them to
   Python `StorageError`. Ordinary messages must name the failed operation and
   catalog/data basename without exposing full local paths by default.
 - [ ] Expose optional finalization timeout parameters on Python
