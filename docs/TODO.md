@@ -636,6 +636,70 @@ Recorded local result on 2026-07-06:
   `queue_full_errors=0`, `persisted_reports=0`, `writer_state=running`,
   `last_write_error=None`.
 
+## V2 Cleanup / Subtractive Hardening
+
+This pass is for removing accidental surface area and dead compatibility paths
+after the v2 implementation. It must not add SQLite support, new runtime
+dependencies, new diagnostics fields, new storage abstractions, or broad
+refactors. Each item should be a small reviewable change with declared files,
+focused tests, and the relevant verification gate.
+
+### Cleanup Scope Rules
+
+- Keep each cleanup task to at most five edited files and roughly 200 changed
+  lines unless the scope is explicitly expanded before editing.
+- Prefer deletion and signature tightening over adapter layers.
+- Do not preserve v1 automatic-step compatibility under a private Rust API.
+- Keep SQLite as a named deferred backend; only update stale wording that makes
+  it sound supported.
+- Run the smallest relevant gate after each task, then the full Rust/Python
+  gates before considering the cleanup pass complete.
+
+### Cleanup Tasks
+
+- [ ] Remove the public `context_shutdown_timeout` initialization keyword from
+  `pulseon.init(...)`, `_pulseon.pyi`, README examples, and Python wrapper
+  forwarding. Context-manager exit should use the ordinary unbounded shutdown
+  path; bounded drain behavior remains available through explicit
+  `client.shutdown(timeout=...)`, `finish_run(..., timeout=...)`, and
+  `fail_run(..., timeout=...)`.
+- [ ] Delete Python tests that depend on `context_shutdown_timeout`, or rewrite
+  them to exercise explicit bounded APIs instead of adding another hidden
+  public hook.
+- [ ] Tighten the Rust metric reporter to require explicit `Step` values.
+  Replace `MetricReport.step: Option<Step>` with `Step`, remove
+  `assign_batch_step(...)` and `load_next_metric_step(...)`, and keep
+  `run.log(key, step, value)` as the only Python-facing logging path.
+- [ ] Remove stale internal automatic-step APIs from `NativeRun` and
+  `NativeWriteStore`, including `log_metric(...)` and `next_metric_step(...)`.
+  Update native tests to use explicit-step batch/client paths rather than the
+  old synchronous compatibility helpers.
+- [ ] Re-evaluate synchronous metric write helpers that still refresh
+  `metric_aggregates` per report. Keep only helpers that are still necessary
+  for query/storage tests; otherwise delete them and move tests to persisted
+  batch data plus finalization-time aggregate rebuild.
+- [ ] Align finalization drain wording with implementation. Either document the
+  current client-wide enqueue barrier as intentional, or narrow the
+  implementation to a run-scoped drain barrier; do not leave docs saying
+  "drain queued reports for the run" while the code waits on all reports in the
+  client.
+- [ ] Document DuckLake's physical partition path escaping for
+  `metric_key_encoded` directories. The logical column value remains RFC 3986
+  percent-encoding, while Hive-style partition directory names may escape `%`
+  again on disk.
+- [ ] Fix README wording that currently implies DuckDB/SQLite catalog options
+  are both supported. It should say DuckDB is supported in v2 and SQLite is
+  deferred until real DuckLake-backed parity tests pass.
+
+### Cleanup Exit Gate
+
+- [ ] No public Python API remains outside the v2 contract unless it is
+  explicitly documented as intentional.
+- [ ] No automatic-step metric logging path remains in production Rust code.
+- [ ] README, ADRs, catalog/data boundary docs, `_pulseon.pyi`, and tests agree
+  on the supported v2 surface.
+- [ ] `cargo check`, `cargo test`, `uv run pyright`, and `uv run pytest` pass.
+
 ## Post-V2 Backlog
 
 - [ ] Add S3-compatible `data_path` support, including local MinIO. The design
