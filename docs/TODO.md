@@ -174,7 +174,7 @@ the roadmap.
 - [x] Replace per-report writer inserts with true batch-oriented DuckLake
   appends for `metric_points`, preserving enqueue order and writer-assigned
   strictly increasing `ingested_at` values within each batch.
-- [ ] Keep writer retry and diagnostics semantics batch-aware: count reports as
+- [x] Keep writer retry and diagnostics semantics batch-aware: count reports as
   persisted only after the DuckLake batch append succeeds, preserve pending
   reports on failed batches, and keep `last_write_error` sanitized.
 - [ ] Remove per-report `metric_aggregates` refresh from the background writer;
