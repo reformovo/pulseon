@@ -215,10 +215,10 @@ the roadmap.
 - [ ] Document `last_flush_error` as the most recent flush error, not the
   current flush state; callers must use `last_flush_status` for current flush
   state.
-- [ ] When finalization writes terminal run state but Parquet flush fails,
+- [x] When finalization writes terminal run state but Parquet flush fails,
   raise `MetricFlushError` and update diagnostics to
   `last_flush_run_id=<run_id>` and `last_flush_status=failed`.
-- [ ] When `flush_run_data(run_id, timeout=...)` times out, leave the terminal
+- [x] When `flush_run_data(run_id, timeout=...)` times out, leave the terminal
   run unchanged, update diagnostics to `last_flush_run_id=<run_id>` and
   `last_flush_status=timed_out`, and allow a later retry.
 - [ ] Keep ordinary diagnostics, including `last_write_error`, sanitized:
@@ -383,7 +383,7 @@ the roadmap.
   reports reaching admission after the barrier raise `RunClosedError`.
 - [ ] Use an internal global enqueue sequence for drain barriers and writer
   ordering; do not expose it in the public schema.
-- [ ] Guarantee that normal finalization starts Parquet flush only after all
+- [x] Guarantee that normal finalization starts Parquet flush only after all
   reports queued before the close barrier are persisted.
 - [ ] Make unbounded finalization wait until drain completes or writer failure.
 - [ ] If the writer is already failed, make `finish_run(...)` and
