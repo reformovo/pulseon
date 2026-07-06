@@ -564,10 +564,10 @@ fresh after run finalization, and query paths still read persisted
 
 V2 TODO audit notes from 2026-07-06:
 
-- The remaining unchecked V2 contract items are intentional follow-up work, not
-  stale checkboxes. They cover the active-logging-during-shutdown test/document
-  gap, bounded context-manager drain-timeout behavior, a public/internal bounded
-  finalization timeout path, and the explicit global enqueue-sequence contract.
+- The previously unchecked V2 contract items are now completed and backed by
+  Rust or Python-facing tests: active-logging-during-shutdown behavior,
+  bounded context-manager drain-timeout behavior, bounded finalization timeout,
+  finalization-timeout lock retention, and internal global enqueue sequencing.
 - Post-v2 backlog items remain outside the `0.1.0a2` V2 completion gate.
 
 ### Queue Capacity Planning
