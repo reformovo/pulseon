@@ -73,7 +73,7 @@ impl NativeClient {
         let created_at = current_timestamp("created_at")?;
         let connection = self.connection()?;
         connection.execute(
-            "INSERT INTO dl.pulseon_projects (project_id, name, created_at)
+            "INSERT INTO __ducklake_metadata_dl.pulseon_projects (project_id, name, created_at)
              VALUES (?, ?, ?)",
             (project_id.as_str(), name, timestamp_as_rfc3339(created_at)),
         )?;
@@ -89,7 +89,7 @@ impl NativeClient {
         let connection = self.connection()?;
         let result = connection.query_row(
             "SELECT project_id, name, epoch_ms(created_at)
-             FROM dl.pulseon_projects
+             FROM __ducklake_metadata_dl.pulseon_projects
              WHERE project_id = ?",
             [project_id.as_str()],
             |row| {
@@ -182,7 +182,7 @@ impl NativeClient {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
                 "SELECT run_id
-                 FROM dl.pulseon_runs
+                 FROM __ducklake_metadata_dl.pulseon_runs
                  WHERE project_id = ?
                  ORDER BY created_at, run_id",
             )?;
@@ -216,7 +216,7 @@ impl NativeClient {
                 Some(project_id) => {
                     let mut statement = connection.prepare(
                         "SELECT run_id
-                         FROM dl.pulseon_runs
+                         FROM __ducklake_metadata_dl.pulseon_runs
                          WHERE project_id = ?
                            AND status = 'running'
                          ORDER BY created_at, run_id",
@@ -229,7 +229,7 @@ impl NativeClient {
                 None => {
                     let mut statement = connection.prepare(
                         "SELECT run_id
-                         FROM dl.pulseon_runs
+                         FROM __ducklake_metadata_dl.pulseon_runs
                          WHERE status = 'running'
                          ORDER BY created_at, run_id",
                     )?;
@@ -372,7 +372,7 @@ impl NativeClient {
         let mut statement = connection.prepare(
             "SELECT run_id, metric_key, effective_count, last_step, last_value_f64,
                     min_value_f64, max_value_f64
-             FROM dl.pulseon_metric_aggregates
+             FROM __ducklake_metadata_dl.pulseon_metric_aggregates
              WHERE run_id = ?
              ORDER BY metric_key",
         )?;
@@ -396,7 +396,7 @@ impl NativeClient {
         let exists = connection.query_row(
             "SELECT EXISTS (
                  SELECT 1
-                 FROM dl.pulseon_projects
+                 FROM __ducklake_metadata_dl.pulseon_projects
                  WHERE project_id = ?
              )",
             [project_id.as_str()],
@@ -423,7 +423,7 @@ impl NativeClient {
         let finished_at = current_timestamp("finished_at")?;
         let connection = self.connection()?;
         let updated = connection.execute(
-            "UPDATE dl.pulseon_runs
+            "UPDATE __ducklake_metadata_dl.pulseon_runs
              SET status = ?,
                  finished_at = ?
              WHERE run_id = ?
@@ -985,6 +985,7 @@ mod tests {
             .join("metric_points")
             .join("run_id=run-flush")
             .join("metric_key_encoded=train%252Floss");
+        let data_main_path = root_path.join(".pulseon").join("data").join("main");
 
         assert_eq!(finished.status, RunStatus::Finished);
         assert_eq!(diagnostics.last_flush_run_id.as_deref(), Some("run-flush"));
@@ -993,6 +994,12 @@ mod tests {
             partition_contains_parquet(&partition_path)?,
             "expected partitioned parquet under {}",
             partition_path.display(),
+        );
+        assert!(
+            !data_main_path.join("pulseon_projects").exists()
+                && !data_main_path.join("pulseon_runs").exists()
+                && !data_main_path.join("pulseon_metric_aggregates").exists(),
+            "application tables must stay catalog-owned, not in the data path",
         );
         std::fs::remove_dir_all(root_path)?;
         Ok(())

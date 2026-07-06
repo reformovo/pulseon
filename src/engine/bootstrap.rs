@@ -73,12 +73,12 @@ fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
 
 pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {
     connection.execute_batch(
-        "CREATE TABLE IF NOT EXISTS dl.pulseon_projects (
+        "CREATE TABLE IF NOT EXISTS __ducklake_metadata_dl.pulseon_projects (
              project_id VARCHAR NOT NULL,
              name VARCHAR NOT NULL,
              created_at TIMESTAMPTZ NOT NULL
          );
-         CREATE TABLE IF NOT EXISTS dl.pulseon_runs (
+         CREATE TABLE IF NOT EXISTS __ducklake_metadata_dl.pulseon_runs (
              run_id VARCHAR NOT NULL,
              project_id VARCHAR NOT NULL,
              name VARCHAR NOT NULL,
@@ -97,7 +97,7 @@ pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), En
              ingested_at TIMESTAMPTZ NOT NULL
          );
          ALTER TABLE dl.metric_points SET PARTITIONED BY (run_id, metric_key_encoded);
-         CREATE TABLE IF NOT EXISTS dl.pulseon_metric_aggregates (
+         CREATE TABLE IF NOT EXISTS __ducklake_metadata_dl.pulseon_metric_aggregates (
              run_id VARCHAR NOT NULL,
              metric_key VARCHAR NOT NULL,
              effective_count UBIGINT NOT NULL,

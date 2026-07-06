@@ -40,14 +40,14 @@ pub fn create_minimal_v1_tables(connection: &duckdb::Connection) -> Result<(), E
 
 pub fn seed_minimal_v1_data(connection: &duckdb::Connection) -> duckdb::Result<()> {
     connection.execute_batch(
-        "INSERT INTO dl.pulseon_projects VALUES
+        "INSERT INTO __ducklake_metadata_dl.pulseon_projects VALUES
              ('project-1', 'local training', now());
-         INSERT INTO dl.pulseon_runs VALUES
+         INSERT INTO __ducklake_metadata_dl.pulseon_runs VALUES
              ('run-1', 'project-1', 'baseline', 'running', now(), now(), NULL);
          INSERT INTO dl.metric_points VALUES
              ('run-1', 'train/loss', 'train%2Floss', 0, now(), 0.25, now()),
              ('run-1', 'train/loss', 'train%2Floss', 1, now(), 0.125, now());
-         INSERT INTO dl.pulseon_metric_aggregates VALUES
+         INSERT INTO __ducklake_metadata_dl.pulseon_metric_aggregates VALUES
              ('run-1', 'train/loss', 2, 1, 0.125, 0.125, 0.25);",
     )
 }

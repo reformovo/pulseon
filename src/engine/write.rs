@@ -31,7 +31,7 @@ impl<'connection> NativeWriteStore<'connection> {
 
         let now = current_timestamp("created_at")?;
         self.connection.execute(
-            "INSERT INTO dl.pulseon_runs
+            "INSERT INTO __ducklake_metadata_dl.pulseon_runs
                  (run_id, project_id, name, status, created_at, started_at, finished_at)
              VALUES (?, ?, ?, ?, ?, ?, NULL)",
             (
@@ -59,7 +59,7 @@ impl<'connection> NativeWriteStore<'connection> {
         let result = self.connection.query_row(
             "SELECT run_id, project_id, name, status, epoch_ms(created_at), epoch_ms(started_at),
                     epoch_ms(finished_at)
-             FROM dl.pulseon_runs
+             FROM __ducklake_metadata_dl.pulseon_runs
              WHERE run_id = ?",
             [run_id.as_str()],
             |row| {
@@ -161,7 +161,7 @@ impl<'connection> NativeWriteStore<'connection> {
 
     fn run_exists(&self, run_id: &RunId) -> Result<bool, EngineError> {
         let count: i64 = self.connection.query_row(
-            "SELECT count(*) FROM dl.pulseon_runs WHERE run_id = ?",
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs WHERE run_id = ?",
             [run_id.as_str()],
             |row| row.get(0),
         )?;
@@ -190,13 +190,13 @@ impl<'connection> NativeWriteStore<'connection> {
         metric_key: &MetricKey,
     ) -> Result<(), EngineError> {
         self.connection.execute(
-            "DELETE FROM dl.pulseon_metric_aggregates
+            "DELETE FROM __ducklake_metadata_dl.pulseon_metric_aggregates
              WHERE run_id = ?
                AND metric_key = ?",
             (run_id.as_str(), metric_key.as_str()),
         )?;
         self.connection.execute(
-            "INSERT INTO dl.pulseon_metric_aggregates
+            "INSERT INTO __ducklake_metadata_dl.pulseon_metric_aggregates
                  (run_id, metric_key, effective_count, last_step, last_value_f64,
                   min_value_f64, max_value_f64)
              SELECT run_id, metric_key, count(*), arg_max(step, step), arg_max(value_f64, step),

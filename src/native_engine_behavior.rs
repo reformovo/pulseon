@@ -44,7 +44,7 @@ mod tests {
 
     fn insert_project(connection: &duckdb::Connection) -> Result<(), duckdb::Error> {
         connection.execute(
-            "INSERT INTO dl.pulseon_projects VALUES (?1, ?2, now())",
+            "INSERT INTO __ducklake_metadata_dl.pulseon_projects VALUES (?1, ?2, now())",
             duckdb::params![PROJECT_ID, PROJECT_NAME],
         )?;
         Ok(())
@@ -57,21 +57,29 @@ mod tests {
         let connection = dataset.connection();
 
         // Then
-        let table_count: i64 = connection.query_row(
-            "SELECT count(*)
-             FROM information_schema.tables
-             WHERE table_catalog = 'dl'
-               AND table_schema = 'main'
-               AND table_name IN (
-                   'pulseon_projects',
-                   'pulseon_runs',
-                   'metric_points',
-                   'pulseon_metric_aggregates'
-               )",
+        let project_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_projects",
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(table_count, 4);
+        let run_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs",
+            [],
+            |row| row.get(0),
+        )?;
+        let aggregate_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_metric_aggregates",
+            [],
+            |row| row.get(0),
+        )?;
+        let point_count: i64 =
+            connection.query_row("SELECT count(*) FROM dl.metric_points", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(
+            (project_count, run_count, aggregate_count, point_count),
+            (0, 0, 0, 0),
+        );
         seed_minimal_v1_data(connection)?;
 
         let metric_total: f64 = connection.query_row(
@@ -105,8 +113,11 @@ mod tests {
         // Then
         assert_ne!(generated.run_id, supplied.run_id);
         assert_eq!(supplied.run_id.as_str(), "run-user-1");
-        let run_count: i64 =
-            connection.query_row("SELECT count(*) FROM dl.pulseon_runs", [], |row| row.get(0))?;
+        let run_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs",
+            [],
+            |row| row.get(0),
+        )?;
         assert_eq!(run_count, 2);
         Ok(())
     }
@@ -131,8 +142,11 @@ mod tests {
             Err(crate::engine::EngineError::RunAlreadyExists { .. })
         ));
         assert_eq!(resumed, created);
-        let run_count: i64 =
-            connection.query_row("SELECT count(*) FROM dl.pulseon_runs", [], |row| row.get(0))?;
+        let run_count: i64 = connection.query_row(
+            "SELECT count(*) FROM __ducklake_metadata_dl.pulseon_runs",
+            [],
+            |row| row.get(0),
+        )?;
         assert_eq!(run_count, 1);
         Ok(())
     }
@@ -299,8 +313,8 @@ mod tests {
             "CREATE MACRO lttb(x, y, n) AS [
                  list({x: x, y: y} ORDER BY x)[1],
                  list({x: x, y: y} ORDER BY x)[len(list({x: x, y: y} ORDER BY x))]];
-             INSERT INTO dl.pulseon_projects VALUES ('project-1', 'local training', now());
-             INSERT INTO dl.pulseon_runs VALUES
+             INSERT INTO __ducklake_metadata_dl.pulseon_projects VALUES ('project-1', 'local training', now());
+             INSERT INTO __ducklake_metadata_dl.pulseon_runs VALUES
                  ('run-1', 'project-1', 'metrics', 'running', now(), now(), NULL);
              INSERT INTO dl.metric_points VALUES
                  ('run-1', 'train/loss', 'train%2Floss', 0, now(), 0.5, now()),
