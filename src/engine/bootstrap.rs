@@ -53,13 +53,24 @@ pub(crate) fn attach_ducklake(
     catalog_path: &Path,
     data_path: &Path,
 ) -> Result<(), EngineError> {
+    let storage_name = format!(
+        "{}, {}",
+        path_basename(catalog_path),
+        path_basename(data_path)
+    );
     let catalog_path = sql_string_literal(catalog_path.to_string_lossy().as_ref());
     let data_path = sql_string_literal(data_path.to_string_lossy().as_ref());
-    connection.execute_batch(&format!(
-        "INSTALL ducklake;
+    connection
+        .execute_batch(&format!(
+            "INSTALL ducklake;
          LOAD ducklake;
          ATTACH {catalog_path} AS dl (TYPE ducklake, DATA_PATH {data_path});"
-    ))?;
+        ))
+        .map_err(|source| EngineError::StorageDuckDb {
+            operation: "attaching DuckLake catalog",
+            name: storage_name,
+            source,
+        })?;
     Ok(())
 }
 
@@ -128,6 +139,39 @@ mod tests {
     #[test]
     fn sql_string_literal_escapes_single_quotes() {
         assert_eq!(sql_string_literal("canary's/data"), "'canary''s/data'");
+    }
+
+    #[test]
+    fn attach_ducklake_sanitizes_storage_error_paths() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-bootstrap-{}", uuid::Uuid::new_v4()));
+        let catalog_path = root_path.join("private").join("catalog.ducklake");
+        let data_path = root_path.join("secret-data");
+        std::fs::create_dir_all(&catalog_path)?;
+        std::fs::create_dir_all(&data_path)?;
+        let connection = open_duckdb_connection()?;
+
+        let error = attach_ducklake(&connection, &catalog_path, &data_path).unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            matches!(error, EngineError::StorageDuckDb { .. }),
+            "expected sanitized storage error, got {error:?}",
+        );
+        assert!(
+            message.contains("attaching DuckLake catalog"),
+            "expected operation in error message, got {message}",
+        );
+        assert!(
+            message.contains("catalog.ducklake") && message.contains("secret-data"),
+            "expected storage basenames in error message, got {message}",
+        );
+        assert!(
+            !message.contains(root_path.to_string_lossy().as_ref()),
+            "expected sanitized message without full path, got {message}",
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
     }
 
     #[test]

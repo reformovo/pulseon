@@ -53,6 +53,7 @@ def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
     import pulseon
 
     invalid_kwargs = [
+        {"metric_queue_capacity": -1},
         {"metric_queue_capacity": 0},
         {"metric_queue_capacity": 1_048_577},
         {"catalog_backend": "postgres"},
@@ -321,6 +322,31 @@ def test_finalization_closes_run_for_late_logging(
     assert [point.value_f64 for point in points] == [0.25]
 
 
+@pytest.mark.parametrize("terminal_method", ["finish_run", "fail_run"])
+def test_bounded_finalization_timeout_leaves_run_running(
+    tmp_path: pathlib.Path,
+    terminal_method: str,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / f"pulseon-{terminal_method}")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    for step in range(1000):
+        run.log("train/loss", step, float(step))
+
+    with pytest.raises(pulseon.MetricDrainTimeoutError):
+        getattr(client, terminal_method)(run.run_id, timeout=0.0)
+
+    selected_run = client.get_run(run.run_id)
+    assert selected_run.status == "running"
+    assert selected_run.finished_at is None
+
+    getattr(client, terminal_method)(run.run_id)
+    terminal_run = client.get_run(run.run_id)
+    assert terminal_run.status == ("finished" if terminal_method == "finish_run" else "failed")
+
+
 def test_finish_run_flushes_partitioned_parquet_and_updates_diagnostics(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -392,6 +418,24 @@ def test_shutdown_does_not_finalize_running_runs(
 
     with pytest.raises(pulseon.ClientClosedError):
         run.log("train/loss", 0, 0.25)
+    with pytest.raises(pulseon.ClientClosedError):
+        client.create_project("late project", project_id="late-project")
+    with pytest.raises(pulseon.ClientClosedError):
+        client.create_run(project.project_id, "late run", run_id="late-run")
+    with pytest.raises(pulseon.ClientClosedError):
+        client.resume_run(run.run_id)
+    with pytest.raises(pulseon.ClientClosedError):
+        client.finish_run(run.run_id)
+    with pytest.raises(pulseon.ClientClosedError):
+        client.fail_run(run.run_id)
+    with pytest.raises(pulseon.ClientClosedError):
+        client.flush_run_data(run.run_id)
+
+    selected_run = client.get_run(run.run_id)
+    metric_points = client.query_metric(run.run_id, "train/loss")
+    assert selected_run.run_id == run.run_id
+    assert metric_points == []
+
     reopened_client = pulseon.init(root_path)
     running_run = reopened_client.get_run(run.run_id)
     resumed_run = reopened_client.resume_run(run.run_id)
