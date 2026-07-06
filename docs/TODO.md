@@ -362,7 +362,7 @@ fresh after run finalization, and query paths still read persisted
 - [x] Make unbounded shutdown return only after drain completes or writer
   failure; writer failure raises `MetricWriterFailedError`.
 - [x] Make bounded shutdown timeout raise `MetricDrainTimeoutError`.
-- [ ] Document and test that callers should stop active logging before
+- [x] Document and test that callers should stop active logging before
   shutdown; v2 does not guarantee bounded shutdown can complete while other
   threads keep admitting new reports.
 - [x] Make context-manager exit follow shutdown resource-release semantics:

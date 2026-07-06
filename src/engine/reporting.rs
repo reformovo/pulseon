@@ -831,6 +831,45 @@ mod tests {
     }
 
     #[test]
+    fn bounded_shutdown_can_timeout_while_another_thread_is_logging() {
+        let reporter = MetricReporter::blocked_for_test(128);
+        let logging_reporter = reporter.clone();
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        let logging_thread = std::thread::spawn(move || {
+            let mut sent_started = false;
+            let mut step = 0;
+            while stop_receiver.try_recv().is_err() {
+                let result = logging_reporter.report_metric(
+                    RunId::from_string("run-1"),
+                    MetricKey::from_string("train/loss"),
+                    Some(Step::new(step)),
+                    step as f64,
+                );
+                if result.is_ok() && !sent_started {
+                    started_sender
+                        .send(())
+                        .expect("test should observe first admitted report");
+                    sent_started = true;
+                }
+                step += 1;
+            }
+        });
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("logging thread should admit at least one report");
+
+        let shutdown = reporter.shutdown(Some(Duration::from_millis(1)));
+        stop_sender
+            .send(())
+            .expect("test should stop logging thread");
+        logging_thread.join().expect("logging thread should join");
+
+        assert!(matches!(shutdown, Err(EngineError::MetricDrainTimeout)));
+        assert_ne!(reporter.diagnostics().writer_state, "closed");
+    }
+
+    #[test]
     fn shutdown_after_writer_failure_releases_sender_without_closing_diagnostics() {
         let reporter = MetricReporter::blocked_for_test(1);
         reporter
