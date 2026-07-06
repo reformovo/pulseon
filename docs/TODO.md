@@ -576,7 +576,7 @@ V2 post-review contract gaps from 2026-07-06:
   `InvalidConfigurationError`, not PyO3 `OverflowError`. The binding should
   accept a signed integer at the Python boundary and route all range failures
   through the shared init validation path.
-- [ ] After successful `shutdown()`, make every write, flush, and finalization
+- [x] After successful `shutdown()`, make every write, flush, and finalization
   path through that client raise `ClientClosedError`. This includes
   `create_project(...)`, `create_run(...)`, `resume_run(...)`,
   `finish_run(...)`, `fail_run(...)`, and `flush_run_data(...)`; diagnostics

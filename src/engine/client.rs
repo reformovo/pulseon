@@ -21,6 +21,7 @@ pub struct NativeClient {
     connection: Arc<Mutex<duckdb::Connection>>,
     active_runs: Arc<Mutex<HashMap<RunId, Arc<ActiveRun>>>>,
     flush_lock: Arc<Mutex<()>>,
+    is_shutdown: AtomicBool,
 }
 
 impl NativeClient {
@@ -54,6 +55,7 @@ impl NativeClient {
             connection,
             active_runs: Arc::new(Mutex::new(HashMap::new())),
             flush_lock: Arc::new(Mutex::new(())),
+            is_shutdown: AtomicBool::new(false),
         })
     }
 
@@ -62,6 +64,7 @@ impl NativeClient {
         name: &str,
         project_id: Option<ProjectId>,
     ) -> Result<Project, EngineError> {
+        self.ensure_writeable()?;
         let project_id =
             project_id.unwrap_or_else(|| ProjectId::from_string(uuid::Uuid::new_v4().to_string()));
         if self.project_exists(&project_id)? {
@@ -126,6 +129,7 @@ impl NativeClient {
         name: &str,
         run_id: Option<RunId>,
     ) -> Result<Run, EngineError> {
+        self.ensure_writeable()?;
         if !self.project_exists(project_id)? {
             return Err(EngineError::ProjectNotFound {
                 project_id: project_id.as_str().to_owned(),
@@ -159,6 +163,7 @@ impl NativeClient {
     }
 
     pub fn resume_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
+        self.ensure_writeable()?;
         let run = self.get_run(run_id)?;
         if run.status != RunStatus::Running {
             return Err(EngineError::InvalidRunTransition {
@@ -275,6 +280,7 @@ impl NativeClient {
         run_id: &RunId,
         timeout: Option<Duration>,
     ) -> Result<(), EngineError> {
+        self.ensure_writeable()?;
         let run = self.get_run(run_id)?;
         if run.status == RunStatus::Running {
             return Err(EngineError::InvalidRunTransition {
@@ -332,6 +338,9 @@ impl NativeClient {
         let result = self.reporter.shutdown(timeout);
         if !matches!(result, Err(EngineError::MetricDrainTimeout)) {
             self.release_all_run_writers();
+        }
+        if result.is_ok() {
+            self.is_shutdown.store(true, Ordering::Release);
         }
         result
     }
@@ -427,6 +436,7 @@ impl NativeClient {
         target_status: RunStatus,
         timeout: Option<Duration>,
     ) -> Result<Run, EngineError> {
+        self.ensure_writeable()?;
         let run = self.get_run(run_id)?;
         if run.status != RunStatus::Running {
             return Err(EngineError::InvalidRunTransition {
@@ -488,6 +498,13 @@ impl NativeClient {
         self.connection
             .lock()
             .map_err(|_| EngineError::ConnectionLockPoisoned)
+    }
+
+    fn ensure_writeable(&self) -> Result<(), EngineError> {
+        if self.is_shutdown.load(Ordering::Acquire) {
+            return Err(EngineError::ClientClosed);
+        }
+        Ok(())
     }
 
     fn acquire_flush_lock(
@@ -888,6 +905,7 @@ mod tests {
             connection,
             active_runs: Arc::new(Mutex::new(HashMap::new())),
             flush_lock: Arc::new(Mutex::new(())),
+            is_shutdown: AtomicBool::new(false),
         };
         let project = client.create_project(
             "local training",
@@ -1228,6 +1246,7 @@ mod tests {
             connection,
             active_runs: Arc::new(Mutex::new(HashMap::new())),
             flush_lock: Arc::new(Mutex::new(())),
+            is_shutdown: AtomicBool::new(false),
         };
         let project = client.create_project(
             "local training",
@@ -1377,6 +1396,17 @@ mod tests {
 
         client.shutdown(None)?;
         let log_after_shutdown = run_handle.log_metric_at_step("train/loss", 0, 0.25);
+        let create_project_after_shutdown =
+            client.create_project("late project", Some(ProjectId::from_string("late-project")));
+        let create_run_after_shutdown = client.create_run(
+            &project.project_id,
+            "late run",
+            Some(RunId::from_string("late-run")),
+        );
+        let resume_after_shutdown = client.resume_run(&run.run_id);
+        let finish_after_shutdown = client.finish_run(&run.run_id);
+        let fail_after_shutdown = client.fail_run(&run.run_id);
+        let flush_after_shutdown = client.flush_run_data(&run.run_id, None);
         let reopened_client = NativeClient::open(&root_path)?;
         let reopened_run = reopened_client.get_run(&run.run_id)?;
         let resumed_run = reopened_client.resume_run(&run.run_id)?;
@@ -1384,6 +1414,33 @@ mod tests {
         assert!(
             matches!(log_after_shutdown, Err(EngineError::ClientClosed)),
             "expected closed client error after shutdown, got {log_after_shutdown:?}",
+        );
+        assert!(
+            matches!(
+                create_project_after_shutdown,
+                Err(EngineError::ClientClosed)
+            ),
+            "expected closed client error after shutdown, got {create_project_after_shutdown:?}",
+        );
+        assert!(
+            matches!(create_run_after_shutdown, Err(EngineError::ClientClosed)),
+            "expected closed client error after shutdown, got {create_run_after_shutdown:?}",
+        );
+        assert!(
+            matches!(resume_after_shutdown, Err(EngineError::ClientClosed)),
+            "expected closed client error after shutdown, got {resume_after_shutdown:?}",
+        );
+        assert!(
+            matches!(finish_after_shutdown, Err(EngineError::ClientClosed)),
+            "expected closed client error after shutdown, got {finish_after_shutdown:?}",
+        );
+        assert!(
+            matches!(fail_after_shutdown, Err(EngineError::ClientClosed)),
+            "expected closed client error after shutdown, got {fail_after_shutdown:?}",
+        );
+        assert!(
+            matches!(flush_after_shutdown, Err(EngineError::ClientClosed)),
+            "expected closed client error after shutdown, got {flush_after_shutdown:?}",
         );
         assert_eq!(reopened_run.status, RunStatus::Running);
         assert!(reopened_run.finished_at.is_none());

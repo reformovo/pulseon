@@ -393,6 +393,24 @@ def test_shutdown_does_not_finalize_running_runs(
 
     with pytest.raises(pulseon.ClientClosedError):
         run.log("train/loss", 0, 0.25)
+    with pytest.raises(pulseon.ClientClosedError):
+        client.create_project("late project", project_id="late-project")
+    with pytest.raises(pulseon.ClientClosedError):
+        client.create_run(project.project_id, "late run", run_id="late-run")
+    with pytest.raises(pulseon.ClientClosedError):
+        client.resume_run(run.run_id)
+    with pytest.raises(pulseon.ClientClosedError):
+        client.finish_run(run.run_id)
+    with pytest.raises(pulseon.ClientClosedError):
+        client.fail_run(run.run_id)
+    with pytest.raises(pulseon.ClientClosedError):
+        client.flush_run_data(run.run_id)
+
+    selected_run = client.get_run(run.run_id)
+    metric_points = client.query_metric(run.run_id, "train/loss")
+    assert selected_run.run_id == run.run_id
+    assert metric_points == []
+
     reopened_client = pulseon.init(root_path)
     running_run = reopened_client.get_run(run.run_id)
     resumed_run = reopened_client.resume_run(run.run_id)
