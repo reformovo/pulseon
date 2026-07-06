@@ -570,6 +570,25 @@ V2 TODO audit notes from 2026-07-06:
   finalization-timeout lock retention, and internal global enqueue sequencing.
 - Post-v2 backlog items remain outside the `0.1.0a2` V2 completion gate.
 
+V2 post-review contract gaps from 2026-07-06:
+
+- [ ] Reject negative Python `metric_queue_capacity` values with
+  `InvalidConfigurationError`, not PyO3 `OverflowError`. The binding should
+  accept a signed integer at the Python boundary and route all range failures
+  through the shared init validation path.
+- [ ] After successful `shutdown()`, make every write, flush, and finalization
+  path through that client raise `ClientClosedError`. This includes
+  `create_project(...)`, `create_run(...)`, `resume_run(...)`,
+  `finish_run(...)`, `fail_run(...)`, and `flush_run_data(...)`; diagnostics
+  and read/query paths remain callable according to the v2 contract.
+- [ ] Sanitize DuckLake `ATTACH` startup failures before mapping them to
+  Python `StorageError`. Ordinary messages must name the failed operation and
+  catalog/data basename without exposing full local paths by default.
+- [ ] Expose optional finalization timeout parameters on Python
+  `finish_run(...)` and `fail_run(...)`, update `_pulseon.pyi`, and add
+  Python-facing tests that bounded timeout raises `MetricDrainTimeoutError`
+  without writing terminal run state.
+
 ### Queue Capacity Planning
 
 These measurements are planning guardrails, not a stable ABI promise. On the
