@@ -1097,6 +1097,54 @@ mod tests {
     }
 
     #[test]
+    fn finalization_flush_failure_keeps_terminal_state_and_updates_diagnostics()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-flush-failure")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-flush-failure")),
+        )?;
+        let run_handle = client.run_handle(run.clone());
+        run_handle.log_metric_at_step("train/loss", 0, 0.25)?;
+        client.reporter.drain(None)?;
+        let metric_points_path = root_path
+            .join(".pulseon")
+            .join("data")
+            .join("main")
+            .join("metric_points");
+        std::fs::create_dir_all(metric_points_path.parent().expect("metric_points parent"))?;
+        if metric_points_path.is_dir() {
+            std::fs::remove_dir_all(&metric_points_path)?;
+        }
+        std::fs::write(&metric_points_path, b"not a directory")?;
+
+        let finish = client.finish_run(&run.run_id);
+        let stored = client.get_run(&run.run_id)?;
+        let diagnostics = client.diagnostics();
+
+        assert!(
+            matches!(finish, Err(EngineError::MetricFlush { .. })),
+            "expected finalization to surface MetricFlush, got {finish:?}",
+        );
+        assert_eq!(stored.status, RunStatus::Finished);
+        assert_eq!(
+            diagnostics.last_flush_run_id.as_deref(),
+            Some("run-flush-failure"),
+        );
+        assert_eq!(diagnostics.last_flush_status, "failed");
+        assert!(diagnostics.last_flush_error.is_some());
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
     fn admission_close_waits_for_in_flight_log_gate_before_rejecting_late_logs()
     -> Result<(), Box<dyn std::error::Error>> {
         let lock_path = std::env::temp_dir().join(format!("pulseon-lock-{}", uuid::Uuid::new_v4()));
