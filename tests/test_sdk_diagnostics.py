@@ -45,6 +45,54 @@ def test_context_manager_preserves_user_exception(
             raise ValueError("user failure")
 
 
+def test_context_manager_drain_timeout_keeps_client_usable(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = None
+    run = None
+    with pytest.raises(pulseon.MetricDrainTimeoutError):
+        with pulseon.init(
+            root_path,
+            context_shutdown_timeout=0.0,
+        ) as context_client:
+            client = context_client
+            project = client.create_project("local training", project_id="project-1")
+            run = client.create_run(project.project_id, "baseline", run_id="run-1")
+            run.log("train/loss", 0, 0.25)
+
+    assert client is not None
+    assert run is not None
+    assert client.diagnostics().writer_state != "closed"
+    second_client = pulseon.init(root_path)
+    with pytest.raises(pulseon.RunAlreadyActiveError):
+        second_client.resume_run(run.run_id)
+    run.log("train/loss", 1, 0.125)
+    finished = client.finish_run(run.run_id)
+
+    assert finished.status == "finished"
+
+
+def test_context_manager_drain_timeout_preserves_user_exception(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    with pytest.raises(ValueError, match="user failure") as error:
+        with pulseon.init(
+            tmp_path / "pulseon",
+            context_shutdown_timeout=0.0,
+        ) as client:
+            project = client.create_project("local training", project_id="project-1")
+            run = client.create_run(project.project_id, "baseline", run_id="run-1")
+            run.log("train/loss", 0, 0.25)
+            raise ValueError("user failure")
+
+    assert isinstance(error.value.__context__, pulseon.MetricDrainTimeoutError)
+
+
 def test_v2_diagnostics_contract_fields_are_read_only(
     tmp_path: pathlib.Path,
 ) -> None:

@@ -54,6 +54,7 @@ impl MetricReporter {
                 sender: Mutex::new(Some(sender)),
                 diagnostics,
                 worker: Mutex::new(Some(worker)),
+                next_enqueue_sequence: AtomicU64::new(1),
             }),
         }
     }
@@ -65,7 +66,12 @@ impl MetricReporter {
         step: Option<Step>,
         value_f64: f64,
     ) -> Result<(), EngineError> {
-        let Some(sender) = self.sender() else {
+        let sender = self
+            .inner
+            .sender
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+        let Some(sender) = sender.as_ref() else {
             return Err(EngineError::ClientClosed);
         };
         if self.inner.diagnostics.is_writer_failed() {
@@ -77,15 +83,20 @@ impl MetricReporter {
                     .unwrap_or_else(|| "metric writer failed".to_owned()),
             });
         }
+        let enqueue_sequence = self.inner.next_enqueue_sequence.load(Ordering::Relaxed);
         let report = MetricReport {
             run_id,
             metric_key,
             step,
             value_f64,
+            enqueue_sequence,
         };
         self.inner.diagnostics.increment_pending();
         match sender.try_send(report) {
             Ok(()) => {
+                self.inner
+                    .next_enqueue_sequence
+                    .fetch_add(1, Ordering::Relaxed);
                 self.inner.diagnostics.increment_accepted();
                 Ok(())
             }
@@ -126,8 +137,17 @@ impl MetricReporter {
     }
 
     pub fn drain(&self, timeout: Option<Duration>) -> Result<(), EngineError> {
+        let barrier_sequence = self.enqueue_barrier_sequence()?;
+        self.drain_through(barrier_sequence, timeout)
+    }
+
+    fn drain_through(
+        &self,
+        barrier_sequence: u64,
+        timeout: Option<Duration>,
+    ) -> Result<(), EngineError> {
         let deadline = timeout.map(|timeout| Instant::now() + timeout);
-        while self.inner.diagnostics.pending_reports() > 0 {
+        while self.inner.diagnostics.persisted_through_sequence() < barrier_sequence {
             if self.inner.diagnostics.is_writer_failed() {
                 return Err(EngineError::MetricWriterFailed {
                     message: self
@@ -152,6 +172,19 @@ impl MetricReporter {
             });
         }
         Ok(())
+    }
+
+    fn enqueue_barrier_sequence(&self) -> Result<u64, EngineError> {
+        let _sender = self
+            .inner
+            .sender
+            .lock()
+            .map_err(|_| EngineError::ConnectionLockPoisoned)?;
+        Ok(self
+            .inner
+            .next_enqueue_sequence
+            .load(Ordering::Relaxed)
+            .saturating_sub(1))
     }
 
     pub fn shutdown_for(&self, timeout: Duration) -> bool {
@@ -185,13 +218,9 @@ impl MetricReporter {
                 sender: Mutex::new(Some(sender)),
                 diagnostics: Arc::new(MetricReporterDiagnosticsInner::default()),
                 worker: Mutex::new(None),
+                next_enqueue_sequence: AtomicU64::new(1),
             }),
         }
-    }
-
-    fn sender(&self) -> Option<SyncSender<MetricReport>> {
-        let guard = self.inner.sender.lock().ok()?;
-        guard.as_ref().cloned()
     }
 }
 
@@ -199,6 +228,7 @@ struct MetricReporterInner {
     sender: Mutex<Option<SyncSender<MetricReport>>>,
     diagnostics: Arc<MetricReporterDiagnosticsInner>,
     worker: Mutex<Option<JoinHandle<()>>>,
+    next_enqueue_sequence: AtomicU64,
 }
 
 impl Drop for MetricReporterInner {
@@ -234,6 +264,7 @@ struct MetricReporterDiagnosticsInner {
     last_flush_run_id: Mutex<Option<String>>,
     last_flush_status: AtomicU64,
     last_flush_error: Mutex<Option<String>>,
+    persisted_through_sequence: AtomicU64,
 }
 
 impl MetricReporterDiagnosticsInner {
@@ -248,6 +279,11 @@ impl MetricReporterDiagnosticsInner {
 
     fn increment_persisted_by(&self, count: u64) {
         self.persisted_reports.fetch_add(count, Ordering::Relaxed);
+    }
+
+    fn set_persisted_through_sequence(&self, sequence: u64) {
+        self.persisted_through_sequence
+            .fetch_max(sequence, Ordering::Relaxed);
     }
 
     fn set_writer_running(&self) {
@@ -336,6 +372,10 @@ impl MetricReporterDiagnosticsInner {
         self.pending_reports.load(Ordering::Relaxed)
     }
 
+    fn persisted_through_sequence(&self) -> u64 {
+        self.persisted_through_sequence.load(Ordering::Relaxed)
+    }
+
     fn snapshot(&self) -> MetricReporterDiagnostics {
         let pending_reports = self.pending_reports();
         let writer_state = match self.writer_state.load(Ordering::Relaxed) as u8 {
@@ -381,6 +421,7 @@ struct MetricReport {
     metric_key: MetricKey,
     step: Option<Step>,
     value_f64: f64,
+    enqueue_sequence: u64,
 }
 
 struct MetricPointBatchRow {
@@ -418,6 +459,9 @@ fn metric_worker(
             Ok(next_millis) => {
                 next_ingested_at_millis = next_millis;
                 diagnostics.increment_persisted_by(batch_len);
+                if let Some(last_report) = batch.last() {
+                    diagnostics.set_persisted_through_sequence(last_report.enqueue_sequence);
+                }
                 diagnostics.decrement_pending_by(batch_len);
             }
             Err(error) => {
@@ -610,7 +654,7 @@ mod tests {
 
     #[test]
     fn metric_report_struct_footprint_matches_capacity_planning() {
-        assert_eq!(std::mem::size_of::<MetricReport>(), 72);
+        assert_eq!(std::mem::size_of::<MetricReport>(), 80);
         assert_eq!(std::mem::align_of::<MetricReport>(), 8);
     }
 
@@ -648,6 +692,7 @@ mod tests {
                 sender: Mutex::new(Some(sender)),
                 diagnostics: Arc::new(MetricReporterDiagnosticsInner::default()),
                 worker: Mutex::new(None),
+                next_enqueue_sequence: AtomicU64::new(1),
             }),
         };
 
@@ -669,9 +714,10 @@ mod tests {
             Err(EngineError::MetricQueueFull)
         ));
 
-        receiver
+        let first_report = receiver
             .try_recv()
             .expect("queued report should be available");
+        assert_eq!(first_report.enqueue_sequence, 1);
         reporter.inner.diagnostics.decrement_pending();
         reporter
             .report_metric(
@@ -681,8 +727,12 @@ mod tests {
                 0.0625,
             )
             .expect("later report should enter the queue after capacity is freed");
+        let later_report = receiver
+            .try_recv()
+            .expect("later queued report should be available");
 
         let diagnostics = reporter.diagnostics();
+        assert_eq!(later_report.enqueue_sequence, 2);
         assert_eq!(diagnostics.queue_full_errors, 1);
         assert_eq!(diagnostics.pending_reports, 1);
     }
@@ -701,6 +751,36 @@ mod tests {
 
         assert!(!reporter.drain_for(Duration::from_millis(1)));
         assert_eq!(reporter.diagnostics().pending_reports, 1);
+    }
+
+    #[test]
+    fn drain_waits_for_current_enqueue_sequence_barrier_only() {
+        let reporter = MetricReporter::blocked_for_test(4);
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.25,
+            )
+            .expect("first report should enter the queue");
+        reporter.inner.diagnostics.set_persisted_through_sequence(1);
+        reporter
+            .report_metric(
+                RunId::from_string("run-1"),
+                MetricKey::from_string("train/loss"),
+                None,
+                0.125,
+            )
+            .expect("later report should enter the queue");
+
+        let drain = reporter.drain_through(1, None);
+
+        assert!(
+            drain.is_ok(),
+            "expected first barrier to drain, got {drain:?}"
+        );
+        assert_eq!(reporter.diagnostics().pending_reports, 2);
     }
 
     #[test]
@@ -748,6 +828,45 @@ mod tests {
         let diagnostics = reporter.diagnostics();
         assert_eq!(diagnostics.pending_reports, 2);
         assert_eq!(diagnostics.writer_state, "running");
+    }
+
+    #[test]
+    fn bounded_shutdown_can_timeout_while_another_thread_is_logging() {
+        let reporter = MetricReporter::blocked_for_test(128);
+        let logging_reporter = reporter.clone();
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        let logging_thread = std::thread::spawn(move || {
+            let mut sent_started = false;
+            let mut step = 0;
+            while stop_receiver.try_recv().is_err() {
+                let result = logging_reporter.report_metric(
+                    RunId::from_string("run-1"),
+                    MetricKey::from_string("train/loss"),
+                    Some(Step::new(step)),
+                    step as f64,
+                );
+                if result.is_ok() && !sent_started {
+                    started_sender
+                        .send(())
+                        .expect("test should observe first admitted report");
+                    sent_started = true;
+                }
+                step += 1;
+            }
+        });
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("logging thread should admit at least one report");
+
+        let shutdown = reporter.shutdown(Some(Duration::from_millis(1)));
+        stop_sender
+            .send(())
+            .expect("test should stop logging thread");
+        logging_thread.join().expect("logging thread should join");
+
+        assert!(matches!(shutdown, Err(EngineError::MetricDrainTimeout)));
+        assert_ne!(reporter.diagnostics().writer_state, "closed");
     }
 
     #[test]
@@ -1029,6 +1148,7 @@ mod tests {
                 i64::try_from(step).expect("test step should fit i64"),
             )),
             value_f64: step as f64,
+            enqueue_sequence: u64::try_from(step + 1).expect("test step should fit u64"),
         }
     }
 }

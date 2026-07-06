@@ -247,11 +247,27 @@ impl NativeClient {
     }
 
     pub fn finish_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
-        self.finalize_run(run_id, RunStatus::Finished)
+        self.finish_run_with_timeout(run_id, None)
+    }
+
+    pub fn finish_run_with_timeout(
+        &self,
+        run_id: &RunId,
+        timeout: Option<Duration>,
+    ) -> Result<Run, EngineError> {
+        self.finalize_run(run_id, RunStatus::Finished, timeout)
     }
 
     pub fn fail_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
-        self.finalize_run(run_id, RunStatus::Failed)
+        self.fail_run_with_timeout(run_id, None)
+    }
+
+    pub fn fail_run_with_timeout(
+        &self,
+        run_id: &RunId,
+        timeout: Option<Duration>,
+    ) -> Result<Run, EngineError> {
+        self.finalize_run(run_id, RunStatus::Failed, timeout)
     }
 
     pub fn flush_run_data(
@@ -405,7 +421,12 @@ impl NativeClient {
         Ok(exists)
     }
 
-    fn finalize_run(&self, run_id: &RunId, target_status: RunStatus) -> Result<Run, EngineError> {
+    fn finalize_run(
+        &self,
+        run_id: &RunId,
+        target_status: RunStatus,
+        timeout: Option<Duration>,
+    ) -> Result<Run, EngineError> {
         let run = self.get_run(run_id)?;
         if run.status != RunStatus::Running {
             return Err(EngineError::InvalidRunTransition {
@@ -416,7 +437,7 @@ impl NativeClient {
         }
         let active_run = self.acquire_run_writer(run_id)?;
         active_run.close_admission()?;
-        if let Err(error) = self.reporter.drain(None) {
+        if let Err(error) = self.reporter.drain(timeout) {
             active_run.open_admission()?;
             return Err(error);
         }
@@ -1190,6 +1211,50 @@ mod tests {
         assert_eq!(
             diagnostics.last_flush_error.as_deref(),
             Some("flush metric_points failed"),
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finish_run_with_timeout_does_not_write_terminal_state()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        let client = NativeClient {
+            root_path: root_path.clone(),
+            reporter: MetricReporter::blocked_for_test(2),
+            connection,
+            active_runs: Arc::new(Mutex::new(HashMap::new())),
+            flush_lock: Arc::new(Mutex::new(())),
+        };
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-finalize-timeout")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-finalize-timeout")),
+        )?;
+        let run_handle = client.run_handle(run.clone());
+        run_handle.log_metric_at_step("train/loss", 0, 0.25)?;
+
+        let finish = client.finish_run_with_timeout(&run.run_id, Some(Duration::from_millis(1)));
+        let stored = client.get_run(&run.run_id)?;
+        let second_client = NativeClient::open(&root_path)?;
+        let resumed_by_second_client = second_client.resume_run(&run.run_id);
+
+        assert!(matches!(finish, Err(EngineError::MetricDrainTimeout)));
+        assert_eq!(stored.status, RunStatus::Running);
+        assert!(stored.finished_at.is_none());
+        assert!(
+            matches!(
+                resumed_by_second_client,
+                Err(EngineError::RunAlreadyActive { .. })
+            ),
+            "expected finalization timeout to keep writer lock held, got {resumed_by_second_client:?}",
         );
         std::fs::remove_dir_all(root_path)?;
         Ok(())

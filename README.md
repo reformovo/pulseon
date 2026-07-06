@@ -24,11 +24,17 @@ client = pulseon.init(
     catalog_backend="duckdb",
     catalog_path=None,
     metric_queue_capacity=65536,
+    context_shutdown_timeout=None,
 )
 project = client.create_project("local training")
 run = client.create_run(project.project_id, "baseline")
 run.log("train/loss", 0, 0.25)
 ```
+
+For bounded teardown, stop active logging threads before calling
+`client.shutdown(timeout=...)`; PulseOn keeps admission open while bounded
+shutdown is draining, so concurrent `run.log(...)` calls can prevent that drain
+from completing before the timeout.
 
 Architecture entry points:
 

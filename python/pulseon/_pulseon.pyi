@@ -105,4 +105,5 @@ def init(
     catalog_backend: str = "duckdb",
     catalog_path: str | os.PathLike[str] | None = None,
     metric_queue_capacity: int = 65536,
+    context_shutdown_timeout: float | None = None,
 ) -> Client: ...

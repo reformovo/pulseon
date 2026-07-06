@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyRuntimeError;
@@ -52,11 +53,15 @@ sdk_exception!(StorageError, "A storage operation failed.");
 #[pyclass(name = "Client", module = "pulseon._pulseon", unsendable)]
 pub struct PyClient {
     _inner: NativeClient,
+    context_shutdown_timeout: Option<Duration>,
 }
 
 impl PyClient {
-    fn new(inner: NativeClient) -> Self {
-        Self { _inner: inner }
+    fn new(inner: NativeClient, context_shutdown_timeout: Option<Duration>) -> Self {
+        Self {
+            _inner: inner,
+            context_shutdown_timeout,
+        }
     }
 }
 
@@ -154,7 +159,9 @@ impl PyClient {
     #[pyo3(signature = (run_id, timeout=None))]
     pub fn flush_run_data(&self, run_id: &str, timeout: Option<f64>) -> PyResult<()> {
         let run_id = RunId::from_string(run_id);
-        let timeout = timeout.map(duration_from_seconds).transpose()?;
+        let timeout = timeout
+            .map(|seconds| duration_from_seconds("flush timeout", seconds))
+            .transpose()?;
         self._inner
             .flush_run_data(&run_id, timeout)
             .map_err(runtime_error)
@@ -162,7 +169,9 @@ impl PyClient {
 
     #[pyo3(signature = (timeout=None))]
     pub fn shutdown(&self, timeout: Option<f64>) -> PyResult<()> {
-        let timeout = timeout.map(duration_from_seconds).transpose()?;
+        let timeout = timeout
+            .map(|seconds| duration_from_seconds("shutdown timeout", seconds))
+            .transpose()?;
         self._inner.shutdown(timeout).map_err(runtime_error)
     }
 
@@ -173,13 +182,16 @@ impl PyClient {
     pub fn __exit__(
         &self,
         exc_type: &Bound<'_, PyAny>,
-        _exc_value: &Bound<'_, PyAny>,
+        exc_value: &Bound<'_, PyAny>,
         _traceback: &Bound<'_, PyAny>,
     ) -> PyResult<bool> {
         let user_exception_active = !exc_type.is_none();
-        match self._inner.shutdown(None) {
+        match self._inner.shutdown(self.context_shutdown_timeout) {
             Ok(()) => Ok(false),
-            Err(_) if user_exception_active => Ok(false),
+            Err(error) if user_exception_active => {
+                attach_exception_context(exc_value, runtime_error(error));
+                Ok(false)
+            }
             Err(error) => Err(runtime_error(error)),
         }
     }
@@ -414,7 +426,8 @@ impl From<MetricAggregate> for PyMetricSummary {
         data_path=None,
         catalog_backend="duckdb",
         catalog_path=None,
-        metric_queue_capacity=65536
+        metric_queue_capacity=65536,
+        context_shutdown_timeout=None
     )
 )]
 pub fn init(
@@ -423,7 +436,11 @@ pub fn init(
     catalog_backend: &str,
     catalog_path: Option<PathBuf>,
     metric_queue_capacity: usize,
+    context_shutdown_timeout: Option<f64>,
 ) -> PyResult<PyClient> {
+    let context_shutdown_timeout = context_shutdown_timeout
+        .map(|seconds| duration_from_seconds("context_shutdown_timeout", seconds))
+        .transpose()?;
     validate_init_config(
         data_path.as_deref(),
         catalog_backend,
@@ -431,7 +448,7 @@ pub fn init(
         metric_queue_capacity,
     )?;
     NativeClient::open_with_storage_config(path, catalog_path, data_path, metric_queue_capacity)
-        .map(PyClient::new)
+        .map(|client| PyClient::new(client, context_shutdown_timeout))
         .map_err(runtime_error)
 }
 
@@ -473,13 +490,22 @@ fn is_uri_path(path: &Path) -> bool {
     path.to_string_lossy().contains("://")
 }
 
-fn duration_from_seconds(seconds: f64) -> PyResult<std::time::Duration> {
+fn duration_from_seconds(name: &str, seconds: f64) -> PyResult<Duration> {
     if seconds < 0.0 || !seconds.is_finite() {
-        return Err(InvalidConfigurationError::new_err(
-            "shutdown timeout must be a finite non-negative number",
-        ));
+        return Err(InvalidConfigurationError::new_err(format!(
+            "{name} must be a finite non-negative number"
+        )));
     }
-    Ok(std::time::Duration::from_secs_f64(seconds))
+    Ok(Duration::from_secs_f64(seconds))
+}
+
+fn attach_exception_context(exc_value: &Bound<'_, PyAny>, teardown_error: PyErr) {
+    if exc_value.is_none() {
+        return;
+    }
+    let py = exc_value.py();
+    let teardown_value = teardown_error.value(py);
+    let _ = exc_value.setattr("__context__", teardown_value);
 }
 
 fn runtime_error(error: crate::engine::EngineError) -> PyErr {
