@@ -114,7 +114,7 @@ DuckDB-backed recovery paths.
   `run.log(...)` throughput.
 - [x] Measure the actual `MetricReport` memory footprint and update queue
   capacity planning.
-- [ ] Prove the 100k calls-per-second one-Python-thread target on a recorded
+- [x] Prove the 100k calls-per-second one-Python-thread target on a recorded
   local environment.
 - [ ] Re-run full Rust/Python verification and update release notes before
   cutting `0.1.0a2`.
@@ -524,6 +524,20 @@ The benchmark command should live under `scripts/`, for example
 `uv run python scripts/bench_log_throughput.py`. CI should keep correctness
 tests for queue behavior, writer state, storage layout, and API errors, but it
 should not fail based on timing-sensitive throughput numbers.
+
+Recorded local result on 2026-07-06:
+
+- Command: `uv run python scripts/bench_log_throughput.py --reports 100000`
+- Benchmark mode: admission-only explicit-step `run.log(...)`; the parent
+  process cleans the temporary project directory and the child process skips
+  Rust teardown so durable writer drain is not included in the hot-path timing.
+- Environment: macOS-26.3 arm64, CPython 3.13.2, Rust extension built by
+  `uv run`/maturin in the local development environment.
+- Result: 100,000 calls in 0.05564875000072789 seconds, or
+  1,796,985.5567050832 calls per second.
+- Diagnostics immediately after the timed loop: `pending_reports=100000`,
+  `queue_full_errors=0`, `persisted_reports=0`, `writer_state=running`,
+  `last_write_error=None`.
 
 ## Post-V2 Backlog
 
