@@ -322,6 +322,31 @@ def test_finalization_closes_run_for_late_logging(
     assert [point.value_f64 for point in points] == [0.25]
 
 
+@pytest.mark.parametrize("terminal_method", ["finish_run", "fail_run"])
+def test_bounded_finalization_timeout_leaves_run_running(
+    tmp_path: pathlib.Path,
+    terminal_method: str,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / f"pulseon-{terminal_method}")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    for step in range(1000):
+        run.log("train/loss", step, float(step))
+
+    with pytest.raises(pulseon.MetricDrainTimeoutError):
+        getattr(client, terminal_method)(run.run_id, timeout=0.0)
+
+    selected_run = client.get_run(run.run_id)
+    assert selected_run.status == "running"
+    assert selected_run.finished_at is None
+
+    getattr(client, terminal_method)(run.run_id)
+    terminal_run = client.get_run(run.run_id)
+    assert terminal_run.status == ("finished" if terminal_method == "finish_run" else "failed")
+
+
 def test_finish_run_flushes_partitioned_parquet_and_updates_diagnostics(
     tmp_path: pathlib.Path,
 ) -> None:

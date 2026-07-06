@@ -584,7 +584,7 @@ V2 post-review contract gaps from 2026-07-06:
 - [x] Sanitize DuckLake `ATTACH` startup failures before mapping them to
   Python `StorageError`. Ordinary messages must name the failed operation and
   catalog/data basename without exposing full local paths by default.
-- [ ] Expose optional finalization timeout parameters on Python
+- [x] Expose optional finalization timeout parameters on Python
   `finish_run(...)` and `fail_run(...)`, update `_pulseon.pyi`, and add
   Python-facing tests that bounded timeout raises `MetricDrainTimeoutError`
   without writing terminal run state.

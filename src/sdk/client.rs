@@ -140,18 +140,26 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
-    pub fn finish_run(&self, run_id: &str) -> PyResult<PyRun> {
+    #[pyo3(signature = (run_id, timeout=None))]
+    pub fn finish_run(&self, run_id: &str, timeout: Option<f64>) -> PyResult<PyRun> {
         let run_id = RunId::from_string(run_id);
+        let timeout = timeout
+            .map(|seconds| duration_from_seconds("finish_run timeout", seconds))
+            .transpose()?;
         self._inner
-            .finish_run(&run_id)
+            .finish_run_with_timeout(&run_id, timeout)
             .map(|run| PyRun::from(self._inner.run_handle(run)))
             .map_err(runtime_error)
     }
 
-    pub fn fail_run(&self, run_id: &str) -> PyResult<PyRun> {
+    #[pyo3(signature = (run_id, timeout=None))]
+    pub fn fail_run(&self, run_id: &str, timeout: Option<f64>) -> PyResult<PyRun> {
         let run_id = RunId::from_string(run_id);
+        let timeout = timeout
+            .map(|seconds| duration_from_seconds("fail_run timeout", seconds))
+            .transpose()?;
         self._inner
-            .fail_run(&run_id)
+            .fail_run_with_timeout(&run_id, timeout)
             .map(|run| PyRun::from(self._inner.run_handle(run)))
             .map_err(runtime_error)
     }
