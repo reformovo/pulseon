@@ -378,15 +378,15 @@ fresh after run finalization, and query paths still read persisted
 - [x] Do not add a new logging dependency for teardown errors. Prefer Python
   exception context; if chaining is too complex for v2, leave diagnostics as
   the observable teardown state.
-- [ ] Treat drain timeout during context-manager exit as incomplete shutdown:
+- [x] Treat drain timeout during context-manager exit as incomplete shutdown:
   client-wide admission remains open, the run-writer lock stays held, and the
   client remains usable if the caller still has a reference.
-- [ ] If context-manager exit times out while draining and no user exception is
+- [x] If context-manager exit times out while draining and no user exception is
   active, raise `MetricDrainTimeoutError`.
-- [ ] If context-manager exit times out while draining and a user exception is
+- [x] If context-manager exit times out while draining and a user exception is
   active, keep the user exception primary and expose the timeout through
   diagnostics or exception context when practical.
-- [ ] After a context-manager drain timeout, allow the caller to continue using
+- [x] After a context-manager drain timeout, allow the caller to continue using
   existing `Run` handles and retry `shutdown(timeout=None)`,
   `finish_run(...)`, or `fail_run(...)`.
 - [x] Keep `shutdown()` as client teardown, not run finalization. It must not

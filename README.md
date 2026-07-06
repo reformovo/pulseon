@@ -24,6 +24,7 @@ client = pulseon.init(
     catalog_backend="duckdb",
     catalog_path=None,
     metric_queue_capacity=65536,
+    context_shutdown_timeout=None,
 )
 project = client.create_project("local training")
 run = client.create_run(project.project_id, "baseline")
