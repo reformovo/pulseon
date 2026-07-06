@@ -116,7 +116,7 @@ DuckDB-backed recovery paths.
   capacity planning.
 - [x] Prove the 100k calls-per-second one-Python-thread target on a recorded
   local environment.
-- [ ] Re-run full Rust/Python verification and update release notes before
+- [x] Re-run full Rust/Python verification and update release notes before
   cutting `0.1.0a2`.
 
 Exit gate: correctness gates pass, the benchmark result and environment are
