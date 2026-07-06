@@ -56,6 +56,7 @@ def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
         {"metric_queue_capacity": 0},
         {"metric_queue_capacity": 1_048_577},
         {"catalog_backend": "postgres"},
+        {"catalog_backend": "sqlite"},
         {"data_path": "s3://bucket/pulseon"},
         {"catalog_path": "s3://bucket/catalog.ducklake"},
     ]

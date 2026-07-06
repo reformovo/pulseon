@@ -9,10 +9,12 @@ configuration surface without expanding into shared cloud storage or
 multi-client catalog coordination.
 
 ## Decision
-V2 supports DuckDB and SQLite as native DuckLake catalog backends. PostgreSQL is
-not part of the v2 public surface. Catalog backend selection is explicit rather
-than inferred from the catalog path suffix. The Python initialization API may
-grow a keyword-based configuration shape:
+V2 supports DuckDB as the native DuckLake catalog backend. SQLite remains a
+named but explicitly deferred backend until real DuckLake-backed SQLite tests
+prove the same schema, transaction, locking, and multi-client behavior.
+PostgreSQL is not part of the v2 public surface. Catalog backend selection is
+explicit rather than inferred from the catalog path suffix. The Python
+initialization API may grow a keyword-based configuration shape:
 
 ```python
 pulseon.init(
@@ -25,27 +27,25 @@ pulseon.init(
 ```
 
 `metric_queue_capacity` must be between 1 and 1,048,576 inclusive. Invalid
-capacity values, unknown catalog backends, and unsupported data paths raise
-`InvalidConfigurationError`, a subclass of `PulseOnError`, before the client
-starts. The only valid `catalog_backend` values are the case-sensitive strings
-`"duckdb"` and `"sqlite"`.
+capacity values, unknown catalog backends, deferred catalog backends, and
+unsupported data paths raise `InvalidConfigurationError`, a subclass of
+`PulseOnError`, before the client starts. The only startup-supported
+`catalog_backend` value is the case-sensitive string `"duckdb"`; `"sqlite"` is
+recognized only to return an explicit deferred-backend error.
 
 Default paths are backend-specific:
 
 ```text
 duckdb catalog_path = <project>/.pulseon/catalog.ducklake
-sqlite catalog_path = <project>/.pulseon/catalog.sqlite
 data_path           = <project>/.pulseon/data
 ```
 
 The public v2 `data_path` contract is local filesystem paths only. S3-compatible
 object-storage URIs, including local MinIO, are deferred to a post-v2 release.
-DuckDB is the first validation target. SQLite remains a v2 target only if
-DuckLake-backed SQLite catalog behavior passes the same schema, transaction,
-locking, and multi-client correctness tests. If implementation testing shows
-SQLite cannot satisfy the v2 contract without special compatibility behavior,
-SQLite support must either block v2 completion or be explicitly deferred rather
-than presented as working.
+DuckDB is the v2 validation target. SQLite remains deferred because the same
+real DuckLake-backed schema, transaction, locking, and multi-client correctness
+tests have not yet passed against it. V2 must not fake backend compatibility by
+matching table names only.
 
 V2 local native mode supports one active writer client per run. A local
 run-writer lock prevents two clients from concurrently creating, resuming, or
@@ -113,8 +113,8 @@ v2 planning.
   than `project_id=` Parquet directories.
 - PostgreSQL catalog support needs a future decision covering shared catalog
   connection configuration, locking, and multi-client behavior.
-- SQLite catalog support must be proven against real DuckLake behavior before
-  being treated as complete; v2 must not fake backend compatibility by matching
-  table names only.
+- SQLite catalog support is explicitly deferred until real DuckLake-backed
+  behavior tests prove parity with DuckDB; v2 must not fake backend
+  compatibility by matching table names only.
 - S3-compatible object storage needs a post-v2 decision covering credentials,
   HTTPFS configuration, MinIO acceptance tests, and secret-safe test setup.

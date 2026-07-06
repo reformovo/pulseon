@@ -101,7 +101,7 @@ races, and lock release after terminal state is written.
   `run_id` and `metric_key_encoded`.
 - [ ] Implement terminal-run Parquet flush, `flush_run_data(run_id)`, flush
   timeout, idempotent retry, and runtime-only flush diagnostics.
-- [ ] Validate SQLite only after the same real DuckLake-backed storage tests
+- [x] Validate SQLite only after the same real DuckLake-backed storage tests
   pass; otherwise explicitly defer it before v2 completion.
 
 Exit gate: tests inspect catalog tables, logical query behavior, partitioned
@@ -417,12 +417,12 @@ the roadmap.
 - [ ] Publicly support only local filesystem `data_path` values in v2.
 - [ ] Reject S3-compatible `data_path` values in v2 with
   `InvalidConfigurationError`.
-- [ ] Support DuckDB and SQLite as configurable native DuckLake catalog
-  backends.
+- [x] Support DuckDB as the configurable native DuckLake catalog backend and
+  explicitly defer SQLite until real DuckLake-backed parity tests pass.
 - [ ] Treat DuckDB as the first validation target. SQLite is complete only if
   real DuckLake-backed tests prove the same schema, transaction, locking, and
   multi-client behavior.
-- [ ] If SQLite cannot satisfy the v2 storage contract without special
+- [x] If SQLite cannot satisfy the v2 storage contract without special
   compatibility behavior, explicitly block v2 or defer SQLite support rather
   than presenting fake backend compatibility.
 - [ ] Store project, run, and aggregate application state in catalog tables
@@ -430,14 +430,14 @@ the roadmap.
   rather than DuckLake logical tables.
 - [ ] Select `catalog_backend` explicitly instead of inferring it from
   `catalog_path` suffix.
-- [ ] Accept only case-sensitive `catalog_backend` values `"duckdb"` and
-  `"sqlite"`; unknown values raise `InvalidConfigurationError`.
+- [x] Accept only startup-supported `catalog_backend="duckdb"`; unknown values
+  and deferred `catalog_backend="sqlite"` raise `InvalidConfigurationError`.
 - [ ] Keep PostgreSQL catalog support out of the v2 public surface.
 - [ ] Add a keyword-based init shape covering `data_path`, `catalog_backend`,
   `catalog_path`, and `metric_queue_capacity`.
-- [ ] Use default paths of `<project>/.pulseon/catalog.ducklake` for DuckDB,
-  `<project>/.pulseon/catalog.sqlite` for SQLite, and
-  `<project>/.pulseon/data` for Parquet data.
+- [x] Use default paths of `<project>/.pulseon/catalog.ducklake` for DuckDB and
+  `<project>/.pulseon/data` for Parquet data; SQLite defaults are deferred
+  with SQLite support.
 - [ ] Partition flushed `metric_points` Parquet by `run_id` and
   `metric_key_encoded`.
 - [ ] Add `metric_key_encoded` to `metric_points`; keep raw user-facing

@@ -446,7 +446,12 @@ fn validate_init_config(
             "metric_queue_capacity must be between 1 and 1048576",
         ));
     }
-    if !matches!(catalog_backend, "duckdb" | "sqlite") {
+    if catalog_backend == "sqlite" {
+        return Err(InvalidConfigurationError::new_err(
+            "catalog_backend='sqlite' is deferred until real DuckLake-backed SQLite tests pass",
+        ));
+    }
+    if catalog_backend != "duckdb" {
         return Err(InvalidConfigurationError::new_err(format!(
             "unsupported catalog_backend: {catalog_backend}"
         )));
