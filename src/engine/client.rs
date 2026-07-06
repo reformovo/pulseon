@@ -1243,10 +1243,19 @@ mod tests {
 
         let finish = client.finish_run_with_timeout(&run.run_id, Some(Duration::from_millis(1)));
         let stored = client.get_run(&run.run_id)?;
+        let second_client = NativeClient::open(&root_path)?;
+        let resumed_by_second_client = second_client.resume_run(&run.run_id);
 
         assert!(matches!(finish, Err(EngineError::MetricDrainTimeout)));
         assert_eq!(stored.status, RunStatus::Running);
         assert!(stored.finished_at.is_none());
+        assert!(
+            matches!(
+                resumed_by_second_client,
+                Err(EngineError::RunAlreadyActive { .. })
+            ),
+            "expected finalization timeout to keep writer lock held, got {resumed_by_second_client:?}",
+        );
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }

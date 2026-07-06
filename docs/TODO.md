@@ -461,7 +461,7 @@ fresh after run finalization, and query paths still read persisted
   state and do not flush.
 - [x] Make bounded finalization timeout raise `MetricDrainTimeoutError` without
   writing terminal run state.
-- [ ] Keep the run-writer lock after finalization drain timeout because the run
+- [x] Keep the run-writer lock after finalization drain timeout because the run
   remains writable by the current client.
 - [x] Release the run-writer lock once terminal lifecycle state is written,
   even if the later Parquet flush raises `MetricFlushError`.
