@@ -7,7 +7,7 @@ import pathlib
 from tests import helpers
 
 
-def test_client_queries_metric_points_and_summaries(
+def test_client_queries_metric_points_and_terminal_summaries(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
@@ -24,11 +24,18 @@ def test_client_queries_metric_points_and_summaries(
         "train/loss",
         expected_count=2,
     )
+    client.finish_run(run.run_id)
+    summaries = client.query_metric_summaries([run.run_id], "train/loss")
     diagnostics = client.diagnostics()
 
     assert [point.step for point in points] == [0, 1]
     assert [point.value_f64 for point in points] == [0.25, 0.125]
     assert isinstance(points[0], pulseon.MetricPoint)
+    assert len(summaries) == 1
+    assert isinstance(summaries[0], pulseon.MetricSummary)
+    assert summaries[0].effective_count == 2
+    assert summaries[0].last_step == 1
+    assert summaries[0].last_value_f64 == 0.125
     assert diagnostics.pending_reports == 0
     assert diagnostics.persisted_reports >= 2
     assert diagnostics.writer_state == "drained"
@@ -61,6 +68,28 @@ def test_active_run_metric_discovery_can_lag_persisted_points(
     metrics = client.list_metrics(run.run_id)
 
     assert metrics == []
+
+
+def test_terminal_run_metric_discovery_uses_rebuilt_aggregate_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run.log("eval/accuracy", 0, 0.8)
+    run.log("train/loss", 0, 0.25)
+
+    client.finish_run(run.run_id)
+    metrics = client.list_metrics(run.run_id)
+
+    assert [metric.metric_key for metric in metrics] == [
+        "eval/accuracy",
+        "train/loss",
+    ]
+    assert [metric.effective_count for metric in metrics] == [1, 1]
+    assert isinstance(metrics[0], pulseon.MetricSummary)
 
 
 def test_client_query_metric_applies_range_filters_and_short_max_points(

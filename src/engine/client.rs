@@ -420,6 +420,16 @@ impl NativeClient {
             active_run.open_admission()?;
             return Err(error);
         }
+        {
+            let connection = self.connection()?;
+            if let Err(error) =
+                NativeWriteStore::new(&connection).rebuild_metric_aggregates_for_run(run_id)
+            {
+                drop(connection);
+                active_run.open_admission()?;
+                return Err(error);
+            }
+        }
         let finished_at = current_timestamp("finished_at")?;
         let connection = self.connection()?;
         let updated = connection.execute(
@@ -953,6 +963,44 @@ mod tests {
         assert!(
             matches!(late_log, Err(EngineError::RunClosed { .. })),
             "expected late log to raise RunClosed, got {late_log:?}",
+        );
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn finish_run_rebuilds_metric_aggregates_after_drain() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-final-aggregates")),
+        )?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run-final-aggregates")),
+        )?;
+        let run_handle = client.run_handle(run.clone());
+        run_handle.log_metric_at_step("train/loss", 0, 0.25)?;
+        run_handle.log_metric_at_step("train/loss", 0, 0.125)?;
+        run_handle.log_metric_at_step("eval/accuracy", 0, 0.8)?;
+
+        client.finish_run(&run.run_id)?;
+        let summaries = client.list_metrics(&run.run_id)?;
+
+        assert_eq!(
+            summaries
+                .iter()
+                .map(|summary| (
+                    summary.metric_key.as_str(),
+                    summary.effective_count,
+                    summary.last_value_f64
+                ))
+                .collect::<Vec<_>>(),
+            vec![("eval/accuracy", 1, 0.8), ("train/loss", 1, 0.125)],
         );
         std::fs::remove_dir_all(root_path)?;
         Ok(())

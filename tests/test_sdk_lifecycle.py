@@ -209,7 +209,7 @@ def test_leftover_lock_file_does_not_block_resume(
     assert resumed.run_id == run.run_id
 
 
-def test_client_lists_project_runs_without_requiring_active_run_summaries(
+def test_client_lists_project_runs_for_terminal_summary_queries(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
@@ -233,6 +233,8 @@ def test_client_lists_project_runs_without_requiring_active_run_summaries(
         "train/loss",
         expected_count=1,
     )
+    client.finish_run(first_run.run_id)
+    client.finish_run(second_run.run_id)
     del first_run
     del second_run
     del client
@@ -246,7 +248,8 @@ def test_client_lists_project_runs_without_requiring_active_run_summaries(
 
     assert [run.run_id for run in runs] == ["run-1", "run-2"]
     assert [run.name for run in runs] == ["baseline", "candidate"]
-    assert summaries == []
+    assert [summary.run_id for summary in summaries] == ["run-1", "run-2"]
+    assert [summary.last_value_f64 for summary in summaries] == [0.25, 0.125]
 
 
 def test_client_detects_orphan_running_runs(tmp_path: pathlib.Path) -> None:
