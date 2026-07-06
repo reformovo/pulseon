@@ -53,6 +53,7 @@ def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
     import pulseon
 
     invalid_kwargs = [
+        {"metric_queue_capacity": -1},
         {"metric_queue_capacity": 0},
         {"metric_queue_capacity": 1_048_577},
         {"catalog_backend": "postgres"},

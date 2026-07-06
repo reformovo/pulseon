@@ -572,7 +572,7 @@ V2 TODO audit notes from 2026-07-06:
 
 V2 post-review contract gaps from 2026-07-06:
 
-- [ ] Reject negative Python `metric_queue_capacity` values with
+- [x] Reject negative Python `metric_queue_capacity` values with
   `InvalidConfigurationError`, not PyO3 `OverflowError`. The binding should
   accept a signed integer at the Python boundary and route all range failures
   through the shared init validation path.

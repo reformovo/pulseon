@@ -435,13 +435,13 @@ pub fn init(
     data_path: Option<PathBuf>,
     catalog_backend: &str,
     catalog_path: Option<PathBuf>,
-    metric_queue_capacity: usize,
+    metric_queue_capacity: i64,
     context_shutdown_timeout: Option<f64>,
 ) -> PyResult<PyClient> {
     let context_shutdown_timeout = context_shutdown_timeout
         .map(|seconds| duration_from_seconds("context_shutdown_timeout", seconds))
         .transpose()?;
-    validate_init_config(
+    let metric_queue_capacity = validate_init_config(
         data_path.as_deref(),
         catalog_backend,
         catalog_path.as_deref(),
@@ -456,8 +456,8 @@ fn validate_init_config(
     data_path: Option<&Path>,
     catalog_backend: &str,
     catalog_path: Option<&Path>,
-    metric_queue_capacity: usize,
-) -> PyResult<()> {
+    metric_queue_capacity: i64,
+) -> PyResult<usize> {
     if !(1..=1_048_576).contains(&metric_queue_capacity) {
         return Err(InvalidConfigurationError::new_err(
             "metric_queue_capacity must be between 1 and 1048576",
@@ -483,7 +483,9 @@ fn validate_init_config(
             "catalog_path must be a local filesystem path",
         ));
     }
-    Ok(())
+    usize::try_from(metric_queue_capacity).map_err(|_| {
+        InvalidConfigurationError::new_err("metric_queue_capacity must be between 1 and 1048576")
+    })
 }
 
 fn is_uri_path(path: &Path) -> bool {
