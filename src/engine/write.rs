@@ -129,8 +129,6 @@ impl<'connection> NativeWriteStore<'connection> {
                 timestamp_as_rfc3339(ingested_at),
             ),
         )?;
-        self.refresh_metric_aggregate(run_id, metric_key)?;
-
         Ok(MetricPoint {
             run_id: run_id.clone(),
             metric_key: metric_key.clone(),
@@ -139,14 +137,6 @@ impl<'connection> NativeWriteStore<'connection> {
             value_f64,
             ingested_at,
         })
-    }
-
-    pub fn repair_metric_aggregate(
-        &self,
-        run_id: &RunId,
-        metric_key: &MetricKey,
-    ) -> Result<(), EngineError> {
-        self.refresh_metric_aggregate(run_id, metric_key)
     }
 
     pub fn rebuild_metric_aggregates_for_run(&self, run_id: &RunId) -> Result<(), EngineError> {
@@ -184,40 +174,6 @@ impl<'connection> NativeWriteStore<'connection> {
             |row| row.get(0),
         )?;
         Ok(count > 0)
-    }
-
-    fn refresh_metric_aggregate(
-        &self,
-        run_id: &RunId,
-        metric_key: &MetricKey,
-    ) -> Result<(), EngineError> {
-        self.connection.execute(
-            "DELETE FROM __ducklake_metadata_dl.pulseon_metric_aggregates
-             WHERE run_id = ?
-               AND metric_key = ?",
-            (run_id.as_str(), metric_key.as_str()),
-        )?;
-        self.connection.execute(
-            "INSERT INTO __ducklake_metadata_dl.pulseon_metric_aggregates
-                 (run_id, metric_key, effective_count, last_step, last_value_f64,
-                  min_value_f64, max_value_f64)
-             SELECT run_id, metric_key, count(*), arg_max(step, step), arg_max(value_f64, step),
-                    min(value_f64), max(value_f64)
-             FROM (
-                 SELECT *,
-                        row_number() OVER (
-                            PARTITION BY run_id, metric_key, step
-                            ORDER BY ingested_at DESC, rowid DESC
-                        ) AS write_rank
-                 FROM dl.metric_points
-                 WHERE run_id = ?
-                   AND metric_key = ?
-             )
-             WHERE write_rank = 1
-             GROUP BY run_id, metric_key",
-            (run_id.as_str(), metric_key.as_str()),
-        )?;
-        Ok(())
     }
 }
 

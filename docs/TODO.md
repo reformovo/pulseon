@@ -674,7 +674,7 @@ focused tests, and the relevant verification gate.
   `NativeWriteStore`, including `log_metric(...)` and `next_metric_step(...)`.
   Update native tests to use explicit-step batch/client paths rather than the
   old synchronous compatibility helpers.
-- [ ] Re-evaluate synchronous metric write helpers that still refresh
+- [x] Re-evaluate synchronous metric write helpers that still refresh
   `metric_aggregates` per report. Keep only helpers that are still necessary
   for query/storage tests; otherwise delete them and move tests to persisted
   batch data plus finalization-time aggregate rebuild.
