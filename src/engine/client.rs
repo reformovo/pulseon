@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
 use crate::engine::EngineError;
-use crate::engine::bootstrap::{NativeStorageConfig, open_native_connection_with_config};
+use crate::engine::bootstrap::{
+    CatalogBackend, NativeStorageConfig, open_native_connection_with_config,
+};
 use crate::engine::query::NativeQueryStore;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
@@ -42,8 +44,25 @@ impl NativeClient {
         data_path: Option<PathBuf>,
         metric_queue_capacity: usize,
     ) -> Result<Self, EngineError> {
+        Self::open_with_catalog_backend_storage_config(
+            path,
+            CatalogBackend::DuckDb,
+            catalog_path,
+            data_path,
+            metric_queue_capacity,
+        )
+    }
+
+    pub(crate) fn open_with_catalog_backend_storage_config(
+        path: impl AsRef<Path>,
+        catalog_backend: CatalogBackend,
+        catalog_path: Option<PathBuf>,
+        data_path: Option<PathBuf>,
+        metric_queue_capacity: usize,
+    ) -> Result<Self, EngineError> {
         let root_path = path.as_ref().to_path_buf();
-        let storage_config = NativeStorageConfig::duckdb(&root_path, catalog_path, data_path);
+        let storage_config =
+            NativeStorageConfig::with_backend(catalog_backend, &root_path, catalog_path, data_path);
         let connection = open_native_connection_with_config(storage_config)?;
         let connection = Arc::new(Mutex::new(connection));
         let reporter =
@@ -91,7 +110,7 @@ impl NativeClient {
     pub fn get_project(&self, project_id: &ProjectId) -> Result<Project, EngineError> {
         let connection = self.connection()?;
         let result = connection.query_row(
-            "SELECT project_id, name, epoch_ms(created_at)
+            "SELECT project_id, name, epoch_ms(created_at::TIMESTAMPTZ)
              FROM pulseon_projects
              WHERE project_id = ?",
             [project_id.as_str()],

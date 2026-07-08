@@ -81,6 +81,18 @@ def test_init_uses_duckdb_catalog_and_data_defaults(tmp_path: pathlib.Path) -> N
     assert (root_path / ".pulseon" / "data").is_dir()
 
 
+def test_init_uses_sqlite_catalog_and_data_defaults(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path, catalog_backend="sqlite")
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert (root_path / ".pulseon" / "catalog.sqlite").is_file()
+    assert (root_path / ".pulseon" / "data").is_dir()
+
+
 def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
     import pulseon
 
@@ -89,7 +101,6 @@ def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
         {"metric_queue_capacity": 0},
         {"metric_queue_capacity": 1_048_577},
         {"catalog_backend": "postgres"},
-        {"catalog_backend": "sqlite"},
         {"data_path": "s3://bucket/pulseon"},
         {"catalog_path": "s3://bucket/catalog.ducklake"},
     ]

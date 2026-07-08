@@ -5,7 +5,31 @@ use crate::engine::EngineError;
 const DUCKLAKE_ALIAS: &str = "dl";
 const DUCKDB_CATALOG_ALIAS: &str = "pulseon_catalog";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CatalogBackend {
+    DuckDb,
+    Sqlite,
+}
+
+impl CatalogBackend {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "duckdb" => Some(Self::DuckDb),
+            "sqlite" => Some(Self::Sqlite),
+            _ => None,
+        }
+    }
+
+    fn adapter(self) -> CatalogAdapter {
+        match self {
+            Self::DuckDb => CatalogAdapter::duckdb(),
+            Self::Sqlite => CatalogAdapter::sqlite(),
+        }
+    }
+}
+
 pub(crate) struct NativeStorageConfig {
+    catalog_backend: CatalogBackend,
     catalog_path: PathBuf,
     data_path: PathBuf,
 }
@@ -14,6 +38,8 @@ struct CatalogAdapter {
     default_catalog_filename: &'static str,
     ducklake_alias: &'static str,
     catalog_application_database: &'static str,
+    ducklake_path_prefix: &'static str,
+    attach_type_clause: Option<&'static str>,
 }
 
 impl CatalogAdapter {
@@ -22,16 +48,36 @@ impl CatalogAdapter {
             default_catalog_filename: "catalog.ducklake",
             ducklake_alias: DUCKLAKE_ALIAS,
             catalog_application_database: DUCKDB_CATALOG_ALIAS,
+            ducklake_path_prefix: "",
+            attach_type_clause: Some("TYPE ducklake"),
+        }
+    }
+
+    const fn sqlite() -> Self {
+        Self {
+            default_catalog_filename: "catalog.sqlite",
+            ducklake_alias: DUCKLAKE_ALIAS,
+            catalog_application_database: DUCKDB_CATALOG_ALIAS,
+            ducklake_path_prefix: "ducklake:sqlite:",
+            attach_type_clause: None,
         }
     }
 
     fn attach_ducklake_statement(&self, catalog_path: &Path, data_path: &Path) -> String {
-        let catalog_path = sql_string_literal(catalog_path.to_string_lossy().as_ref());
+        let catalog_uri = format!(
+            "{}{}",
+            self.ducklake_path_prefix,
+            catalog_path.to_string_lossy()
+        );
+        let catalog_uri = sql_string_literal(&catalog_uri);
         let data_path = sql_string_literal(data_path.to_string_lossy().as_ref());
+        let attach_type_clause = self
+            .attach_type_clause
+            .map(|clause| format!("                 {clause},\n"))
+            .unwrap_or_default();
         format!(
-            "ATTACH {catalog_path} AS {} (
-                 TYPE ducklake,
-                 DATA_PATH {data_path},
+            "ATTACH {catalog_uri} AS {} (
+{attach_type_clause}                 DATA_PATH {data_path},
                  METADATA_CATALOG '{}'
              );",
             self.ducklake_alias, self.catalog_application_database
@@ -55,14 +101,25 @@ impl CatalogAdapter {
 }
 
 impl NativeStorageConfig {
+    #[cfg(test)]
     pub(crate) fn duckdb(
         root_path: &Path,
         catalog_path: Option<PathBuf>,
         data_path: Option<PathBuf>,
     ) -> Self {
+        Self::with_backend(CatalogBackend::DuckDb, root_path, catalog_path, data_path)
+    }
+
+    pub(crate) fn with_backend(
+        catalog_backend: CatalogBackend,
+        root_path: &Path,
+        catalog_path: Option<PathBuf>,
+        data_path: Option<PathBuf>,
+    ) -> Self {
         let pulseon_path = root_path.join(".pulseon");
-        let adapter = CatalogAdapter::duckdb();
+        let adapter = catalog_backend.adapter();
         Self {
+            catalog_backend,
             catalog_path: catalog_path
                 .unwrap_or_else(|| pulseon_path.join(adapter.default_catalog_filename)),
             data_path: data_path.unwrap_or_else(|| pulseon_path.join("data")),
@@ -92,14 +149,29 @@ pub(crate) fn open_native_connection_with_config(
     })?;
 
     let connection = open_duckdb_connection()?;
-    attach_ducklake(&connection, &config.catalog_path, &config.data_path)?;
-    setup_duckdb_catalog_adapter(&connection, &config.catalog_path)?;
+    attach_ducklake_with_backend(
+        &connection,
+        config.catalog_backend,
+        &config.catalog_path,
+        &config.data_path,
+    )?;
+    setup_catalog_adapter(&connection, config.catalog_backend, &config.catalog_path)?;
     create_v1_tables(&connection)?;
     Ok(connection)
 }
 
+#[cfg(test)]
 pub(crate) fn attach_ducklake(
     connection: &duckdb::Connection,
+    catalog_path: &Path,
+    data_path: &Path,
+) -> Result<(), EngineError> {
+    attach_ducklake_with_backend(connection, CatalogBackend::DuckDb, catalog_path, data_path)
+}
+
+pub(crate) fn attach_ducklake_with_backend(
+    connection: &duckdb::Connection,
+    catalog_backend: CatalogBackend,
     catalog_path: &Path,
     data_path: &Path,
 ) -> Result<(), EngineError> {
@@ -108,7 +180,7 @@ pub(crate) fn attach_ducklake(
         path_basename(catalog_path),
         path_basename(data_path)
     );
-    let adapter = CatalogAdapter::duckdb();
+    let adapter = catalog_backend.adapter();
     connection
         .execute_batch(&format!(
             "INSTALL ducklake;
@@ -124,11 +196,22 @@ pub(crate) fn attach_ducklake(
     Ok(())
 }
 
+pub(crate) fn setup_catalog_adapter(
+    connection: &duckdb::Connection,
+    catalog_backend: CatalogBackend,
+    catalog_path: &Path,
+) -> Result<(), EngineError> {
+    catalog_backend
+        .adapter()
+        .setup_catalog_application_tables(connection, catalog_path)
+}
+
+#[cfg(test)]
 pub(crate) fn setup_duckdb_catalog_adapter(
     connection: &duckdb::Connection,
     catalog_path: &Path,
 ) -> Result<(), EngineError> {
-    CatalogAdapter::duckdb().setup_catalog_application_tables(connection, catalog_path)
+    setup_catalog_adapter(connection, CatalogBackend::DuckDb, catalog_path)
 }
 
 fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
