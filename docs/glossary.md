@@ -46,13 +46,13 @@ release.
   summary schema.
 - **Parquet schema**: The open compatibility boundary for native metric data.
 - **Catalog backend**: The database engine DuckLake uses for metadata in native
-  mode. V2 validates DuckDB first; SQLite is named but deferred until real
-  DuckLake-backed parity tests pass.
+  mode. The released a2 native mode supports DuckDB; SQLite is named but
+  deferred until real DuckLake-backed parity tests pass.
 - **Data path**: The local filesystem location where DuckLake writes Parquet
   data files.
 - **Catalog path**: The local path or connection target used for DuckLake
   catalog metadata.
-- **DuckLake**: The required native storage engine for v2. It is a core
+- **DuckLake**: The required native storage engine. It is a core
   dependency during validation, not a public product protocol.
 - **Native mode**: Local-first operation without a separate service process.
 

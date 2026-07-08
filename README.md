@@ -3,15 +3,16 @@
 PulseOn is a local-first training metrics tracker backed by Rust, PyO3, DuckDB,
 and DuckLake.
 
-Current focus: plan and implement the 0.1.0a2 native loop:
+Current focus: start the 0.1.0a3 / v3 native loop after the 0.1.0a2 alpha
+release:
 
 - create a project
 - start or resume a run
 - log explicit-step numeric metrics through a bounded async queue
 - query metric series and summaries locally
-- support local DuckDB DuckLake catalog storage
+- support local DuckDB-backed DuckLake catalog storage
 - defer SQLite catalog support until real DuckLake-backed parity tests pass
-- keep the v2 public data path local-filesystem only
+- keep the current public data path local-filesystem only
 - keep Parquet as the long-term compatibility boundary
 
 Python API shape:
@@ -38,10 +39,10 @@ from completing before the timeout.
 
 Architecture entry points:
 
-- [Catalog/data boundary](docs/catalog-data-boundary.md)
-- [V1 native architecture](docs/v1-native-architecture.md)
+- [Docs index](docs/README.md)
+- [Native storage boundary](docs/native-storage-boundary.md)
 - [Glossary](docs/glossary.md)
-- [Roadmap](docs/TODO.md)
+- [Roadmap](docs/ROADMAP.md)
 - [ADRs](docs/adr/)
 
 Runtime extensions:

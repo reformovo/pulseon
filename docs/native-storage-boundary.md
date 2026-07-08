@@ -1,13 +1,13 @@
-# Catalog/Data Boundary
+# Native Storage Boundary
 
-This document records the v2 storage boundary between the catalog database and
-the DuckLake data area.
+This document records the native storage boundary between the catalog database
+and the DuckLake data area.
 
 ## Decision
 
-V2 treats the catalog database as the primary home for control-plane state and
-query index state. The DuckLake data area is primarily for large Parquet-backed
-fact data.
+PulseOn treats the catalog database as the primary home for control-plane state
+and query index state. The DuckLake data area is primarily for large
+Parquet-backed fact data.
 
 ```text
 catalog database
@@ -21,7 +21,7 @@ data area / object storage
   partitioned metric_points Parquet files
 ```
 
-For local native mode, the v2 catalog database is backed by a DuckDB catalog
+The released a2 local native catalog database is backed by a DuckDB catalog
 file. SQLite remains a named but deferred backend until real DuckLake-backed
 parity tests pass. PostgreSQL is a future shared-catalog option. Object storage
 is for the data area, not for the catalog database file itself.
@@ -34,9 +34,9 @@ The default project-local store is:
   data/              # default Parquet data path
 ```
 
-Users must be able to override only the Parquet data path. For v2, the public
+Users must be able to override only the Parquet data path. The current public
 `data_path` contract is local filesystem paths. S3-compatible object-storage
-data paths, including local MinIO, are deferred to a post-v2 release; when
+data paths, including local MinIO, are deferred to a future release; when
 enabled later, the catalog database still remains local unless a shared-catalog
 decision says otherwise.
 
@@ -68,14 +68,17 @@ lookup and transactional refresh are cheap.
 - Own transactional updates for run lifecycle and aggregate refresh.
 - Optionally hold DuckLake inline data for small batches before flush.
 
+Field-level schemas for PulseOn-owned catalog tables live in
+`docs/catalog-application-tables.md`.
+
 ## Data Area Responsibilities
 
 - Store large Parquet data files for metric facts.
 - Support local filesystem paths in native mode.
-- Support a custom local Parquet data path in v2.
+- Support a custom local Parquet data path.
 - Defer S3-compatible object-storage data paths, including local MinIO, to a
-  post-v2 release.
-- Keep the metric point schema compatible with the v2 Parquet contract.
+  future release.
+- Keep the metric point schema compatible with the Parquet contract.
 - Partition metric point files for export-friendly layout.
 - Preserve accepted metric points without making the training hot path wait for
   DuckDB, DuckLake, or Parquet flush work.
@@ -84,8 +87,8 @@ lookup and transactional refresh are cheap.
 ## Metric Point Partitioning
 
 Metric data means the `metric_points` fact table.
-`metric_points` must be partitioned when flushed to Parquet. V2 partitions by
-`run_id` and `metric_key_encoded`; it does not denormalize `project_id` into
+`metric_points` must be partitioned when flushed to Parquet. PulseOn partitions
+by `run_id` and `metric_key_encoded`; it does not denormalize `project_id` into
 the metric point fact table. Project-scoped exports must use catalog
 `pulseon_runs(project_id)` metadata.
 
@@ -101,8 +104,8 @@ This mirrors the DuckLake behavior validated in
 Hive-style `column=value/` directories after `ALTER TABLE ... SET PARTITIONED
 BY (...)`.
 
-Raw metric keys may contain path separators, such as `train/loss`. V2 therefore
-adds a public `metric_key_encoded` column containing the reversible
+Raw metric keys may contain path separators, such as `train/loss`. PulseOn
+therefore adds a public `metric_key_encoded` column containing the reversible
 percent-encoded metric key. The user-facing `metric_key` remains unencoded in
 the logical fact table, while DuckLake partitions flushed Parquet by `run_id`
 and `metric_key_encoded`. The encoding uses RFC 3986 percent-encoding over
@@ -114,9 +117,9 @@ directory values again when it writes Hive-style `column=value/` paths, so a
 logical key value such as `train%2Floss` can appear on disk under
 `metric_key_encoded=train%252Floss/`.
 
-V2 does not partition by `step`. Very long metric series may produce multiple
-Parquet files in one run/key partition, but not additional step-based directory
-levels.
+PulseOn does not partition by `step`. Very long metric series may produce
+multiple Parquet files in one run/key partition, but not additional step-based
+directory levels.
 
 ## Custom Data Path
 
@@ -126,7 +129,7 @@ PulseOn has two paths:
 - `data_path`: the Parquet data area used by DuckLake.
 
 The default `data_path` is `<project>/.pulseon/data`. Users must be able to
-override `data_path` independently with a local filesystem path in v2, for
+override `data_path` independently with a local filesystem path, for
 example:
 
 ```text
@@ -148,11 +151,11 @@ Metric ingestion has two separate requirements:
 - PulseOn must not silently drop metric points that it has accepted from user
   code.
 
-The catalog/data boundary therefore requires a clear distinction between
+The storage boundary therefore requires a clear distinction between
 queued reports and accepted reports. Admission into a bounded in-process memory
-queue alone is not acceptance. In v2 Phase A, a report becomes accepted when the
-background batch writer persists it into DuckLake, so accepted reports and
-persisted metric points are the same state.
+queue alone is not acceptance. In the released a2 contract, a report becomes
+accepted when the background batch writer persists it into DuckLake, so
+accepted reports and persisted metric points are the same state.
 
 If PulseOn cannot queue a metric report because the bounded metric queue is
 full, that condition must be surfaced as an explicit queue-full failure rather
@@ -180,21 +183,21 @@ not discard accepted metric points. Flush failure after terminal lifecycle state
 is written must raise `MetricFlushError`, must not roll back the run's terminal
 state, and must update runtime-only diagnostics. Ordinary `MetricFlushError`
 messages must include the failed operation and basename, not full local paths by
-default; explicit debug dumps or verbose diagnostics are post-v2 work. Users
+default; explicit debug dumps or verbose diagnostics are future work. Users
 retry that visibility step with `flush_run_data(run_id)`, not by calling
 `finish_run(...)` or `fail_run(...)` again.
 
 Diagnostics are exposed through `client.diagnostics()` as a public read-only
 runtime snapshot for users, tests, and operational debugging. They describe the
 current client process only. They are not query results, durable history,
-catalog truth, or a recovery protocol. V2 does not add per-run diagnostics
+catalog truth, or a recovery protocol. PulseOn does not add per-run diagnostics
 queries, diagnostics event history, telemetry export, or durable diagnostic
 tables. `client.diagnostics()` remains callable after `shutdown()` and returns
-the last runtime snapshot. Diagnostics reads are safe, but v2 does not promise
-cross-field atomic consistency; callers that need lifecycle or drain guarantees
-must use explicit APIs. Report counters and `writer_state` are runtime-only
-current-client state. They are not catalog state, not durable history, and are
-not restored when another process opens the same project.
+the last runtime snapshot. Diagnostics reads are safe, but PulseOn does not
+promise cross-field atomic consistency; callers that need lifecycle or drain
+guarantees must use explicit APIs. Report counters and `writer_state` are
+runtime-only current-client state. They are not catalog state, not durable
+history, and are not restored when another process opens the same project.
 
 Normal finalization must drain through the current client's enqueue barrier
 before the flush step. Finalization first closes metric admission for the run,
@@ -222,19 +225,21 @@ to Parquet. Context-manager exit follows the same resource-release rule. If the
 user block is already raising an exception,
 PulseOn must not mask that original exception with a writer-failed or
 drain-timeout teardown error; the user exception takes priority, with the
-teardown error attached as exception context when practical. V2 must not add a
-new logging dependency for teardown errors; diagnostics remain the observable
-state if exception chaining is too costly. Even when a user exception is active,
-context-manager exit still performs best-effort resource release. If drain
+teardown error attached as exception context when practical. PulseOn must not
+add a new logging dependency for teardown errors; diagnostics remain the
+observable state if exception chaining is too costly. Even when a user
+exception is active, context-manager exit still performs best-effort resource
+release. If drain
 times out during context-manager exit, shutdown did not complete: metric
 admission stays open, the run-writer lock remains held, and the client remains
 usable if the caller still has a reference. With no user exception active,
 PulseOn raises `MetricDrainTimeoutError`; with a user exception active, the
-user exception remains primary and the timeout is observable through diagnostics
-or exception context when practical.
-Users who want terminal-run Parquet
-visibility must call `finish_run(...)` or `fail_run(...)`; users recovering from
-a prior flush failure call `flush_run_data(run_id)`. Calling `run.log(...)`
+user exception remains primary and the timeout is observable through
+diagnostics or exception context when practical.
+
+Users who want terminal-run Parquet visibility must call `finish_run(...)` or
+`fail_run(...)`; users recovering from a prior flush failure call
+`flush_run_data(run_id)`. Calling `run.log(...)`
 through a shut-down client raises `ClientClosedError`; this is separate from
 `RunClosedError` because the underlying run may still be running and resumable.
 Calling `flush_run_data(run_id)` for a running run raises
@@ -250,11 +255,13 @@ APIs. `finish_run(...)` and `fail_run(...)` reject already terminal runs with
 `InvalidRunStateError`, including repeated calls with the same target terminal
 state.
 
-V2 supports only one active writer client per run. A local run-writer lock
-prevents two clients from concurrently logging to the same running run.
+Current native mode supports only one active writer client per run. A local
+run-writer lock prevents two clients from concurrently logging to the same
+running run.
 `create_run(...)` and `resume_run(run_id)` must acquire the lock before
-returning a writable `Run` handle. The lock is an OS advisory file lock; v2 does
-not add a lock table, lease protocol, heartbeat, or stale-lock cleanup system.
+returning a writable `Run` handle. The lock is an OS advisory file lock;
+PulseOn does not add a lock table, lease protocol, heartbeat, or stale-lock
+cleanup system.
 Lock acquisition is a try-lock, not a blocking wait. If the lock is already
 held, `create_run(...)` or `resume_run(run_id)` immediately raises
 non-fatal `RunAlreadyActiveError` with the conflicting `run_id` in the message,
@@ -286,7 +293,7 @@ permission, or disk failures affecting catalog paths, data paths, lock
 directories, or lock files raise `StorageError`, not
 `InvalidConfigurationError`. Ordinary `StorageError` messages should include
 the failed operation and basename, not full local paths by default. Full local
-paths are not exposed through ordinary diagnostics in v2 Phase A; they are
+paths are not exposed through ordinary diagnostics; they are
 reserved for a future explicit debug/verbose facility or internal chained/source
 errors intended for debugging.
 
@@ -297,29 +304,30 @@ writer also exhausts persistence retries.
 
 Because `shutdown()` does not finalize runs, it may leave running-run metric
 data persisted in DuckLake but not forced into Parquet files. That is accepted
-in v2: only terminal runs require Parquet visibility.
+in current native mode: only terminal runs require Parquet visibility.
 
 ## Implications
 
 The Parquet schema contract documents stable table shapes for reading and
 export, but it does not require every PulseOn table to use Parquet as its
-primary storage location. In v2, `pulseon_projects`, `pulseon_runs`, and
-`pulseon_metric_aggregates` are catalog application tables and are not DuckLake
-logical tables.
+primary storage location. Currently, `pulseon_projects`, `pulseon_runs`, and
+`pulseon_metric_aggregates` are catalog application tables and are not
+DuckLake logical tables.
 
-V2 may build or refresh `metric_aggregates` after a run is finalized instead of
-maintaining it synchronously during active metric reporting. Active-run queries
-that require fresh data should read persisted `metric_points` through DuckLake.
+PulseOn may build or refresh `metric_aggregates` after a run is finalized
+instead of maintaining it synchronously during active metric reporting.
+Active-run queries that require fresh data should read persisted
+`metric_points` through DuckLake.
 
 DuckLake may create directories for its logical tables under the data area. That
-physical layout is an implementation detail, but v2 should not model project,
-run, or aggregate application state as DuckLake logical tables.
+physical layout is an implementation detail, but PulseOn should not model
+project, run, or aggregate application state as DuckLake logical tables.
 
 Small metric batches may also remain inline in the catalog before run end. This
 is acceptable because it avoids small-file churn. After run end, inline
 `metric_points` data must be flushed to the configured data path.
 
-V2 does not store durable Parquet visibility state such as a
+PulseOn does not store durable Parquet visibility state such as a
 `run_storage_state` table. Finalization is expected to drain the run and flush
 terminal-run data; shutdown drains queued reports but does not force running
 runs into Parquet. Flush failures are surfaced by the operation or by
@@ -332,5 +340,5 @@ they are reset by process restart and are not a recovery protocol.
 ## Non-Goals
 
 - This does not introduce a public `StorageLayer`.
-- This does not require PostgreSQL for v2 local native mode.
+- This does not require PostgreSQL for current local native mode.
 - This does not make DuckLake catalog internals part of the PulseOn API.

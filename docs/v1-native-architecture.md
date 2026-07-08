@@ -67,7 +67,7 @@ DuckLake is required in native v1 to avoid custom staging, flush, and compaction
 before validation.
 
 The stable product contract is the PulseOn Parquet schema documented in
-`docs/v1-parquet-schema-contract.md`. DuckLake catalog metadata is
+`docs/parquet-schema-contract.md`. DuckLake catalog metadata is
 implementation detail.
 
 ## Query Goals
