@@ -20,17 +20,16 @@ Python API shape:
 ```python
 import pulseon
 
-client = pulseon.init(
-    "runs",
-    data_path=None,
-    catalog_backend="duckdb",
-    catalog_path=None,
-    metric_queue_capacity=65536,
-)
+client = pulseon.init()
 project = client.create_project("local training")
 run = client.create_run(project.project_id, "baseline")
 run.log("train/loss", 0, 0.25)
 ```
+
+By default, PulseOn stores local state under `./.pulseon`. Pass an explicit
+root path, such as `pulseon.init("runs")`, when a project should use a
+different local store. The existing storage keywords remain available:
+`data_path`, `catalog_backend`, `catalog_path`, and `metric_queue_capacity`.
 
 For bounded teardown, stop active logging threads before calling
 `client.shutdown(timeout=...)`; PulseOn keeps admission open while bounded

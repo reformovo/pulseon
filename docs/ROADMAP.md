@@ -13,15 +13,15 @@ stores do not need migration support.
 
 ### Phase 1: Public API Defaults
 
-- [ ] Make `pulseon.init()` default to the current working directory,
+- [x] Make `pulseon.init()` default to the current working directory,
   equivalent to `pulseon.init(".")`, so the default local store remains
   `./.pulseon` without requiring an explicit path argument.
-- [ ] Keep the rest of the public Python API shape unchanged for V3.
-- [ ] Update `python/pulseon/__init__.py`, `python/pulseon/_pulseon.pyi`,
+- [x] Keep the rest of the public Python API shape unchanged for V3.
+- [x] Update `python/pulseon/__init__.py`, `python/pulseon/_pulseon.pyi`,
   README/examples, and Python-facing tests to cover no-argument initialization,
   explicit custom-root initialization, and unchanged custom `catalog_path` /
   `data_path` behavior.
-- [ ] Verification gate: `uv run maturin develop --uv`, `uv run pyright`, and
+- [x] Verification gate: `uv run maturin develop --uv`, `uv run pyright`, and
   the Python init/lifecycle tests that cover default and explicit roots.
 
 ### Phase 2: Catalog Adapter on DuckDB
