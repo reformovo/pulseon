@@ -71,19 +71,19 @@ stores do not need migration support.
 
 ### Phase 4: Metric Data Layout
 
-- [ ] Set the DuckLake table-level option
+- [x] Set the DuckLake table-level option
   `data_inlining_row_limit=8192` for `metric_points` to reduce tiny Parquet
   files from short runs and small writer appends.
-- [ ] Keep `target_file_size` unset in V3 unless local measurements prove the
+- [x] Keep `target_file_size` unset in V3 unless local measurements prove the
   default causes a concrete problem. Record any measurement in the relevant test
   or follow-up note rather than adding a public configuration knob.
-- [ ] Preserve the terminal-run flush contract: `finish_run(...)` and
+- [x] Preserve the terminal-run flush contract: `finish_run(...)` and
   `fail_run(...)` drain accepted reports, write terminal lifecycle state, and
   flush inline `metric_points` to Parquet; `flush_run_data(run_id)` remains the
   retry API.
-- [ ] Add DuckDB and SQLite coverage proving short runs stay inline before
+- [x] Add DuckDB and SQLite coverage proving short runs stay inline before
   terminal flush and become Parquet-visible after terminal flush.
-- [ ] Verification gate: `cargo test`, `uv run maturin develop --uv`, and
+- [x] Verification gate: `cargo test`, `uv run maturin develop --uv`, and
   Python lifecycle tests that inspect terminal Parquet visibility.
 
 ### Phase 5: Release Gate
