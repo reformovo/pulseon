@@ -1027,7 +1027,7 @@ mod tests {
         {
             let connection = connection.lock().expect("test connection lock");
             connection.execute(
-                "INSERT INTO __ducklake_metadata_dl.pulseon_projects (project_id, name, created_at)
+                "INSERT INTO pulseon_projects (project_id, name, created_at)
                  VALUES ('project-1', 'local training', now())",
                 [],
             )?;
@@ -1074,7 +1074,7 @@ mod tests {
         {
             let connection = connection.lock().expect("test connection lock");
             connection.execute(
-                "INSERT INTO __ducklake_metadata_dl.pulseon_projects (project_id, name, created_at)
+                "INSERT INTO pulseon_projects (project_id, name, created_at)
                  VALUES ('project-1', 'local training', now())",
                 [],
             )?;
@@ -1090,7 +1090,7 @@ mod tests {
         let connection = connection.lock().expect("test connection lock");
         let aggregate_count: u64 = connection.query_row(
             "SELECT count(*)
-             FROM __ducklake_metadata_dl.pulseon_metric_aggregates
+             FROM pulseon_metric_aggregates
              WHERE run_id = 'run-1'
                AND metric_key = 'train/loss'",
             [],

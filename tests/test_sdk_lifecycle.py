@@ -52,6 +52,23 @@ def test_init_accepts_v2_configuration_keywords(tmp_path: pathlib.Path) -> None:
     assert catalog_path.is_file()
 
 
+def test_init_accepts_explicit_duckdb_catalog_path_without_ducklake_suffix(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    catalog_path = tmp_path / "catalog" / "pulseon-catalog.db"
+    client = pulseon.init(
+        tmp_path / "pulseon",
+        catalog_backend="duckdb",
+        catalog_path=catalog_path,
+    )
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert catalog_path.is_file()
+
+
 def test_init_uses_duckdb_catalog_and_data_defaults(tmp_path: pathlib.Path) -> None:
     import pulseon
 

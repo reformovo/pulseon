@@ -26,28 +26,28 @@ stores do not need migration support.
 
 ### Phase 2: Catalog Adapter on DuckDB
 
-- [ ] Add a backend-aware catalog adapter while keeping only
+- [x] Add a backend-aware catalog adapter while keeping only
   `catalog_backend="duckdb"` enabled. The adapter must provide the DuckLake
   attach statement, default catalog filename, catalog application table
   qualification, and any backend setup needed before table creation.
-- [ ] Keep backend-specific default catalog filenames, but do not enforce file
+- [x] Keep backend-specific default catalog filenames, but do not enforce file
   suffixes when the user passes an explicit `catalog_path`.
-- [ ] Move PulseOn-owned catalog application tables out of DuckLake's internal
+- [x] Move PulseOn-owned catalog application tables out of DuckLake's internal
   metadata alias for the DuckDB backend. Code must stop hard-coding
   `__ducklake_metadata_dl.pulseon_projects`,
   `__ducklake_metadata_dl.pulseon_runs`, and
   `__ducklake_metadata_dl.pulseon_metric_aggregates`.
-- [ ] Keep stable PulseOn-owned table names:
+- [x] Keep stable PulseOn-owned table names:
   `pulseon_projects`, `pulseon_runs`, and `pulseon_metric_aggregates`. Do not
   rely on schema-qualified names as the portable baseline because SQLite does
   not support PostgreSQL/DuckDB-style schemas inside one database file.
-- [ ] Store PulseOn catalog application tables in the same catalog database file
+- [x] Store PulseOn catalog application tables in the same catalog database file
   as DuckLake metadata for the DuckDB backend.
-- [ ] Preserve existing DuckDB behavior for project/run lifecycle, metric writes,
+- [x] Preserve existing DuckDB behavior for project/run lifecycle, metric writes,
   active and terminal queries, aggregate refresh, terminal flush, custom local
   `data_path`, explicit custom `catalog_path`, and invalid backend/configuration
   errors.
-- [ ] Verification gate: `cargo check`, `cargo test`, `uv run maturin develop
+- [x] Verification gate: `cargo check`, `cargo test`, `uv run maturin develop
   --uv`, and the existing Python lifecycle/query/diagnostics tests.
 
 ### Phase 3: SQLite Backend Parity
