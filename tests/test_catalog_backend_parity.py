@@ -87,6 +87,53 @@ def test_catalog_backend_round_trips_native_storage_workflow(
 
 
 @pytest.mark.parametrize("catalog_backend", _CATALOG_BACKENDS)
+@pytest.mark.parametrize("terminal_method", ["finish_run", "fail_run"])
+def test_short_run_metrics_flush_from_inline_to_parquet(
+    tmp_path: pathlib.Path,
+    catalog_backend: str,
+    terminal_method: str,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / catalog_backend / terminal_method / "pulseon"
+    data_path = tmp_path / catalog_backend / terminal_method / "data"
+    client = pulseon.init(
+        root_path,
+        data_path=data_path,
+        catalog_backend=catalog_backend,
+    )
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    for step in range(16):
+        run.log("train/loss", step, float(step))
+
+    active_points = helpers.wait_for_metric_points(
+        client,
+        run.run_id,
+        "train/loss",
+        expected_count=16,
+    )
+    assert [point.step for point in active_points] == list(range(16))
+    assert not list((data_path / "main" / "metric_points").rglob("*.parquet"))
+
+    terminal_run = getattr(client, terminal_method)(run.run_id)
+    terminal_points = client.query_metric(run.run_id, "train/loss")
+    partition_path = (
+        data_path
+        / "main"
+        / "metric_points"
+        / "run_id=run-1"
+        / "metric_key_encoded=train%252Floss"
+    )
+
+    assert terminal_run.status == (
+        "finished" if terminal_method == "finish_run" else "failed"
+    )
+    assert [point.step for point in terminal_points] == list(range(16))
+    assert any(partition_path.glob("*.parquet"))
+
+
+@pytest.mark.parametrize("catalog_backend", _CATALOG_BACKENDS)
 def test_catalog_backend_rejects_invalid_local_storage_configuration(
     tmp_path: pathlib.Path,
     catalog_backend: str,
