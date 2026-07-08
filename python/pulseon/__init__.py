@@ -28,7 +28,7 @@ StorageError = _pulseon.StorageError
 
 
 def init(
-    path: str | os.PathLike[str],
+    path: str | os.PathLike[str] = ".",
     *,
     data_path: str | os.PathLike[str] | None = None,
     catalog_backend: str = "duckdb",
