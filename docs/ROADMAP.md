@@ -90,7 +90,7 @@ stores do not need migration support.
 
 - [x] Update README and examples so `pulseon.init()` is the default quickstart
   path and explicit-root initialization remains documented.
-- [ ] Add release notes that V3 may require a fresh local store instead of
+- [x] Add release notes that V3 may require a fresh local store instead of
   migrating 0.1.0a2 development stores.
 - [ ] Run the full local verification set: `cargo check`, `cargo test`,
   `uv run maturin develop --uv`, `uv run pyright`, and `uv run pytest`.
