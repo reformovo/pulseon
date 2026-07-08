@@ -22,23 +22,26 @@ data area / object storage
 ```
 
 The released a2 local native catalog database is backed by a DuckDB catalog
-file. SQLite remains a named but deferred backend until real DuckLake-backed
-parity tests pass. PostgreSQL is a future shared-catalog option. Object storage
-is for the data area, not for the catalog database file itself.
+file. V3 adds SQLite as a required local catalog backend after real
+DuckLake-backed parity tests pass. PostgreSQL is a future shared-catalog option.
+Object storage is for the data area, not for the catalog database file itself.
 
 The default project-local store is:
 
 ```text
 <project>/.pulseon/
-  catalog.ducklake   # or a future SQLite catalog file
+  catalog.ducklake   # default DuckDB-backed DuckLake catalog
+  catalog.sqlite     # SQLite-backed DuckLake catalog when selected in V3
   data/              # default Parquet data path
 ```
 
-Users must be able to override only the Parquet data path. The current public
-`data_path` contract is local filesystem paths. S3-compatible object-storage
-data paths, including local MinIO, are deferred to a future release; when
-enabled later, the catalog database still remains local unless a shared-catalog
-decision says otherwise.
+Users may override `catalog_path` and `data_path` independently with local
+filesystem paths. Backend-specific defaults use conventional filenames, but an
+explicit `catalog_path` is used as provided and does not need to match a
+backend-specific suffix. The current public `data_path` contract is local
+filesystem paths. S3-compatible object-storage data paths, including local
+MinIO, are deferred to a future release; when enabled later, the catalog
+database still remains local unless a shared-catalog decision says otherwise.
 
 ## Why
 
@@ -70,6 +73,13 @@ lookup and transactional refresh are cheap.
 
 Field-level schemas for PulseOn-owned catalog tables live in
 `docs/catalog-application-tables.md`.
+
+V3 requires PulseOn SQL to address catalog application tables through
+PulseOn-owned names or a backend-aware adapter, not through DuckLake's internal
+metadata alias. This keeps control-plane and query-index state from becoming
+coupled to DuckLake internal catalog naming. The tables still live in the same
+catalog database file as DuckLake metadata for both DuckDB and SQLite local
+backends.
 
 ## Data Area Responsibilities
 
@@ -287,15 +297,18 @@ writer failure. After failed-client shutdown releases resources, a new client
 may resume the non-terminal run if it can acquire the writer lock, but reports
 left pending in the failed client were not durably admitted and are lost. Once
 terminal lifecycle state is written, the lock is released even if the later
-Parquet flush raises `MetricFlushError`. The encoded run id uses the same RFC
-3986 percent-encoding rule as `metric_key_encoded`. Filesystem I/O,
+Parquet flush raises `MetricFlushError`. A future lock cleanup phase may remove
+the lock file as part of the release path only when it can prove that it is
+deleting the original file for the released writer. If that cannot be proven
+safely, PulseOn must leave the file on disk. The encoded run id uses the same
+RFC 3986 percent-encoding rule as `metric_key_encoded`. Filesystem I/O,
 permission, or disk failures affecting catalog paths, data paths, lock
 directories, or lock files raise `StorageError`, not
 `InvalidConfigurationError`. Ordinary `StorageError` messages should include
 the failed operation and basename, not full local paths by default. Full local
-paths are not exposed through ordinary diagnostics; they are
-reserved for a future explicit debug/verbose facility or internal chained/source
-errors intended for debugging.
+paths are not exposed through ordinary diagnostics; they are reserved for a
+future explicit debug/verbose facility or internal chained/source errors
+intended for debugging.
 
 Initialization-time `StorageError` prevents the client from starting. Runtime
 `StorageError` from direct API operations is an operation error and does not
@@ -310,9 +323,9 @@ in current native mode: only terminal runs require Parquet visibility.
 
 The Parquet schema contract documents stable table shapes for reading and
 export, but it does not require every PulseOn table to use Parquet as its
-primary storage location. Currently, `pulseon_projects`, `pulseon_runs`, and
-`pulseon_metric_aggregates` are catalog application tables and are not
-DuckLake logical tables.
+primary storage location. `pulseon_projects`, `pulseon_runs`, and
+`pulseon_metric_aggregates` are catalog application tables and are not DuckLake
+logical tables or DuckLake internal tables.
 
 PulseOn may build or refresh `metric_aggregates` after a run is finalized
 instead of maintaining it synchronously during active metric reporting.

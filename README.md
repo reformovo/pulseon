@@ -11,7 +11,7 @@ release:
 - log explicit-step numeric metrics through a bounded async queue
 - query metric series and summaries locally
 - support local DuckDB-backed DuckLake catalog storage
-- defer SQLite catalog support until real DuckLake-backed parity tests pass
+- add SQLite-backed DuckLake catalog support in v3 after real parity tests pass
 - keep the current public data path local-filesystem only
 - keep Parquet as the long-term compatibility boundary
 

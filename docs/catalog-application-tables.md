@@ -4,10 +4,11 @@ PulseOn stores small control-plane and query-index state in catalog application
 tables. These tables are not Parquet compatibility contracts and are not
 DuckLake logical data tables.
 
-The current table names are prefixed with `pulseon_` because they live beside
-DuckLake catalog metadata. V3/a3 may move them out of DuckLake's internal
-metadata namespace, but the product meaning of these tables should remain the
-same.
+The table names are prefixed with `pulseon_` because they are owned by PulseOn.
+V3 keeps the names stable but stops addressing them through DuckLake's internal
+metadata alias. Backend-specific qualification belongs in the native catalog
+adapter, not in query/write call sites. The tables live in the same catalog
+database file as DuckLake metadata for local DuckDB and SQLite backends.
 
 ## `pulseon_projects`
 
