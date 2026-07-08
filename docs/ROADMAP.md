@@ -52,21 +52,21 @@ stores do not need migration support.
 
 ### Phase 3: SQLite Backend Parity
 
-- [ ] Promote `catalog_backend="sqlite"` from deferred to supported in V3.
+- [x] Promote `catalog_backend="sqlite"` from deferred to supported in V3.
   DuckDB remains the default backend; PostgreSQL remains post-V3.
-- [ ] Add the SQLite catalog adapter path with a default
+- [x] Add the SQLite catalog adapter path with a default
   `<project>/.pulseon/catalog.sqlite` catalog file.
-- [ ] Store PulseOn catalog application tables in the same SQLite catalog
+- [x] Store PulseOn catalog application tables in the same SQLite catalog
   database file as DuckLake metadata, without addressing them through DuckLake's
   internal metadata alias.
-- [ ] Add real DuckLake-backed parity tests for DuckDB and SQLite covering:
+- [x] Add real DuckLake-backed parity tests for DuckDB and SQLite covering:
   client initialization, project/run lifecycle, metric writes, active and
   terminal queries, aggregate refresh, terminal flush, custom local `data_path`,
   explicit custom `catalog_path`, and invalid backend/configuration errors.
-- [ ] Verify that SQLite stores DuckLake metadata, PulseOn catalog application
+- [x] Verify that SQLite stores DuckLake metadata, PulseOn catalog application
   tables, inline metric data, and Parquet data-file references without requiring
   DuckLake internal aliases in PulseOn SQL.
-- [ ] Verification gate: `cargo check`, `cargo test`, `uv run maturin develop
+- [x] Verification gate: `cargo check`, `cargo test`, `uv run maturin develop
   --uv`, `uv run pyright`, and `uv run pytest`.
 
 ### Phase 4: Metric Data Layout
