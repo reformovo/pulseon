@@ -110,7 +110,7 @@ impl NativeClient {
     pub fn get_project(&self, project_id: &ProjectId) -> Result<Project, EngineError> {
         let connection = self.connection()?;
         let result = connection.query_row(
-            "SELECT project_id, name, epoch_ms(created_at)
+            "SELECT project_id, name, epoch_ms(created_at::TIMESTAMPTZ)
              FROM pulseon_projects
              WHERE project_id = ?",
             [project_id.as_str()],

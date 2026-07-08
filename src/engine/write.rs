@@ -57,8 +57,10 @@ impl<'connection> NativeWriteStore<'connection> {
 
     pub fn resume_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
         let result = self.connection.query_row(
-            "SELECT run_id, project_id, name, status, epoch_ms(created_at), epoch_ms(started_at),
-                    epoch_ms(finished_at)
+            "SELECT run_id, project_id, name, status,
+                    epoch_ms(created_at::TIMESTAMPTZ),
+                    epoch_ms(started_at::TIMESTAMPTZ),
+                    epoch_ms(finished_at::TIMESTAMPTZ)
              FROM pulseon_runs
              WHERE run_id = ?",
             [run_id.as_str()],
