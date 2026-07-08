@@ -425,7 +425,7 @@ impl From<MetricAggregate> for PyMetricSummary {
 #[pyfunction]
 #[pyo3(
     signature = (
-        path,
+        path=PathBuf::from("."),
         *,
         data_path=None,
         catalog_backend="duckdb",

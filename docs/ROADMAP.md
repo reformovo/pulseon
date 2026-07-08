@@ -6,36 +6,108 @@
 
 ## 0.1.0a3 / V3 Backlog
 
-V3/a3 should continue from the current native contract. Each item should remain
-a small, independently reviewable change with tests and the smallest relevant
-verification gate.
+V3/a3 hardens the native local loop before adding object storage or shared
+catalogs. Each item should remain a small, independently reviewable change with
+tests and the smallest relevant verification gate. Existing 0.1.0a2 development
+stores do not need migration support.
 
-- [ ] Make `pulseon.init()` default to the current working directory,
+### Phase 1: Public API Defaults
+
+- [x] Make `pulseon.init()` default to the current working directory,
   equivalent to `pulseon.init(".")`, so the default local store remains
   `./.pulseon` without requiring an explicit path argument.
-- [ ] Update `python/pulseon/__init__.py`, `python/pulseon/_pulseon.pyi`,
-  README/examples, and Python-facing tests to cover both no-argument
-  initialization and explicit custom-root initialization.
-- [ ] Set DuckLake table-level options for `metric_points` to reduce tiny
-  Parquet files from short runs or small writer appends. Start by raising
-  `data_inlining_row_limit` above DuckLake's default 10 rows, with an initial
-  target near the current writer batch size (`8192` rows), so tens/hundreds of
-  rows stay inline until terminal-run flush. Evaluate whether
-  `target_file_size` also needs a PulseOn default after measuring local
-  examples.
-- [ ] Move PulseOn-owned catalog tables out of DuckLake's internal metadata
-  namespace while keeping the layout portable across DuckDB, SQLite, and future
-  PostgreSQL catalog backends. Do not rely on schemas as the portable baseline:
-  SQLite does not support PostgreSQL/DuckDB-style schemas inside one database
-  file. Use an explicit PulseOn-owned namespace strategy, such as stable
-  `pulseon_*` table names or a backend-specific schema adapter, and include
-  full SQLite support and parity tests in the a3 acceptance gate.
-- [ ] Clean up run-writer lock files after releasing the OS advisory lock when
-  it is safe to do so, so successful terminal runs and shutdowns do not leave
-  confusing empty `.pulseon/locks/runs/*.lock` files behind. Preserve the v2
-  safety contract: process crashes may still leave lock files on disk,
-  leftover files without a held OS lock must not block resume, and cleanup must
-  not delete a lock file that another client has recreated or currently holds.
+- [x] Keep the rest of the public Python API shape unchanged for V3.
+- [x] Update `python/pulseon/__init__.py`, `python/pulseon/_pulseon.pyi`,
+  README/examples, and Python-facing tests to cover no-argument initialization,
+  explicit custom-root initialization, and unchanged custom `catalog_path` /
+  `data_path` behavior.
+- [x] Verification gate: `uv run maturin develop --uv`, `uv run pyright`, and
+  the Python init/lifecycle tests that cover default and explicit roots.
+
+### Phase 2: Catalog Adapter on DuckDB
+
+- [ ] Add a backend-aware catalog adapter while keeping only
+  `catalog_backend="duckdb"` enabled. The adapter must provide the DuckLake
+  attach statement, default catalog filename, catalog application table
+  qualification, and any backend setup needed before table creation.
+- [ ] Keep backend-specific default catalog filenames, but do not enforce file
+  suffixes when the user passes an explicit `catalog_path`.
+- [ ] Move PulseOn-owned catalog application tables out of DuckLake's internal
+  metadata alias for the DuckDB backend. Code must stop hard-coding
+  `__ducklake_metadata_dl.pulseon_projects`,
+  `__ducklake_metadata_dl.pulseon_runs`, and
+  `__ducklake_metadata_dl.pulseon_metric_aggregates`.
+- [ ] Keep stable PulseOn-owned table names:
+  `pulseon_projects`, `pulseon_runs`, and `pulseon_metric_aggregates`. Do not
+  rely on schema-qualified names as the portable baseline because SQLite does
+  not support PostgreSQL/DuckDB-style schemas inside one database file.
+- [ ] Store PulseOn catalog application tables in the same catalog database file
+  as DuckLake metadata for the DuckDB backend.
+- [ ] Preserve existing DuckDB behavior for project/run lifecycle, metric writes,
+  active and terminal queries, aggregate refresh, terminal flush, custom local
+  `data_path`, explicit custom `catalog_path`, and invalid backend/configuration
+  errors.
+- [ ] Verification gate: `cargo check`, `cargo test`, `uv run maturin develop
+  --uv`, and the existing Python lifecycle/query/diagnostics tests.
+
+### Phase 3: SQLite Backend Parity
+
+- [ ] Promote `catalog_backend="sqlite"` from deferred to supported in V3.
+  DuckDB remains the default backend; PostgreSQL remains post-V3.
+- [ ] Add the SQLite catalog adapter path with a default
+  `<project>/.pulseon/catalog.sqlite` catalog file.
+- [ ] Store PulseOn catalog application tables in the same SQLite catalog
+  database file as DuckLake metadata, without addressing them through DuckLake's
+  internal metadata alias.
+- [ ] Add real DuckLake-backed parity tests for DuckDB and SQLite covering:
+  client initialization, project/run lifecycle, metric writes, active and
+  terminal queries, aggregate refresh, terminal flush, custom local `data_path`,
+  explicit custom `catalog_path`, and invalid backend/configuration errors.
+- [ ] Verify that SQLite stores DuckLake metadata, PulseOn catalog application
+  tables, inline metric data, and Parquet data-file references without requiring
+  DuckLake internal aliases in PulseOn SQL.
+- [ ] Verification gate: `cargo check`, `cargo test`, `uv run maturin develop
+  --uv`, `uv run pyright`, and `uv run pytest`.
+
+### Phase 4: Metric Data Layout
+
+- [ ] Set the DuckLake table-level option
+  `data_inlining_row_limit=8192` for `metric_points` to reduce tiny Parquet
+  files from short runs and small writer appends.
+- [ ] Keep `target_file_size` unset in V3 unless local measurements prove the
+  default causes a concrete problem. Record any measurement in the relevant test
+  or follow-up note rather than adding a public configuration knob.
+- [ ] Preserve the terminal-run flush contract: `finish_run(...)` and
+  `fail_run(...)` drain accepted reports, write terminal lifecycle state, and
+  flush inline `metric_points` to Parquet; `flush_run_data(run_id)` remains the
+  retry API.
+- [ ] Add DuckDB and SQLite coverage proving short runs stay inline before
+  terminal flush and become Parquet-visible after terminal flush.
+- [ ] Verification gate: `cargo test`, `uv run maturin develop --uv`, and
+  Python lifecycle tests that inspect terminal Parquet visibility.
+
+### Phase 5: Release Gate
+
+- [ ] Update README and examples so `pulseon.init()` is the default quickstart
+  path and explicit-root initialization remains documented.
+- [ ] Add release notes that V3 may require a fresh local store instead of
+  migrating 0.1.0a2 development stores.
+- [ ] Run the full local verification set: `cargo check`, `cargo test`,
+  `uv run maturin develop --uv`, `uv run pyright`, and `uv run pytest`.
+
+## V4 Backlog
+
+- [ ] Clean up run-writer lock files only when the release path can prove it is
+  deleting the original lock file for the released writer. If that cannot be
+  proven safely, leave the file on disk.
+- [ ] Preserve the v2 safety contract: process crashes may leave lock files on
+  disk; leftover files without a held OS lock must not block resume; cleanup
+  must not delete a lock file that another client has recreated or currently
+  holds.
+- [ ] Add Rust and Python-facing tests for successful terminal finalization,
+  shutdown release, leftover stale lock files, and the race-safe "leave it on
+  disk when unsure" path.
+- [ ] Expand SQLite parity to cover multi-client run-writer lock behavior.
 
 ## Post-V3 Backlog
 

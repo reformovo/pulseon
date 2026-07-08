@@ -51,6 +51,10 @@ Derived index state over an effective metric series.
 **Catalog backend**:
 The database engine used for native storage metadata.
 
+**Catalog application table**:
+A PulseOn-owned catalog table for control-plane or query-index state.
+_Avoid_: DuckLake logical table, DuckLake internal table
+
 **Data path**:
 The local filesystem location used for Parquet metric data.
 

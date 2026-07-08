@@ -17,6 +17,21 @@ def test_init_returns_client(tmp_path: pathlib.Path) -> None:
     assert isinstance(client, pulseon.Client)
 
 
+def test_init_without_path_uses_current_working_directory(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pulseon
+
+    monkeypatch.chdir(tmp_path)
+    client = pulseon.init()
+    project = client.create_project("local training", project_id="project-1")
+
+    assert isinstance(client, pulseon.Client)
+    assert project.project_id == "project-1"
+    assert (tmp_path / ".pulseon" / "catalog.ducklake").is_file()
+    assert (tmp_path / ".pulseon" / "data").is_dir()
+
+
 def test_init_accepts_v2_configuration_keywords(tmp_path: pathlib.Path) -> None:
     import pulseon
 
