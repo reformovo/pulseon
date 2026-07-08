@@ -76,7 +76,7 @@ impl NativeClient {
         let created_at = current_timestamp("created_at")?;
         let connection = self.connection()?;
         connection.execute(
-            "INSERT INTO __ducklake_metadata_dl.pulseon_projects (project_id, name, created_at)
+            "INSERT INTO pulseon_projects (project_id, name, created_at)
              VALUES (?, ?, ?)",
             (project_id.as_str(), name, timestamp_as_rfc3339(created_at)),
         )?;
@@ -92,7 +92,7 @@ impl NativeClient {
         let connection = self.connection()?;
         let result = connection.query_row(
             "SELECT project_id, name, epoch_ms(created_at)
-             FROM __ducklake_metadata_dl.pulseon_projects
+             FROM pulseon_projects
              WHERE project_id = ?",
             [project_id.as_str()],
             |row| {
@@ -187,7 +187,7 @@ impl NativeClient {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
                 "SELECT run_id
-                 FROM __ducklake_metadata_dl.pulseon_runs
+                 FROM pulseon_runs
                  WHERE project_id = ?
                  ORDER BY created_at, run_id",
             )?;
@@ -221,7 +221,7 @@ impl NativeClient {
                 Some(project_id) => {
                     let mut statement = connection.prepare(
                         "SELECT run_id
-                         FROM __ducklake_metadata_dl.pulseon_runs
+                         FROM pulseon_runs
                          WHERE project_id = ?
                            AND status = 'running'
                          ORDER BY created_at, run_id",
@@ -234,7 +234,7 @@ impl NativeClient {
                 None => {
                     let mut statement = connection.prepare(
                         "SELECT run_id
-                         FROM __ducklake_metadata_dl.pulseon_runs
+                         FROM pulseon_runs
                          WHERE status = 'running'
                          ORDER BY created_at, run_id",
                     )?;
@@ -397,7 +397,7 @@ impl NativeClient {
         let mut statement = connection.prepare(
             "SELECT run_id, metric_key, effective_count, last_step, last_value_f64,
                     min_value_f64, max_value_f64
-             FROM __ducklake_metadata_dl.pulseon_metric_aggregates
+             FROM pulseon_metric_aggregates
              WHERE run_id = ?
              ORDER BY metric_key",
         )?;
@@ -421,7 +421,7 @@ impl NativeClient {
         let exists = connection.query_row(
             "SELECT EXISTS (
                  SELECT 1
-                 FROM __ducklake_metadata_dl.pulseon_projects
+                 FROM pulseon_projects
                  WHERE project_id = ?
              )",
             [project_id.as_str()],
@@ -464,7 +464,7 @@ impl NativeClient {
         let finished_at = current_timestamp("finished_at")?;
         let connection = self.connection()?;
         let updated = connection.execute(
-            "UPDATE __ducklake_metadata_dl.pulseon_runs
+            "UPDATE pulseon_runs
              SET status = ?,
                  finished_at = ?
              WHERE run_id = ?
@@ -775,7 +775,9 @@ fn path_basename(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::bootstrap::open_native_connection;
+    use crate::engine::bootstrap::{
+        attach_ducklake, open_native_connection, setup_duckdb_catalog_adapter,
+    };
 
     fn partition_contains_parquet(path: &Path) -> std::io::Result<bool> {
         if !path.is_dir() {
@@ -807,12 +809,13 @@ mod tests {
     }
 
     #[test]
-    fn open_uses_custom_catalog_and_data_paths() -> Result<(), Box<dyn std::error::Error>> {
+    fn open_uses_custom_catalog_without_requiring_ducklake_suffix()
+    -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
         let custom_root =
             std::env::temp_dir().join(format!("pulseon-storage-{}", uuid::Uuid::new_v4()));
-        let catalog_path = custom_root.join("catalog").join("catalog.ducklake");
+        let catalog_path = custom_root.join("catalog").join("catalog.db");
         let data_path = custom_root.join("parquet-data");
 
         let client = NativeClient::open_with_storage_config(
@@ -832,6 +835,41 @@ mod tests {
         assert!(!root_path.join(".pulseon").join("data").exists());
         let _ = std::fs::remove_dir_all(root_path);
         std::fs::remove_dir_all(custom_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn open_stores_application_tables_in_catalog_file() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let catalog_path = root_path.join(".pulseon").join("catalog.ducklake");
+        let data_path = root_path.join(".pulseon").join("data");
+        {
+            let client = NativeClient::open(&root_path)?;
+            let project = client.create_project(
+                "local training",
+                Some(ProjectId::from_string("project-catalog-file")),
+            )?;
+            client.create_run(
+                &project.project_id,
+                "baseline",
+                Some(RunId::from_string("run-catalog-file")),
+            )?;
+        }
+
+        let connection = duckdb::Connection::open_in_memory()?;
+        attach_ducklake(&connection, &catalog_path, &data_path)?;
+        setup_duckdb_catalog_adapter(&connection, &catalog_path)?;
+        let stored: (i64, i64) = connection.query_row(
+            "SELECT
+                 (SELECT count(*) FROM pulseon_projects),
+                 (SELECT count(*) FROM pulseon_runs)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        assert_eq!(stored, (1, 1));
+        std::fs::remove_dir_all(root_path)?;
         Ok(())
     }
 
