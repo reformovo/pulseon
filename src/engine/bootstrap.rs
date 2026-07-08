@@ -248,6 +248,11 @@ pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), En
              ingested_at TIMESTAMPTZ NOT NULL
          );
          ALTER TABLE dl.metric_points SET PARTITIONED BY (run_id, metric_key_encoded);
+         CALL dl.set_option(
+             'data_inlining_row_limit',
+             8192,
+             table_name => 'metric_points'
+         );
          CREATE TABLE IF NOT EXISTS pulseon_metric_aggregates (
              run_id VARCHAR NOT NULL,
              metric_key VARCHAR NOT NULL,
@@ -355,6 +360,30 @@ mod tests {
             .collect::<Result<_, _>>()?;
 
         assert_eq!(partition_columns, ["run_id", "metric_key_encoded"]);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn create_v1_tables_sets_metric_points_inlining_row_limit()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-bootstrap-{}", uuid::Uuid::new_v4()));
+        let connection = open_native_connection(&root_path)?;
+
+        let inlining_row_limit: i64 = connection.query_row(
+            "SELECT CAST(value AS BIGINT)
+             FROM pulseon_catalog.ducklake_metadata AS metadata
+             JOIN pulseon_catalog.ducklake_table AS tables
+               ON tables.table_id = metadata.scope_id
+             WHERE tables.table_name = 'metric_points'
+               AND metadata.scope = 'table'
+               AND metadata.key = 'data_inlining_row_limit'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        assert_eq!(inlining_row_limit, 8192);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }
