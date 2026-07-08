@@ -6,6 +6,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
+use crate::engine::bootstrap::CatalogBackend;
 use crate::engine::client::{NativeClient, NativeRun};
 use crate::engine::reporting::MetricReporterDiagnostics;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
@@ -440,15 +441,21 @@ pub fn init(
     catalog_path: Option<PathBuf>,
     metric_queue_capacity: i64,
 ) -> PyResult<PyClient> {
-    let metric_queue_capacity = validate_init_config(
+    let (catalog_backend, metric_queue_capacity) = validate_init_config(
         data_path.as_deref(),
         catalog_backend,
         catalog_path.as_deref(),
         metric_queue_capacity,
     )?;
-    NativeClient::open_with_storage_config(path, catalog_path, data_path, metric_queue_capacity)
-        .map(PyClient::new)
-        .map_err(runtime_error)
+    NativeClient::open_with_catalog_backend_storage_config(
+        path,
+        catalog_backend,
+        catalog_path,
+        data_path,
+        metric_queue_capacity,
+    )
+    .map(PyClient::new)
+    .map_err(runtime_error)
 }
 
 fn validate_init_config(
@@ -456,22 +463,17 @@ fn validate_init_config(
     catalog_backend: &str,
     catalog_path: Option<&Path>,
     metric_queue_capacity: i64,
-) -> PyResult<usize> {
+) -> PyResult<(CatalogBackend, usize)> {
     if !(1..=1_048_576).contains(&metric_queue_capacity) {
         return Err(InvalidConfigurationError::new_err(
             "metric_queue_capacity must be between 1 and 1048576",
         ));
     }
-    if catalog_backend == "sqlite" {
-        return Err(InvalidConfigurationError::new_err(
-            "catalog_backend='sqlite' is deferred until real DuckLake-backed SQLite tests pass",
-        ));
-    }
-    if catalog_backend != "duckdb" {
-        return Err(InvalidConfigurationError::new_err(format!(
+    let catalog_backend = CatalogBackend::from_name(catalog_backend).ok_or_else(|| {
+        InvalidConfigurationError::new_err(format!(
             "unsupported catalog_backend: {catalog_backend}"
-        )));
-    }
+        ))
+    })?;
     if data_path.is_some_and(is_uri_path) {
         return Err(InvalidConfigurationError::new_err(
             "data_path must be a local filesystem path",
@@ -482,9 +484,10 @@ fn validate_init_config(
             "catalog_path must be a local filesystem path",
         ));
     }
-    usize::try_from(metric_queue_capacity).map_err(|_| {
+    let metric_queue_capacity = usize::try_from(metric_queue_capacity).map_err(|_| {
         InvalidConfigurationError::new_err("metric_queue_capacity must be between 1 and 1048576")
-    })
+    })?;
+    Ok((catalog_backend, metric_queue_capacity))
 }
 
 fn is_uri_path(path: &Path) -> bool {
