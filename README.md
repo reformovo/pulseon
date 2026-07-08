@@ -3,19 +3,19 @@
 PulseOn is a local-first training metrics tracker backed by Rust, PyO3, DuckDB,
 and DuckLake.
 
-Current focus: start the 0.1.0a3 / v3 native loop after the 0.1.0a2 alpha
+Current focus: finish the 0.1.0a3 / v3 native loop after the 0.1.0a2 alpha
 release:
 
 - create a project
 - start or resume a run
 - log explicit-step numeric metrics through a bounded async queue
 - query metric series and summaries locally
-- support local DuckDB-backed DuckLake catalog storage
-- add SQLite-backed DuckLake catalog support in v3 after real parity tests pass
+- support local DuckDB-backed DuckLake catalog storage by default
+- support local SQLite-backed DuckLake catalog storage when requested
 - keep the current public data path local-filesystem only
 - keep Parquet as the long-term compatibility boundary
 
-Python API shape:
+Quickstart:
 
 ```python
 import pulseon
@@ -24,12 +24,19 @@ client = pulseon.init()
 project = client.create_project("local training")
 run = client.create_run(project.project_id, "baseline")
 run.log("train/loss", 0, 0.25)
+client.finish_run(run.run_id)
+client.shutdown()
 ```
 
 By default, PulseOn stores local state under `./.pulseon`. Pass an explicit
-root path, such as `pulseon.init("runs")`, when a project should use a
-different local store. The existing storage keywords remain available:
-`data_path`, `catalog_backend`, `catalog_path`, and `metric_queue_capacity`.
+root path when a project should use a different local store:
+
+```python
+client = pulseon.init("runs")
+```
+
+The existing storage keywords remain available: `data_path`,
+`catalog_backend`, `catalog_path`, and `metric_queue_capacity`.
 
 For bounded teardown, stop active logging threads before calling
 `client.shutdown(timeout=...)`; PulseOn keeps admission open while bounded
