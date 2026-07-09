@@ -8,6 +8,31 @@ import pytest
 
 from tests import helpers
 
+_S3_OVERRIDE_CONFIG = """data_path = "s3://bucket/pulseon"
+
+[s3]
+endpoint = "from-config:9000"
+access_key_id = "from-config"
+secret_access_key = "from-config-secret"
+path_style = false
+use_ssl = true
+"""
+
+_INVALID_S3_BOOL_CONFIG = """data_path = "s3://bucket/pulseon"
+
+[s3]
+endpoint = "127.0.0.1:9000"
+access_key_id = "pulseon"
+secret_access_key = "secret"
+path_style = "yes"
+"""
+
+
+def _write_project_config(root_path: pathlib.Path, content: str) -> None:
+    config_path = root_path / ".pulseon" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(content, encoding="utf-8")
+
 
 def test_init_returns_client(tmp_path: pathlib.Path) -> None:
     import pulseon
@@ -50,6 +75,126 @@ def test_init_accepts_v2_configuration_keywords(tmp_path: pathlib.Path) -> None:
     assert project.project_id == "project-1"
     assert data_path.is_dir()
     assert catalog_path.is_file()
+
+
+def test_init_uses_configured_data_path(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    configured_data_path = tmp_path / "configured-data"
+    _write_project_config(
+        root_path, f'data_path = "{configured_data_path.as_posix()}"\n'
+    )
+
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert configured_data_path.is_dir()
+    assert not (root_path / ".pulseon" / "data").exists()
+
+
+def test_init_data_path_keyword_overrides_config(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    explicit_data_path = tmp_path / "explicit-data"
+    configured_data_path = tmp_path / "configured-data"
+    _write_project_config(
+        root_path, f'data_path = "{configured_data_path.as_posix()}"\n'
+    )
+
+    client = pulseon.init(root_path, data_path=explicit_data_path)
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert explicit_data_path.is_dir()
+    assert not configured_data_path.exists()
+
+
+def test_init_data_path_keyword_ignores_configured_s3(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    explicit_data_path = tmp_path / "explicit-data"
+    _write_project_config(root_path, _S3_OVERRIDE_CONFIG)
+
+    client = pulseon.init(root_path, data_path=explicit_data_path)
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert explicit_data_path.is_dir()
+
+
+def test_init_rejects_missing_required_s3_config(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="s3_endpoint is required when data_path is s3://",
+    ):
+        pulseon.init(root_path, data_path="s3://bucket/pulseon")
+
+    assert not root_path.exists()
+
+
+def test_init_rejects_invalid_config_toml_s3_setting(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    _write_project_config(root_path, _INVALID_S3_BOOL_CONFIG)
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="config.toml s3.path_style must be a boolean",
+    ):
+        pulseon.init(root_path)
+
+
+def test_init_s3_keyword_override_skips_invalid_config_value(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    _write_project_config(root_path, _INVALID_S3_BOOL_CONFIG)
+
+    try:
+        client = pulseon.init(
+            root_path,
+            data_path="s3://bucket/pulseon",
+            s3_endpoint="127.0.0.1:9000",
+            s3_access_key_id="pulseon",
+            s3_secret_access_key="secret",
+            s3_path_style=True,
+        )
+    except pulseon.StorageError:
+        return
+
+    client.shutdown()
+
+
+def test_init_rejects_invalid_config_toml_data_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    _write_project_config(root_path, "data_path = 123\n")
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="config.toml data_path must be a string",
+    ):
+        pulseon.init(root_path)
 
 
 def test_init_accepts_explicit_duckdb_catalog_path_without_ducklake_suffix(
@@ -101,14 +246,27 @@ def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
         {"metric_queue_capacity": 0},
         {"metric_queue_capacity": 1_048_577},
         {"catalog_backend": "postgres"},
-        {"data_path": "s3://bucket/pulseon"},
-        {"catalog_path": "s3://bucket/catalog.ducklake"},
+        {"data_path": "http://bucket/pulseon"},
     ]
     for index, kwargs in enumerate(invalid_kwargs):
         root_path = tmp_path / f"pulseon-{index}"
         with pytest.raises(pulseon.InvalidConfigurationError):
             pulseon.init(root_path, **kwargs)
         assert not root_path.exists()
+
+
+def test_init_rejects_s3_catalog_path(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="catalog_path must be a local filesystem path",
+    ):
+        pulseon.init(root_path, catalog_path="s3://bucket/catalog.ducklake")
+
+    assert not root_path.exists()
 
 
 def test_client_creates_project_and_run(tmp_path: pathlib.Path) -> None:

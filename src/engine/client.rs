@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::engine::EngineError;
 use crate::engine::bootstrap::{
-    CatalogBackend, NativeStorageConfig, open_native_connection_with_config,
+    CatalogBackend, NativeStorageConfig, S3ConnectionConfig, open_native_connection_with_config,
 };
 use crate::engine::query::NativeQueryStore;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
@@ -49,6 +49,7 @@ impl NativeClient {
             CatalogBackend::DuckDb,
             catalog_path,
             data_path,
+            None,
             metric_queue_capacity,
         )
     }
@@ -58,11 +59,17 @@ impl NativeClient {
         catalog_backend: CatalogBackend,
         catalog_path: Option<PathBuf>,
         data_path: Option<PathBuf>,
+        s3_connection: Option<S3ConnectionConfig>,
         metric_queue_capacity: usize,
     ) -> Result<Self, EngineError> {
         let root_path = path.as_ref().to_path_buf();
-        let storage_config =
-            NativeStorageConfig::with_backend(catalog_backend, &root_path, catalog_path, data_path);
+        let storage_config = NativeStorageConfig::with_backend_and_s3_config(
+            catalog_backend,
+            &root_path,
+            catalog_path,
+            data_path,
+            s3_connection,
+        );
         let connection = open_native_connection_with_config(storage_config)?;
         let connection = Arc::new(Mutex::new(connection));
         let reporter =

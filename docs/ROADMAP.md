@@ -19,12 +19,15 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 
 ### Phase 1: S3 Configuration
 
-- [ ] Support `data_path = "s3://bucket/prefix"` through
+- [x] Support `data_path = "s3://bucket/prefix"` through
   `<project>/.pulseon/config.toml` and the existing `data_path` keyword.
-- [ ] Keep `catalog_path` local-only; `catalog_path = "s3://..."` remains
+- [x] Keep `catalog_path` local-only; `catalog_path = "s3://..."` remains
   `InvalidConfigurationError`.
-- [ ] Use TOML config for S3 credentials and connection settings. Explicit
+- [x] Use TOML config for S3 credentials and connection settings. Explicit
   `pulseon.init(...)` keywords override config-file values.
+- [x] Move `<project>/.pulseon/config.toml` reading, TOML parsing, and
+  config-file/explicit-keyword merge rules into the Rust/PyO3 layer so Python
+  remains a thin API facade and native storage configuration has one owner.
 
 ### Phase 2: DuckDB HTTPFS Setup
 

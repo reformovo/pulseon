@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use pyo3::create_exception;
@@ -6,12 +6,12 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
-use crate::engine::bootstrap::CatalogBackend;
 use crate::engine::client::{NativeClient, NativeRun};
 use crate::engine::reporting::MetricReporterDiagnostics;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
+use crate::sdk::config::{InitConfigError, S3ConnectionOverrides, resolve_init_config};
 
 create_exception!(
     pulseon._pulseon,
@@ -431,8 +431,19 @@ impl From<MetricAggregate> for PyMetricSummary {
         data_path=None,
         catalog_backend="duckdb",
         catalog_path=None,
-        metric_queue_capacity=65536
+        metric_queue_capacity=65536,
+        s3_endpoint=None,
+        s3_access_key_id=None,
+        s3_secret_access_key=None,
+        s3_session_token=None,
+        s3_region=None,
+        s3_path_style=None,
+        s3_use_ssl=None,
     )
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "PyO3 exposes init configuration as keyword-only Python API arguments."
 )]
 pub fn init(
     path: PathBuf,
@@ -440,58 +451,45 @@ pub fn init(
     catalog_backend: &str,
     catalog_path: Option<PathBuf>,
     metric_queue_capacity: i64,
+    s3_endpoint: Option<String>,
+    s3_access_key_id: Option<String>,
+    s3_secret_access_key: Option<String>,
+    s3_session_token: Option<String>,
+    s3_region: Option<String>,
+    s3_path_style: Option<bool>,
+    s3_use_ssl: Option<bool>,
 ) -> PyResult<PyClient> {
-    let (catalog_backend, metric_queue_capacity) = validate_init_config(
-        data_path.as_deref(),
-        catalog_backend,
-        catalog_path.as_deref(),
-        metric_queue_capacity,
-    )?;
-    NativeClient::open_with_catalog_backend_storage_config(
-        path,
+    let init_config = resolve_init_config(
+        &path,
+        data_path,
         catalog_backend,
         catalog_path,
-        data_path,
         metric_queue_capacity,
+        S3ConnectionOverrides {
+            endpoint: s3_endpoint,
+            access_key_id: s3_access_key_id,
+            secret_access_key: s3_secret_access_key,
+            session_token: s3_session_token,
+            region: s3_region,
+            path_style: s3_path_style,
+            use_ssl: s3_use_ssl,
+        },
+    )
+    .map_err(invalid_configuration_error)?;
+    NativeClient::open_with_catalog_backend_storage_config(
+        path,
+        init_config.catalog_backend,
+        init_config.catalog_path,
+        init_config.data_path,
+        init_config.s3_connection,
+        init_config.metric_queue_capacity,
     )
     .map(PyClient::new)
     .map_err(runtime_error)
 }
 
-fn validate_init_config(
-    data_path: Option<&Path>,
-    catalog_backend: &str,
-    catalog_path: Option<&Path>,
-    metric_queue_capacity: i64,
-) -> PyResult<(CatalogBackend, usize)> {
-    if !(1..=1_048_576).contains(&metric_queue_capacity) {
-        return Err(InvalidConfigurationError::new_err(
-            "metric_queue_capacity must be between 1 and 1048576",
-        ));
-    }
-    let catalog_backend = CatalogBackend::from_name(catalog_backend).ok_or_else(|| {
-        InvalidConfigurationError::new_err(format!(
-            "unsupported catalog_backend: {catalog_backend}"
-        ))
-    })?;
-    if data_path.is_some_and(is_uri_path) {
-        return Err(InvalidConfigurationError::new_err(
-            "data_path must be a local filesystem path",
-        ));
-    }
-    if catalog_path.is_some_and(is_uri_path) {
-        return Err(InvalidConfigurationError::new_err(
-            "catalog_path must be a local filesystem path",
-        ));
-    }
-    let metric_queue_capacity = usize::try_from(metric_queue_capacity).map_err(|_| {
-        InvalidConfigurationError::new_err("metric_queue_capacity must be between 1 and 1048576")
-    })?;
-    Ok((catalog_backend, metric_queue_capacity))
-}
-
-fn is_uri_path(path: &Path) -> bool {
-    path.to_string_lossy().contains("://")
+fn invalid_configuration_error(error: InitConfigError) -> PyErr {
+    InvalidConfigurationError::new_err(error.to_string())
 }
 
 fn duration_from_seconds(name: &str, seconds: f64) -> PyResult<Duration> {

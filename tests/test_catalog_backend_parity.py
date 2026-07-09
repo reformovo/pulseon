@@ -141,8 +141,7 @@ def test_catalog_backend_rejects_invalid_local_storage_configuration(
     import pulseon
 
     invalid_kwargs = [
-        {"data_path": "s3://bucket/pulseon"},
-        {"catalog_path": "s3://bucket/catalog.ducklake"},
+        {"data_path": "http://bucket/pulseon"},
     ]
     for index, kwargs in enumerate(invalid_kwargs):
         with pytest.raises(pulseon.InvalidConfigurationError):
@@ -151,6 +150,24 @@ def test_catalog_backend_rejects_invalid_local_storage_configuration(
                 catalog_backend=catalog_backend,
                 **kwargs,
             )
+
+
+@pytest.mark.parametrize("catalog_backend", _CATALOG_BACKENDS)
+def test_catalog_backend_rejects_s3_catalog_path(
+    tmp_path: pathlib.Path,
+    catalog_backend: str,
+) -> None:
+    import pulseon
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="catalog_path must be a local filesystem path",
+    ):
+        pulseon.init(
+            tmp_path / catalog_backend / "pulseon-s3-catalog",
+            catalog_backend=catalog_backend,
+            catalog_path="s3://bucket/catalog.ducklake",
+        )
 
 
 def test_sqlite_catalog_file_contains_ducklake_and_pulseon_state(

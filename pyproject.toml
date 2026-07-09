@@ -55,6 +55,7 @@ config-settings = { build-args = '--profile=dev' }
 [tool.maturin]
 python-source = "python"
 module-name = "pulseon._pulseon"
+bindings = "pyo3"
 
 [tool.maturin.generate-ci.github]
 trusted-publishing = true

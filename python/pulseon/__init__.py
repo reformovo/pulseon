@@ -34,6 +34,13 @@ def init(
     catalog_backend: str = "duckdb",
     catalog_path: str | os.PathLike[str] | None = None,
     metric_queue_capacity: int = 65536,
+    s3_endpoint: str | None = None,
+    s3_access_key_id: str | None = None,
+    s3_secret_access_key: str | None = None,
+    s3_session_token: str | None = None,
+    s3_region: str | None = None,
+    s3_path_style: bool | None = None,
+    s3_use_ssl: bool | None = None,
 ) -> Client:
     return _pulseon.init(
         path,
@@ -41,6 +48,13 @@ def init(
         catalog_backend=catalog_backend,
         catalog_path=catalog_path,
         metric_queue_capacity=metric_queue_capacity,
+        s3_endpoint=s3_endpoint,
+        s3_access_key_id=s3_access_key_id,
+        s3_secret_access_key=s3_secret_access_key,
+        s3_session_token=s3_session_token,
+        s3_region=s3_region,
+        s3_path_style=s3_path_style,
+        s3_use_ssl=s3_use_ssl,
     )
 
 
