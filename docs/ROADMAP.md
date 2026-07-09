@@ -25,6 +25,9 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
   `InvalidConfigurationError`.
 - [x] Use TOML config for S3 credentials and connection settings. Explicit
   `pulseon.init(...)` keywords override config-file values.
+- [x] Move `<project>/.pulseon/config.toml` reading, TOML parsing, and
+  config-file/explicit-keyword merge rules into the Rust/PyO3 layer so Python
+  remains a thin API facade and native storage configuration has one owner.
 
 ### Phase 2: DuckDB HTTPFS Setup
 

@@ -3,23 +3,10 @@
 from __future__ import annotations
 
 import pathlib
-from typing import Any
 
 import pytest
 
 from tests import helpers
-
-_S3_CONFIG = """data_path = "s3://bucket/pulseon"
-
-[s3]
-endpoint = "127.0.0.1:9000"
-access_key_id = "pulseon"
-secret_access_key = "secret"
-session_token = "session"
-region = "us-east-1"
-path_style = true
-use_ssl = false
-"""
 
 _S3_OVERRIDE_CONFIG = """data_path = "s3://bucket/pulseon"
 
@@ -45,20 +32,6 @@ def _write_project_config(root_path: pathlib.Path, content: str) -> None:
     config_path = root_path / ".pulseon" / "config.toml"
     config_path.parent.mkdir(parents=True)
     config_path.write_text(content, encoding="utf-8")
-
-
-def _capture_native_init(
-    pulseon: Any, monkeypatch: pytest.MonkeyPatch
-) -> dict[str, Any]:
-    captured: dict[str, Any] = {}
-
-    def fake_init(*args: Any, **kwargs: Any) -> object:
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return object()
-
-    monkeypatch.setattr(pulseon._pulseon, "init", fake_init)
-    return captured
 
 
 def test_init_returns_client(tmp_path: pathlib.Path) -> None:
@@ -104,68 +77,57 @@ def test_init_accepts_v2_configuration_keywords(tmp_path: pathlib.Path) -> None:
     assert catalog_path.is_file()
 
 
-def test_init_uses_configured_s3_data_path(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_init_uses_configured_data_path(tmp_path: pathlib.Path) -> None:
     import pulseon
 
     root_path = tmp_path / "pulseon"
-    _write_project_config(root_path, _S3_CONFIG)
-    captured = _capture_native_init(pulseon, monkeypatch)
+    configured_data_path = tmp_path / "configured-data"
+    _write_project_config(
+        root_path, f'data_path = "{configured_data_path.as_posix()}"\n'
+    )
 
-    pulseon.init(root_path)
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
 
-    assert captured["args"] == (root_path,)
-    assert {
-        "data_path": "s3://bucket/pulseon",
-        "s3_endpoint": "127.0.0.1:9000",
-        "s3_access_key_id": "pulseon",
-        "s3_secret_access_key": "secret",
-        "s3_session_token": "session",
-        "s3_region": "us-east-1",
-        "s3_path_style": True,
-        "s3_use_ssl": False,
-    }.items() <= captured["kwargs"].items()
+    assert project.project_id == "project-1"
+    assert configured_data_path.is_dir()
+    assert not (root_path / ".pulseon" / "data").exists()
 
 
 def test_init_data_path_keyword_overrides_config(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
 
     root_path = tmp_path / "pulseon"
     explicit_data_path = tmp_path / "explicit-data"
-    _write_project_config(root_path, 'data_path = "s3://bucket/from-config"\n')
-    captured = _capture_native_init(pulseon, monkeypatch)
+    configured_data_path = tmp_path / "configured-data"
+    _write_project_config(
+        root_path, f'data_path = "{configured_data_path.as_posix()}"\n'
+    )
 
-    pulseon.init(root_path, data_path=explicit_data_path)
+    client = pulseon.init(root_path, data_path=explicit_data_path)
+    project = client.create_project("local training", project_id="project-1")
 
-    assert captured["kwargs"]["data_path"] == explicit_data_path
-    assert captured["kwargs"]["s3_endpoint"] is None
+    assert project.project_id == "project-1"
+    assert explicit_data_path.is_dir()
+    assert not configured_data_path.exists()
 
 
-def test_init_s3_keywords_override_config(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+def test_init_data_path_keyword_ignores_configured_s3(
+    tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
 
     root_path = tmp_path / "pulseon"
+    explicit_data_path = tmp_path / "explicit-data"
     _write_project_config(root_path, _S3_OVERRIDE_CONFIG)
-    captured = _capture_native_init(pulseon, monkeypatch)
 
-    pulseon.init(
-        root_path,
-        s3_endpoint="override:9000",
-        s3_path_style=True,
-    )
+    client = pulseon.init(root_path, data_path=explicit_data_path)
+    project = client.create_project("local training", project_id="project-1")
 
-    assert {
-        "s3_endpoint": "override:9000",
-        "s3_access_key_id": "from-config",
-        "s3_secret_access_key": "from-config-secret",
-        "s3_path_style": True,
-        "s3_use_ssl": True,
-    }.items() <= captured["kwargs"].items()
+    assert project.project_id == "project-1"
+    assert explicit_data_path.is_dir()
 
 
 def test_init_rejects_missing_required_s3_config(tmp_path: pathlib.Path) -> None:
