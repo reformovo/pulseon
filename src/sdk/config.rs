@@ -341,9 +341,12 @@ mod tests {
 
     #[test]
     fn init_config_resolves_s3_data_path_for_supported_catalog_backends() {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-config-{}", uuid::Uuid::new_v4()));
+
         for catalog_backend in ["duckdb", "sqlite"] {
             let resolved = resolve_init_config(
-                Path::new("."),
+                &root_path,
                 Some(PathBuf::from("s3://bucket/pulseon")),
                 catalog_backend,
                 None,
