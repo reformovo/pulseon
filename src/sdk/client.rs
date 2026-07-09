@@ -6,7 +6,8 @@ use std::time::Duration;
 use pyo3::create_exception;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyDictMethods, PyModule};
+use pyo3::types::PyAny;
+use toml::Table;
 
 use crate::engine::bootstrap::{CatalogBackend, S3ConnectionConfig};
 use crate::engine::client::{NativeClient, NativeRun};
@@ -448,7 +449,6 @@ impl From<MetricAggregate> for PyMetricSummary {
     reason = "PyO3 exposes init configuration as keyword-only Python API arguments."
 )]
 pub fn init(
-    py: Python<'_>,
     path: PathBuf,
     data_path: Option<PathBuf>,
     catalog_backend: &str,
@@ -462,7 +462,7 @@ pub fn init(
     s3_path_style: Option<bool>,
     s3_use_ssl: Option<bool>,
 ) -> PyResult<PyClient> {
-    let project_config = load_project_config(py, &path)?;
+    let project_config = load_project_config(&path)?;
     let data_path = resolve_data_path(data_path, project_config.as_ref())?;
     let explicit_s3_params = S3ConnectionParams {
         endpoint: s3_endpoint,
@@ -509,10 +509,7 @@ struct S3FileConfig {
     use_ssl: Option<bool>,
 }
 
-fn load_project_config<'py>(
-    py: Python<'py>,
-    root_path: &Path,
-) -> PyResult<Option<Bound<'py, PyDict>>> {
+fn load_project_config(root_path: &Path) -> PyResult<Option<Table>> {
     let config_path = root_path.join(".pulseon").join("config.toml");
     let content = match fs::read_to_string(&config_path) {
         Ok(content) => content,
@@ -523,26 +520,22 @@ fn load_project_config<'py>(
             )));
         }
     };
-    let tomllib = PyModule::import(py, "tomllib")?;
-    let config = tomllib
-        .call_method1("loads", (content,))
-        .map_err(|source| {
-            InvalidConfigurationError::new_err(format!("invalid config.toml: {source}"))
-        })?;
-    let config = config
-        .cast_into::<PyDict>()
-        .map_err(|_| InvalidConfigurationError::new_err("config.toml must be a table"))?;
-    Ok(Some(config))
+    content.parse::<Table>().map(Some).map_err(|source| {
+        InvalidConfigurationError::new_err(format!("invalid config.toml: {source}"))
+    })
 }
 
 fn resolve_data_path(
     data_path: Option<PathBuf>,
-    project_config: Option<&Bound<'_, PyDict>>,
+    project_config: Option<&Table>,
 ) -> PyResult<Option<PathBuf>> {
     if data_path.is_some() {
         return Ok(data_path);
     }
-    optional_config_string(project_config, "data_path", "config.toml data_path")
+    let Some(project_config) = project_config else {
+        return Ok(None);
+    };
+    optional_config_string(project_config, false, "data_path", "config.toml data_path")
         .map(|value| value.map(PathBuf::from))
 }
 
@@ -583,57 +576,57 @@ fn resolve_s3_connection_params(
 }
 
 fn extract_s3_config(
-    config: Option<&Bound<'_, PyDict>>,
+    config: Option<&Table>,
     explicit: &S3ConnectionParams,
 ) -> PyResult<Option<S3FileConfig>> {
     let Some(config) = config else {
         return Ok(None);
     };
-    let Some(value) = config.get_item("s3")? else {
+    let Some(value) = config.get("s3") else {
         return Ok(None);
     };
     let config = value
-        .cast_into::<PyDict>()
-        .map_err(|_| InvalidConfigurationError::new_err("config.toml s3 must be a table"))?;
+        .as_table()
+        .ok_or_else(|| InvalidConfigurationError::new_err("config.toml s3 must be a table"))?;
     Ok(Some(S3FileConfig {
-        endpoint: optional_config_string_unless_explicit(
-            &config,
+        endpoint: optional_config_string(
+            config,
             explicit.endpoint.is_some(),
             "endpoint",
             "config.toml s3.endpoint",
         )?,
-        access_key_id: optional_config_string_unless_explicit(
-            &config,
+        access_key_id: optional_config_string(
+            config,
             explicit.access_key_id.is_some(),
             "access_key_id",
             "config.toml s3.access_key_id",
         )?,
-        secret_access_key: optional_config_string_unless_explicit(
-            &config,
+        secret_access_key: optional_config_string(
+            config,
             explicit.secret_access_key.is_some(),
             "secret_access_key",
             "config.toml s3.secret_access_key",
         )?,
-        session_token: optional_config_string_unless_explicit(
-            &config,
+        session_token: optional_config_string(
+            config,
             explicit.session_token.is_some(),
             "session_token",
             "config.toml s3.session_token",
         )?,
-        region: optional_config_string_unless_explicit(
-            &config,
+        region: optional_config_string(
+            config,
             explicit.region.is_some(),
             "region",
             "config.toml s3.region",
         )?,
-        path_style: optional_config_bool_unless_explicit(
-            &config,
+        path_style: optional_config_bool(
+            config,
             explicit.path_style.is_some(),
             "path_style",
             "config.toml s3.path_style",
         )?,
-        use_ssl: optional_config_bool_unless_explicit(
-            &config,
+        use_ssl: optional_config_bool(
+            config,
             explicit.use_ssl.is_some(),
             "use_ssl",
             "config.toml s3.use_ssl",
@@ -641,59 +634,41 @@ fn extract_s3_config(
     }))
 }
 
-fn optional_config_string_unless_explicit(
-    config: &Bound<'_, PyDict>,
-    is_explicit: bool,
+fn optional_config_string(
+    config: &Table,
+    skip: bool,
     key: &str,
     label: &str,
 ) -> PyResult<Option<String>> {
-    if is_explicit {
+    if skip {
         return Ok(None);
     }
-    optional_config_string(Some(config), key, label)
-}
-
-fn optional_config_string(
-    config: Option<&Bound<'_, PyDict>>,
-    key: &str,
-    label: &str,
-) -> PyResult<Option<String>> {
-    let Some(config) = config else {
-        return Ok(None);
-    };
-    let Some(value) = config.get_item(key)? else {
+    let Some(value) = config.get(key) else {
         return Ok(None);
     };
     value
-        .extract::<String>()
+        .as_str()
+        .map(|value| value.to_owned())
+        .ok_or_else(|| InvalidConfigurationError::new_err(format!("{label} must be a string")))
         .map(Some)
-        .map_err(|_| InvalidConfigurationError::new_err(format!("{label} must be a string")))
-}
-
-fn optional_config_bool_unless_explicit(
-    config: &Bound<'_, PyDict>,
-    is_explicit: bool,
-    key: &str,
-    label: &str,
-) -> PyResult<Option<bool>> {
-    if is_explicit {
-        return Ok(None);
-    }
-    optional_config_bool(config, key, label)
 }
 
 fn optional_config_bool(
-    config: &Bound<'_, PyDict>,
+    config: &Table,
+    skip: bool,
     key: &str,
     label: &str,
 ) -> PyResult<Option<bool>> {
-    let Some(value) = config.get_item(key)? else {
+    if skip {
+        return Ok(None);
+    }
+    let Some(value) = config.get(key) else {
         return Ok(None);
     };
     value
-        .extract::<bool>()
+        .as_bool()
+        .ok_or_else(|| InvalidConfigurationError::new_err(format!("{label} must be a boolean")))
         .map(Some)
-        .map_err(|_| InvalidConfigurationError::new_err(format!("{label} must be a boolean")))
 }
 
 fn resolve_config_string(explicit: Option<String>, config: Option<&str>) -> Option<String> {
@@ -897,5 +872,41 @@ mod tests {
         );
         assert_eq!(merged.path_style, Some(true));
         assert_eq!(merged.use_ssl, Some(true));
+    }
+
+    #[test]
+    fn s3_config_skips_explicit_invalid_file_values() {
+        let config = r#"
+            [s3]
+            endpoint = 123
+            access_key_id = "from-config"
+            secret_access_key = "from-config-secret"
+            path_style = "yes"
+            use_ssl = true
+        "#
+        .parse::<Table>()
+        .expect("test config should parse");
+        let explicit = S3ConnectionParams {
+            endpoint: Some("override:9000".to_owned()),
+            access_key_id: None,
+            secret_access_key: None,
+            session_token: None,
+            region: None,
+            path_style: Some(true),
+            use_ssl: None,
+        };
+
+        let file_config = extract_s3_config(Some(&config), &explicit)
+            .expect("explicit fields should suppress invalid file values")
+            .expect("s3 config should be present");
+
+        assert_eq!(file_config.endpoint, None);
+        assert_eq!(file_config.access_key_id.as_deref(), Some("from-config"));
+        assert_eq!(
+            file_config.secret_access_key.as_deref(),
+            Some("from-config-secret")
+        );
+        assert_eq!(file_config.path_style, None);
+        assert_eq!(file_config.use_ssl, Some(true));
     }
 }
