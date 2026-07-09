@@ -36,7 +36,7 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 
 ### Phase 3: S3 Storage Behavior
 
-- [ ] Preserve local data-path behavior at the PulseOn API level for writes,
+- [x] Preserve local data-path behavior at the PulseOn API level for writes,
   queries, terminal flush, and `flush_run_data(run_id)`.
 - [ ] Support S3-backed `data_path` with both DuckDB and SQLite catalog
   backends.

@@ -42,6 +42,7 @@ def test_catalog_backend_round_trips_native_storage_workflow(
     )
     active_metrics = client.list_metrics(run.run_id)
     finished = client.finish_run(run.run_id)
+    client.flush_run_data(run.run_id)
     terminal_points = client.query_metric(run.run_id, "train/loss")
     summaries = client.query_metric_summaries([run.run_id], "train/loss")
     metrics = client.list_metrics(run.run_id)
