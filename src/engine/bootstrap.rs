@@ -322,7 +322,7 @@ fn path_basename(path: &Path) -> String {
         .to_owned()
 }
 
-fn is_s3_data_path(path: &Path) -> bool {
+pub(crate) fn is_s3_data_path(path: &Path) -> bool {
     path.to_string_lossy().starts_with("s3://")
 }
 
