@@ -66,7 +66,7 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 - [x] Add release notes for 0.1.0a4 covering S3-compatible data paths, MinIO
   acceptance coverage, local-only catalog paths, and narrowed catalog-backend
   type hints.
-- [ ] Run the full local verification set: `cargo check`, `cargo test`,
+- [x] Run the full local verification set: `cargo check`, `cargo test`,
   `uv run maturin develop --uv`, `uv run pyright`, and `uv run pytest`.
 
 ## Later Backlog
