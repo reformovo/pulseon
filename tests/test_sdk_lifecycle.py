@@ -170,13 +170,26 @@ def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
         {"metric_queue_capacity": 1_048_577},
         {"catalog_backend": "postgres"},
         {"data_path": "http://bucket/pulseon"},
-        {"catalog_path": "s3://bucket/catalog.ducklake"},
     ]
     for index, kwargs in enumerate(invalid_kwargs):
         root_path = tmp_path / f"pulseon-{index}"
         with pytest.raises(pulseon.InvalidConfigurationError):
             pulseon.init(root_path, **kwargs)
         assert not root_path.exists()
+
+
+def test_init_rejects_s3_catalog_path(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="catalog_path must be a local filesystem path",
+    ):
+        pulseon.init(root_path, catalog_path="s3://bucket/catalog.ducklake")
+
+    assert not root_path.exists()
 
 
 def test_client_creates_project_and_run(tmp_path: pathlib.Path) -> None:
