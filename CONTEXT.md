@@ -62,3 +62,8 @@ The local filesystem location used for Parquet metric data.
 A storage-facing percent-encoded form of a metric key used for data-path
 partitioning.
 _Avoid_: Metric key partition
+
+**Run-writer lock**:
+A local OS advisory lock that allows only one active writer client to hold a
+writable handle for a run.
+_Avoid_: Lock table, lease, heartbeat, stale-lock cleanup service

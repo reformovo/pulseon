@@ -21,27 +21,26 @@ data area / object storage
   partitioned metric_points Parquet files
 ```
 
-The released a2 local native catalog database is backed by a DuckDB catalog
-file. V3 adds SQLite as a required local catalog backend after real
-DuckLake-backed parity tests pass. PostgreSQL is a future shared-catalog option.
-Object storage is for the data area, not for the catalog database file itself.
+Local native catalogs use DuckDB or SQLite. PostgreSQL is a future
+shared-catalog option. Object storage is for the data area, not for the catalog
+database file itself.
 
 The default project-local store is:
 
 ```text
 <project>/.pulseon/
+  config.toml        # optional native project configuration
   catalog.ducklake   # default DuckDB-backed DuckLake catalog
-  catalog.sqlite     # SQLite-backed DuckLake catalog when selected in V3
+  catalog.sqlite     # SQLite-backed DuckLake catalog
   data/              # default Parquet data path
 ```
 
-Users may override `catalog_path` and `data_path` independently with local
-filesystem paths. Backend-specific defaults use conventional filenames, but an
-explicit `catalog_path` is used as provided and does not need to match a
-backend-specific suffix. The current public `data_path` contract is local
-filesystem paths. S3-compatible object-storage data paths, including local
-MinIO, are deferred to a future release; when enabled later, the catalog
-database still remains local unless a shared-catalog decision says otherwise.
+Users may override `catalog_path` and `data_path` independently. `catalog_path`
+remains a local filesystem path. `data_path` may be local or S3-compatible,
+such as `s3://bucket/prefix`. Backend-specific catalog defaults use
+conventional filenames, but an explicit `catalog_path` is used as provided.
+The catalog database remains local unless a shared-catalog decision says
+otherwise.
 
 ## Why
 
@@ -74,20 +73,18 @@ lookup and transactional refresh are cheap.
 Field-level schemas for PulseOn-owned catalog tables live in
 `docs/catalog-application-tables.md`.
 
-V3 requires PulseOn SQL to address catalog application tables through
-PulseOn-owned names or a backend-aware adapter, not through DuckLake's internal
-metadata alias. This keeps control-plane and query-index state from becoming
-coupled to DuckLake internal catalog naming. The tables still live in the same
-catalog database file as DuckLake metadata for both DuckDB and SQLite local
-backends.
+PulseOn SQL addresses catalog application tables through PulseOn-owned names
+or a backend-aware adapter, not through DuckLake's internal metadata alias.
+This keeps control-plane and query-index state from becoming coupled to
+DuckLake internal catalog naming. The tables live in the same catalog database
+file as DuckLake metadata for both DuckDB and SQLite local backends.
 
 ## Data Area Responsibilities
 
 - Store large Parquet data files for metric facts.
 - Support local filesystem paths in native mode.
 - Support a custom local Parquet data path.
-- Defer S3-compatible object-storage data paths, including local MinIO, to a
-  future release.
+- Support S3-compatible object-storage data paths, including local MinIO.
 - Keep the metric point schema compatible with the Parquet contract.
 - Partition metric point files for export-friendly layout.
 - Preserve accepted metric points without making the training hot path wait for
@@ -138,19 +135,24 @@ PulseOn has two paths:
 - `catalog_path`: the local catalog database path under `<project>/.pulseon/`.
 - `data_path`: the Parquet data area used by DuckLake.
 
-The default `data_path` is `<project>/.pulseon/data`. Users must be able to
-override `data_path` independently with a local filesystem path, for
-example:
+The default `data_path` is `<project>/.pulseon/data`. Users may override it
+with a local filesystem path:
 
 ```text
 catalog_path = <project>/.pulseon/catalog.ducklake
 data_path    = /mnt/pulseon/<project>/data/
 ```
 
-When `data_path` is object storage in a future release, DuckLake records
-relative data-file paths in the catalog and resolves them against the
-configured object-store URI. Accessing S3-compatible storage requires the DuckDB
-HTTPFS/S3 configuration outside the catalog file itself.
+When `data_path` is object storage, DuckLake records relative data-file paths
+in the catalog and resolves them against the configured object-store URI.
+Accessing S3-compatible storage requires the DuckDB HTTPFS/S3 configuration
+outside the catalog file itself.
+
+S3 configuration lives in `<project>/.pulseon/config.toml`. Explicit
+`pulseon.init(...)` keyword arguments override config-file values. S3 secrets
+configure only the current DuckDB connection and must not be copied into
+DuckLake or PulseOn catalog tables. S3-backed `data_path` is supported for both
+DuckDB and SQLite catalog backends, while `catalog_path` remains local-only.
 
 ## Metric Ingestion Durability
 
@@ -163,9 +165,9 @@ Metric ingestion has two separate requirements:
 
 The storage boundary therefore requires a clear distinction between
 queued reports and accepted reports. Admission into a bounded in-process memory
-queue alone is not acceptance. In the released a2 contract, a report becomes
-accepted when the background batch writer persists it into DuckLake, so
-accepted reports and persisted metric points are the same state.
+queue alone is not acceptance. A report becomes accepted when the background
+batch writer persists it into DuckLake, so accepted reports and persisted
+metric points are the same state.
 
 If PulseOn cannot queue a metric report because the bounded metric queue is
 full, that condition must be surfaced as an explicit queue-full failure rather
@@ -181,10 +183,8 @@ tiny Parquet file per training step. That behavior is desirable during an
 active run, especially for high-frequency logging.
 
 When a run ends, PulseOn must flush inline `metric_points` data to the
-configured Parquet data path. In informal discussion, "experiment" means a run
-reaches a terminal state through `finish_run` or `fail_run`; `Run` remains the
-canonical product term. The flush is required so export workflows can observe
-the completed metric data as partitioned Parquet.
+configured Parquet data path. The flush is required so export workflows can
+observe the completed metric data as partitioned Parquet.
 
 The flush operation should preserve the non-blocking hot-path rule for
 `run.log(...)`. It belongs to the run finalization path, not to individual
@@ -297,18 +297,18 @@ writer failure. After failed-client shutdown releases resources, a new client
 may resume the non-terminal run if it can acquire the writer lock, but reports
 left pending in the failed client were not durably admitted and are lost. Once
 terminal lifecycle state is written, the lock is released even if the later
-Parquet flush raises `MetricFlushError`. A future lock cleanup phase may remove
-the lock file as part of the release path only when it can prove that it is
-deleting the original file for the released writer. If that cannot be proven
-safely, PulseOn must leave the file on disk. The encoded run id uses the same
+Parquet flush raises `MetricFlushError`. Lock cleanup may remove the lock file
+only when it can prove that it is deleting the original file for the released
+writer. If that cannot be proven safely, PulseOn must leave the file on disk.
+The encoded run id uses the same
 RFC 3986 percent-encoding rule as `metric_key_encoded`. Filesystem I/O,
 permission, or disk failures affecting catalog paths, data paths, lock
 directories, or lock files raise `StorageError`, not
 `InvalidConfigurationError`. Ordinary `StorageError` messages should include
 the failed operation and basename, not full local paths by default. Full local
-paths are not exposed through ordinary diagnostics; they are reserved for a
-future explicit debug/verbose facility or internal chained/source errors
-intended for debugging.
+paths are not exposed through ordinary diagnostics; they are reserved for an
+explicit debug/verbose facility or internal chained/source errors intended for
+debugging.
 
 Initialization-time `StorageError` prevents the client from starting. Runtime
 `StorageError` from direct API operations is an operation error and does not
