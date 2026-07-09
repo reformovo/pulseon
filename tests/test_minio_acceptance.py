@@ -45,6 +45,9 @@ def test_minio_s3_data_path_round_trips_catalog_backend(
     config = _require_minio_config()
     root_path = tmp_path / catalog_backend / "pulseon"
     prefix = f"pulseon-acceptance/{uuid.uuid4().hex}/{catalog_backend}"
+    partition_prefix = (
+        prefix + "/main/metric_points/run_id=run-1/metric_key_encoded=train%252Floss/"
+    )
     client = _open_minio_client(root_path, config, prefix, catalog_backend)
     project = client.create_project("minio acceptance", project_id="project-1")
     run = client.create_run(project.project_id, "baseline", run_id="run-1")
@@ -60,17 +63,15 @@ def test_minio_s3_data_path_round_trips_catalog_backend(
     summaries = client.query_metric_summaries([run.run_id], "train/loss")
     metrics = client.list_metrics(run.run_id)
     diagnostics = client.diagnostics()
+    terminal_keys = _list_minio_keys(config, partition_prefix)
     client.flush_run_data(run.run_id)
     retry_diagnostics = client.diagnostics()
+    retry_keys = _list_minio_keys(config, partition_prefix)
     client.shutdown()
 
     reopened = _open_minio_client(root_path, config, prefix, catalog_backend)
     reopened_run = reopened.get_run(finished.run_id)
     reopened_points = reopened.query_metric(finished.run_id, "train/loss")
-    keys = _list_minio_keys(
-        config,
-        prefix + "/main/metric_points/run_id=run-1/metric_key_encoded=train%252Floss/",
-    )
     reopened.shutdown()
 
     assert [point.value_f64 for point in active_points] == [0.25, 0.125]
@@ -84,11 +85,12 @@ def test_minio_s3_data_path_round_trips_catalog_backend(
     ]
     assert diagnostics.last_flush_run_id == "run-1"
     assert diagnostics.last_flush_status == "succeeded"
+    assert any(key.endswith(".parquet") for key in terminal_keys)
     assert retry_diagnostics.last_flush_run_id == "run-1"
     assert retry_diagnostics.last_flush_status == "succeeded"
+    assert any(key.endswith(".parquet") for key in retry_keys)
     assert reopened_run.status == "finished"
     assert [point.step for point in reopened_points] == [0, 1]
-    assert any(key.endswith(".parquet") for key in keys)
 
 
 def _open_minio_client(
