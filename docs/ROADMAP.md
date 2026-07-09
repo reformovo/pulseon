@@ -63,7 +63,7 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 
 - [x] Update README/examples only where needed to show `.pulseon/config.toml`
   and S3 `data_path` usage without exposing secrets.
-- [ ] Add release notes for 0.1.0a4 covering S3-compatible data paths, MinIO
+- [x] Add release notes for 0.1.0a4 covering S3-compatible data paths, MinIO
   acceptance coverage, local-only catalog paths, and narrowed catalog-backend
   type hints.
 - [ ] Run the full local verification set: `cargo check`, `cargo test`,
