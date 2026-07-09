@@ -3,7 +3,8 @@
 PulseOn is a local-first training metrics tracker backed by Rust, PyO3, DuckDB,
 and DuckLake.
 
-Current alpha: 0.1.0a3 / v3 native local storage loop:
+Current alpha: 0.1.0a3 / v3 native local storage loop. The v4 development
+line adds S3-compatible data paths for the Parquet data area:
 
 - create a project
 - start or resume a run
@@ -11,7 +12,7 @@ Current alpha: 0.1.0a3 / v3 native local storage loop:
 - query metric series and summaries locally
 - support local DuckDB-backed DuckLake catalog storage by default
 - support local SQLite-backed DuckLake catalog storage when requested
-- keep the current public data path local-filesystem only
+- support local or S3-compatible Parquet data paths
 - keep Parquet as the long-term compatibility boundary
 
 Quickstart:
@@ -35,7 +36,36 @@ client = pulseon.init("runs")
 ```
 
 The existing storage keywords remain available: `data_path`,
-`catalog_backend`, `catalog_path`, and `metric_queue_capacity`.
+`catalog_backend`, `catalog_path`, and `metric_queue_capacity`. `catalog_path`
+must be a local filesystem path. `data_path` may be local, or it may use an
+S3-compatible URI such as `s3://bucket/prefix`.
+
+Project-local storage settings can live in `./.pulseon/config.toml`:
+
+```toml
+data_path = "s3://example-bucket/pulseon/demo"
+
+[s3]
+endpoint = "https://s3.example.com"
+region = "us-east-1"
+access_key_id = "<access-key-id>"
+secret_access_key = "<secret-access-key>"
+path_style = true
+use_ssl = true
+```
+
+Do not commit real S3 credentials. Explicit `pulseon.init(...)` keyword
+arguments override values from `config.toml`:
+
+```python
+client = pulseon.init(
+    data_path="s3://example-bucket/pulseon/demo",
+    s3_endpoint="https://s3.example.com",
+    s3_access_key_id="<access-key-id>",
+    s3_secret_access_key="<secret-access-key>",
+    s3_path_style=True,
+)
+```
 
 For bounded teardown, stop active logging threads before calling
 `client.shutdown(timeout=...)`; PulseOn keeps admission open while bounded
