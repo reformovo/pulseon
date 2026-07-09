@@ -4,6 +4,7 @@ use crate::engine::EngineError;
 
 const DUCKLAKE_ALIAS: &str = "dl";
 const DUCKDB_CATALOG_ALIAS: &str = "pulseon_catalog";
+const S3_SECRET_NAME: &str = "pulseon_s3";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CatalogBackend {
@@ -191,9 +192,12 @@ pub(crate) fn open_native_connection_with_config(
             source,
         })?;
     }
-    let _s3_connection = config.s3_connection.as_ref();
-
     let connection = open_duckdb_connection()?;
+    if is_s3_data_path(&config.data_path)
+        && let Some(s3_connection) = config.s3_connection.as_ref()
+    {
+        configure_s3_connection(&connection, s3_connection)?;
+    }
     attach_ducklake_with_backend(
         &connection,
         config.catalog_backend,
@@ -267,6 +271,59 @@ fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
     Ok(duckdb::Connection::open_in_memory_with_flags(config)?)
 }
 
+fn configure_s3_connection(
+    connection: &duckdb::Connection,
+    config: &S3ConnectionConfig,
+) -> Result<(), EngineError> {
+    connection
+        .execute_batch("INSTALL httpfs; LOAD httpfs;")
+        .map_err(|source| EngineError::StorageDuckDb {
+            operation: "loading DuckDB HTTPFS extension",
+            name: "s3 data path".to_owned(),
+            source,
+        })?;
+
+    connection
+        .execute_batch(&create_s3_secret_statement(config))
+        .map_err(|source| EngineError::StorageDuckDb {
+            operation: "configuring DuckDB S3 secret",
+            name: "s3 data path".to_owned(),
+            source,
+        })?;
+    Ok(())
+}
+
+fn create_s3_secret_statement(config: &S3ConnectionConfig) -> String {
+    let mut options = vec![
+        "TYPE s3".to_owned(),
+        format!("KEY_ID {}", sql_string_literal(&config.access_key_id)),
+        format!("SECRET {}", sql_string_literal(&config.secret_access_key)),
+        format!("ENDPOINT {}", sql_string_literal(&config.endpoint)),
+    ];
+    if let Some(session_token) = config.session_token.as_ref() {
+        options.push(format!(
+            "SESSION_TOKEN {}",
+            sql_string_literal(session_token)
+        ));
+    }
+    if let Some(region) = config.region.as_ref() {
+        options.push(format!("REGION {}", sql_string_literal(region)));
+    }
+    if let Some(path_style) = config.path_style {
+        let url_style = if path_style { "path" } else { "vhost" };
+        options.push(format!("URL_STYLE {}", sql_string_literal(url_style)));
+    }
+    if let Some(use_ssl) = config.use_ssl {
+        options.push(format!("USE_SSL {}", sql_boolean_literal(use_ssl)));
+    }
+    format!(
+        "CREATE OR REPLACE SECRET {S3_SECRET_NAME} (
+             {}
+         );",
+        options.join(",\n             ")
+    )
+}
+
 pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS pulseon_projects (
@@ -313,6 +370,10 @@ pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), En
 
 fn sql_string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+fn sql_boolean_literal(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
 }
 
 fn path_basename(path: &Path) -> String {
@@ -396,6 +457,95 @@ mod tests {
         );
 
         assert!(statement.contains("DATA_PATH 's3://bucket/prefix'"));
+    }
+
+    #[test]
+    fn local_data_path_does_not_configure_httpfs_or_s3_secret()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-bootstrap-{}", uuid::Uuid::new_v4()));
+        let config = NativeStorageConfig::with_backend_and_s3_config(
+            CatalogBackend::DuckDb,
+            &root_path,
+            None,
+            None,
+            Some(s3_test_config()),
+        );
+        let connection = open_native_connection_with_config(config)?;
+
+        let httpfs_loaded: bool = connection.query_row(
+            "SELECT loaded
+             FROM duckdb_extensions()
+             WHERE extension_name = 'httpfs'",
+            [],
+            |row| row.get(0),
+        )?;
+        let secret_count: i64 =
+            connection.query_row("SELECT count(*) FROM duckdb_secrets()", [], |row| {
+                row.get(0)
+            })?;
+
+        assert!(!httpfs_loaded);
+        assert_eq!(secret_count, 0);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn configure_s3_connection_creates_temporary_redacted_secret()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let connection = open_duckdb_connection()?;
+        let config = s3_test_config();
+
+        configure_s3_connection(&connection, &config)?;
+
+        let (name, secret_type, persistent, storage, secret_string): (
+            String,
+            String,
+            bool,
+            String,
+            String,
+        ) = connection.query_row(
+            "SELECT name, type, persistent, storage, secret_string
+             FROM duckdb_secrets()",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )?;
+
+        assert_eq!(name, S3_SECRET_NAME);
+        assert_eq!(secret_type, "s3");
+        assert!(!persistent);
+        assert_eq!(storage, "memory");
+        assert!(secret_string.contains("endpoint=127.0.0.1:9000"));
+        assert!(secret_string.contains("key_id=pulseon-key"));
+        assert!(secret_string.contains("region=us-east-1"));
+        assert!(secret_string.contains("secret=redacted"));
+        assert!(secret_string.contains("session_token=redacted"));
+        assert!(secret_string.contains("url_style=path"));
+        assert!(secret_string.contains("use_ssl=false"));
+        assert!(!secret_string.contains("pulseon-secret"));
+        assert!(!secret_string.contains("pulseon-session"));
+        Ok(())
+    }
+
+    fn s3_test_config() -> S3ConnectionConfig {
+        S3ConnectionConfig::new(
+            "127.0.0.1:9000".to_owned(),
+            "pulseon-key".to_owned(),
+            "pulseon-secret".to_owned(),
+            Some("pulseon-session".to_owned()),
+            Some("us-east-1".to_owned()),
+            Some(true),
+            Some(false),
+        )
     }
 
     #[test]

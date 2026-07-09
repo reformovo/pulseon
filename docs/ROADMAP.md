@@ -31,7 +31,7 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 
 ### Phase 2: DuckDB HTTPFS Setup
 
-- [ ] Configure DuckDB HTTPFS/S3 only for S3 data paths, using connection-local
+- [x] Configure DuckDB HTTPFS/S3 only for S3 data paths, using connection-local
   secrets that are never persisted into DuckLake or PulseOn catalog tables.
 
 ### Phase 3: S3 Storage Behavior
