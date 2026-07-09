@@ -19,7 +19,7 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 
 ### Phase 1: S3 Configuration
 
-- [ ] Support `data_path = "s3://bucket/prefix"` through
+- [x] Support `data_path = "s3://bucket/prefix"` through
   `<project>/.pulseon/config.toml` and the existing `data_path` keyword.
 - [ ] Keep `catalog_path` local-only; `catalog_path = "s3://..."` remains
   `InvalidConfigurationError`.

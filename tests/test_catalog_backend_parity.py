@@ -141,7 +141,7 @@ def test_catalog_backend_rejects_invalid_local_storage_configuration(
     import pulseon
 
     invalid_kwargs = [
-        {"data_path": "s3://bucket/pulseon"},
+        {"data_path": "http://bucket/pulseon"},
         {"catalog_path": "s3://bucket/catalog.ducklake"},
     ]
     for index, kwargs in enumerate(invalid_kwargs):

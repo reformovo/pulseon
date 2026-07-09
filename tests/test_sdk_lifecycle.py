@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+from typing import Any
 
 import pytest
 
@@ -50,6 +51,73 @@ def test_init_accepts_v2_configuration_keywords(tmp_path: pathlib.Path) -> None:
     assert project.project_id == "project-1"
     assert data_path.is_dir()
     assert catalog_path.is_file()
+
+
+def test_init_uses_configured_s3_data_path(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    config_path = root_path / ".pulseon" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text('data_path = "s3://bucket/pulseon"\n', encoding="utf-8")
+    captured_kwargs: dict[str, Any] = {}
+    sentinel_client = object()
+
+    def fake_init(*args: Any, **kwargs: Any) -> object:
+        captured_kwargs["args"] = args
+        captured_kwargs["kwargs"] = kwargs
+        return sentinel_client
+
+    monkeypatch.setattr(pulseon._pulseon, "init", fake_init)
+
+    client = pulseon.init(root_path)
+
+    assert client is sentinel_client
+    assert captured_kwargs["args"] == (root_path,)
+    assert captured_kwargs["kwargs"]["data_path"] == "s3://bucket/pulseon"
+
+
+def test_init_data_path_keyword_overrides_config(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    explicit_data_path = tmp_path / "explicit-data"
+    config_path = root_path / ".pulseon" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text('data_path = "s3://bucket/from-config"\n', encoding="utf-8")
+    captured_kwargs: dict[str, Any] = {}
+
+    def fake_init(*args: Any, **kwargs: Any) -> object:
+        captured_kwargs["args"] = args
+        captured_kwargs["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(pulseon._pulseon, "init", fake_init)
+
+    pulseon.init(root_path, data_path=explicit_data_path)
+
+    assert captured_kwargs["kwargs"]["data_path"] == explicit_data_path
+
+
+def test_init_rejects_invalid_config_toml_data_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    config_path = root_path / ".pulseon" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("data_path = 123\n", encoding="utf-8")
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="config.toml data_path must be a string",
+    ):
+        pulseon.init(root_path)
 
 
 def test_init_accepts_explicit_duckdb_catalog_path_without_ducklake_suffix(
@@ -101,7 +169,7 @@ def test_init_rejects_invalid_v2_configuration(tmp_path: pathlib.Path) -> None:
         {"metric_queue_capacity": 0},
         {"metric_queue_capacity": 1_048_577},
         {"catalog_backend": "postgres"},
-        {"data_path": "s3://bucket/pulseon"},
+        {"data_path": "http://bucket/pulseon"},
         {"catalog_path": "s3://bucket/catalog.ducklake"},
     ]
     for index, kwargs in enumerate(invalid_kwargs):

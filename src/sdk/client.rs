@@ -474,9 +474,9 @@ fn validate_init_config(
             "unsupported catalog_backend: {catalog_backend}"
         ))
     })?;
-    if data_path.is_some_and(is_uri_path) {
+    if data_path.is_some_and(is_unsupported_data_uri_path) {
         return Err(InvalidConfigurationError::new_err(
-            "data_path must be a local filesystem path",
+            "data_path must be a local filesystem path or s3:// URI",
         ));
     }
     if catalog_path.is_some_and(is_uri_path) {
@@ -492,6 +492,11 @@ fn validate_init_config(
 
 fn is_uri_path(path: &Path) -> bool {
     path.to_string_lossy().contains("://")
+}
+
+fn is_unsupported_data_uri_path(path: &Path) -> bool {
+    let path = path.to_string_lossy();
+    path.contains("://") && !path.starts_with("s3://")
 }
 
 fn duration_from_seconds(name: &str, seconds: f64) -> PyResult<Duration> {

@@ -142,11 +142,13 @@ pub(crate) fn open_native_connection_with_config(
             source,
         })?;
     }
-    std::fs::create_dir_all(&config.data_path).map_err(|source| EngineError::Storage {
-        operation: "creating data directory",
-        name: path_basename(&config.data_path),
-        source,
-    })?;
+    if !is_s3_data_path(&config.data_path) {
+        std::fs::create_dir_all(&config.data_path).map_err(|source| EngineError::Storage {
+            operation: "creating data directory",
+            name: path_basename(&config.data_path),
+            source,
+        })?;
+    }
 
     let connection = open_duckdb_connection()?;
     attach_ducklake_with_backend(
@@ -277,6 +279,10 @@ fn path_basename(path: &Path) -> String {
         .to_owned()
 }
 
+fn is_s3_data_path(path: &Path) -> bool {
+    path.to_string_lossy().starts_with("s3://")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +342,17 @@ mod tests {
         assert!(statement.contains("TYPE ducklake"));
         assert!(statement.contains("DATA_PATH 'data'"));
         assert!(statement.contains("METADATA_CATALOG 'pulseon_catalog'"));
+    }
+
+    #[test]
+    fn catalog_adapter_accepts_s3_data_path() {
+        let adapter = CatalogAdapter::duckdb();
+        let statement = adapter.attach_ducklake_statement(
+            Path::new("catalog.ducklake"),
+            Path::new("s3://bucket/prefix"),
+        );
+
+        assert!(statement.contains("DATA_PATH 's3://bucket/prefix'"));
     }
 
     #[test]
