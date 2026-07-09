@@ -43,11 +43,11 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 
 ### Phase 4: MinIO Acceptance
 
-- [ ] Add opt-in MinIO acceptance coverage for DuckDB and SQLite catalog
+- [x] Add opt-in MinIO acceptance coverage for DuckDB and SQLite catalog
   backends.
-- [ ] Cover initialization, metric writes, query visibility, terminal
+- [x] Cover initialization, metric writes, query visibility, terminal
   finalization, terminal Parquet visibility, and `flush_run_data(run_id)`.
-- [ ] Keep acceptance credentials out of source control.
+- [x] Keep acceptance credentials out of source control.
 
 ### Phase 5: Python Type Surface
 
