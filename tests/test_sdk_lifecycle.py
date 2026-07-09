@@ -9,6 +9,57 @@ import pytest
 
 from tests import helpers
 
+_S3_CONFIG = """data_path = "s3://bucket/pulseon"
+
+[s3]
+endpoint = "127.0.0.1:9000"
+access_key_id = "pulseon"
+secret_access_key = "secret"
+session_token = "session"
+region = "us-east-1"
+path_style = true
+use_ssl = false
+"""
+
+_S3_OVERRIDE_CONFIG = """data_path = "s3://bucket/pulseon"
+
+[s3]
+endpoint = "from-config:9000"
+access_key_id = "from-config"
+secret_access_key = "from-config-secret"
+path_style = false
+use_ssl = true
+"""
+
+_INVALID_S3_BOOL_CONFIG = """data_path = "s3://bucket/pulseon"
+
+[s3]
+endpoint = "127.0.0.1:9000"
+access_key_id = "pulseon"
+secret_access_key = "secret"
+path_style = "yes"
+"""
+
+
+def _write_project_config(root_path: pathlib.Path, content: str) -> None:
+    config_path = root_path / ".pulseon" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(content, encoding="utf-8")
+
+
+def _capture_native_init(
+    pulseon: Any, monkeypatch: pytest.MonkeyPatch
+) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    def fake_init(*args: Any, **kwargs: Any) -> object:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(pulseon._pulseon, "init", fake_init)
+    return captured
+
 
 def test_init_returns_client(tmp_path: pathlib.Path) -> None:
     import pulseon
@@ -59,24 +110,22 @@ def test_init_uses_configured_s3_data_path(
     import pulseon
 
     root_path = tmp_path / "pulseon"
-    config_path = root_path / ".pulseon" / "config.toml"
-    config_path.parent.mkdir(parents=True)
-    config_path.write_text('data_path = "s3://bucket/pulseon"\n', encoding="utf-8")
-    captured_kwargs: dict[str, Any] = {}
-    sentinel_client = object()
+    _write_project_config(root_path, _S3_CONFIG)
+    captured = _capture_native_init(pulseon, monkeypatch)
 
-    def fake_init(*args: Any, **kwargs: Any) -> object:
-        captured_kwargs["args"] = args
-        captured_kwargs["kwargs"] = kwargs
-        return sentinel_client
+    pulseon.init(root_path)
 
-    monkeypatch.setattr(pulseon._pulseon, "init", fake_init)
-
-    client = pulseon.init(root_path)
-
-    assert client is sentinel_client
-    assert captured_kwargs["args"] == (root_path,)
-    assert captured_kwargs["kwargs"]["data_path"] == "s3://bucket/pulseon"
+    assert captured["args"] == (root_path,)
+    assert {
+        "data_path": "s3://bucket/pulseon",
+        "s3_endpoint": "127.0.0.1:9000",
+        "s3_access_key_id": "pulseon",
+        "s3_secret_access_key": "secret",
+        "s3_session_token": "session",
+        "s3_region": "us-east-1",
+        "s3_path_style": True,
+        "s3_use_ssl": False,
+    }.items() <= captured["kwargs"].items()
 
 
 def test_init_data_path_keyword_overrides_config(
@@ -86,21 +135,66 @@ def test_init_data_path_keyword_overrides_config(
 
     root_path = tmp_path / "pulseon"
     explicit_data_path = tmp_path / "explicit-data"
-    config_path = root_path / ".pulseon" / "config.toml"
-    config_path.parent.mkdir(parents=True)
-    config_path.write_text('data_path = "s3://bucket/from-config"\n', encoding="utf-8")
-    captured_kwargs: dict[str, Any] = {}
-
-    def fake_init(*args: Any, **kwargs: Any) -> object:
-        captured_kwargs["args"] = args
-        captured_kwargs["kwargs"] = kwargs
-        return object()
-
-    monkeypatch.setattr(pulseon._pulseon, "init", fake_init)
+    _write_project_config(root_path, 'data_path = "s3://bucket/from-config"\n')
+    captured = _capture_native_init(pulseon, monkeypatch)
 
     pulseon.init(root_path, data_path=explicit_data_path)
 
-    assert captured_kwargs["kwargs"]["data_path"] == explicit_data_path
+    assert captured["kwargs"]["data_path"] == explicit_data_path
+    assert captured["kwargs"]["s3_endpoint"] is None
+
+
+def test_init_s3_keywords_override_config(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    _write_project_config(root_path, _S3_OVERRIDE_CONFIG)
+    captured = _capture_native_init(pulseon, monkeypatch)
+
+    pulseon.init(
+        root_path,
+        s3_endpoint="override:9000",
+        s3_path_style=True,
+    )
+
+    assert {
+        "s3_endpoint": "override:9000",
+        "s3_access_key_id": "from-config",
+        "s3_secret_access_key": "from-config-secret",
+        "s3_path_style": True,
+        "s3_use_ssl": True,
+    }.items() <= captured["kwargs"].items()
+
+
+def test_init_rejects_missing_required_s3_config(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="s3_endpoint is required when data_path is s3://",
+    ):
+        pulseon.init(root_path, data_path="s3://bucket/pulseon")
+
+    assert not root_path.exists()
+
+
+def test_init_rejects_invalid_config_toml_s3_setting(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    _write_project_config(root_path, _INVALID_S3_BOOL_CONFIG)
+
+    with pytest.raises(
+        pulseon.InvalidConfigurationError,
+        match="config.toml s3.path_style must be a boolean",
+    ):
+        pulseon.init(root_path)
 
 
 def test_init_rejects_invalid_config_toml_data_path(
@@ -109,9 +203,7 @@ def test_init_rejects_invalid_config_toml_data_path(
     import pulseon
 
     root_path = tmp_path / "pulseon"
-    config_path = root_path / ".pulseon" / "config.toml"
-    config_path.parent.mkdir(parents=True)
-    config_path.write_text("data_path = 123\n", encoding="utf-8")
+    _write_project_config(root_path, "data_path = 123\n")
 
     with pytest.raises(
         pulseon.InvalidConfigurationError,

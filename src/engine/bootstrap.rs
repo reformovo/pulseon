@@ -32,6 +32,40 @@ pub(crate) struct NativeStorageConfig {
     catalog_backend: CatalogBackend,
     catalog_path: PathBuf,
     data_path: PathBuf,
+    s3_connection: Option<S3ConnectionConfig>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct S3ConnectionConfig {
+    pub(crate) endpoint: String,
+    pub(crate) access_key_id: String,
+    pub(crate) secret_access_key: String,
+    pub(crate) session_token: Option<String>,
+    pub(crate) region: Option<String>,
+    pub(crate) path_style: Option<bool>,
+    pub(crate) use_ssl: Option<bool>,
+}
+
+impl S3ConnectionConfig {
+    pub(crate) fn new(
+        endpoint: String,
+        access_key_id: String,
+        secret_access_key: String,
+        session_token: Option<String>,
+        region: Option<String>,
+        path_style: Option<bool>,
+        use_ssl: Option<bool>,
+    ) -> Self {
+        Self {
+            endpoint,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            region,
+            path_style,
+            use_ssl,
+        }
+    }
 }
 
 struct CatalogAdapter {
@@ -107,14 +141,21 @@ impl NativeStorageConfig {
         catalog_path: Option<PathBuf>,
         data_path: Option<PathBuf>,
     ) -> Self {
-        Self::with_backend(CatalogBackend::DuckDb, root_path, catalog_path, data_path)
+        Self::with_backend_and_s3_config(
+            CatalogBackend::DuckDb,
+            root_path,
+            catalog_path,
+            data_path,
+            None,
+        )
     }
 
-    pub(crate) fn with_backend(
+    pub(crate) fn with_backend_and_s3_config(
         catalog_backend: CatalogBackend,
         root_path: &Path,
         catalog_path: Option<PathBuf>,
         data_path: Option<PathBuf>,
+        s3_connection: Option<S3ConnectionConfig>,
     ) -> Self {
         let pulseon_path = root_path.join(".pulseon");
         let adapter = catalog_backend.adapter();
@@ -123,6 +164,7 @@ impl NativeStorageConfig {
             catalog_path: catalog_path
                 .unwrap_or_else(|| pulseon_path.join(adapter.default_catalog_filename)),
             data_path: data_path.unwrap_or_else(|| pulseon_path.join("data")),
+            s3_connection,
         }
     }
 }
@@ -149,6 +191,7 @@ pub(crate) fn open_native_connection_with_config(
             source,
         })?;
     }
+    let _s3_connection = config.s3_connection.as_ref();
 
     let connection = open_duckdb_connection()?;
     attach_ducklake_with_backend(

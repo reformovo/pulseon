@@ -23,7 +23,7 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
   `<project>/.pulseon/config.toml` and the existing `data_path` keyword.
 - [x] Keep `catalog_path` local-only; `catalog_path = "s3://..."` remains
   `InvalidConfigurationError`.
-- [ ] Use TOML config for S3 credentials and connection settings. Explicit
+- [x] Use TOML config for S3 credentials and connection settings. Explicit
   `pulseon.init(...)` keywords override config-file values.
 
 ### Phase 2: DuckDB HTTPFS Setup

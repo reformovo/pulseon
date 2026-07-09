@@ -105,4 +105,11 @@ def init(
     catalog_backend: str = "duckdb",
     catalog_path: str | os.PathLike[str] | None = None,
     metric_queue_capacity: int = 65536,
+    s3_endpoint: str | None = None,
+    s3_access_key_id: str | None = None,
+    s3_secret_access_key: str | None = None,
+    s3_session_token: str | None = None,
+    s3_region: str | None = None,
+    s3_path_style: bool | None = None,
+    s3_use_ssl: bool | None = None,
 ) -> Client: ...

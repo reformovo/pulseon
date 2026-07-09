@@ -6,7 +6,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
-use crate::engine::bootstrap::CatalogBackend;
+use crate::engine::bootstrap::{CatalogBackend, S3ConnectionConfig};
 use crate::engine::client::{NativeClient, NativeRun};
 use crate::engine::reporting::MetricReporterDiagnostics;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
@@ -431,7 +431,14 @@ impl From<MetricAggregate> for PyMetricSummary {
         data_path=None,
         catalog_backend="duckdb",
         catalog_path=None,
-        metric_queue_capacity=65536
+        metric_queue_capacity=65536,
+        s3_endpoint=None,
+        s3_access_key_id=None,
+        s3_secret_access_key=None,
+        s3_session_token=None,
+        s3_region=None,
+        s3_path_style=None,
+        s3_use_ssl=None
     )
 )]
 pub fn init(
@@ -440,18 +447,35 @@ pub fn init(
     catalog_backend: &str,
     catalog_path: Option<PathBuf>,
     metric_queue_capacity: i64,
+    s3_endpoint: Option<String>,
+    s3_access_key_id: Option<String>,
+    s3_secret_access_key: Option<String>,
+    s3_session_token: Option<String>,
+    s3_region: Option<String>,
+    s3_path_style: Option<bool>,
+    s3_use_ssl: Option<bool>,
 ) -> PyResult<PyClient> {
-    let (catalog_backend, metric_queue_capacity) = validate_init_config(
+    let (catalog_backend, metric_queue_capacity, s3_connection) = validate_init_config(
         data_path.as_deref(),
         catalog_backend,
         catalog_path.as_deref(),
         metric_queue_capacity,
+        S3ConnectionParams {
+            endpoint: s3_endpoint,
+            access_key_id: s3_access_key_id,
+            secret_access_key: s3_secret_access_key,
+            session_token: s3_session_token,
+            region: s3_region,
+            path_style: s3_path_style,
+            use_ssl: s3_use_ssl,
+        },
     )?;
     NativeClient::open_with_catalog_backend_storage_config(
         path,
         catalog_backend,
         catalog_path,
         data_path,
+        s3_connection,
         metric_queue_capacity,
     )
     .map(PyClient::new)
@@ -463,7 +487,8 @@ fn validate_init_config(
     catalog_backend: &str,
     catalog_path: Option<&Path>,
     metric_queue_capacity: i64,
-) -> PyResult<(CatalogBackend, usize)> {
+    s3_connection: S3ConnectionParams,
+) -> PyResult<(CatalogBackend, usize, Option<S3ConnectionConfig>)> {
     if !(1..=1_048_576).contains(&metric_queue_capacity) {
         return Err(InvalidConfigurationError::new_err(
             "metric_queue_capacity must be between 1 and 1048576",
@@ -487,7 +512,8 @@ fn validate_init_config(
     let metric_queue_capacity = usize::try_from(metric_queue_capacity).map_err(|_| {
         InvalidConfigurationError::new_err("metric_queue_capacity must be between 1 and 1048576")
     })?;
-    Ok((catalog_backend, metric_queue_capacity))
+    let s3_connection = validate_s3_connection_config(data_path, s3_connection)?;
+    Ok((catalog_backend, metric_queue_capacity, s3_connection))
 }
 
 fn is_uri_path(path: &Path) -> bool {
@@ -497,6 +523,57 @@ fn is_uri_path(path: &Path) -> bool {
 fn is_unsupported_data_uri_path(path: &Path) -> bool {
     let path = path.to_string_lossy();
     path.contains("://") && !path.starts_with("s3://")
+}
+
+struct S3ConnectionParams {
+    endpoint: Option<String>,
+    access_key_id: Option<String>,
+    secret_access_key: Option<String>,
+    session_token: Option<String>,
+    region: Option<String>,
+    path_style: Option<bool>,
+    use_ssl: Option<bool>,
+}
+
+fn validate_s3_connection_config(
+    data_path: Option<&Path>,
+    s3_connection: S3ConnectionParams,
+) -> PyResult<Option<S3ConnectionConfig>> {
+    if !data_path.is_some_and(is_s3_data_path) {
+        return Ok(None);
+    }
+    Ok(Some(S3ConnectionConfig::new(
+        required_s3_string(s3_connection.endpoint, "s3_endpoint")?,
+        required_s3_string(s3_connection.access_key_id, "s3_access_key_id")?,
+        required_s3_string(s3_connection.secret_access_key, "s3_secret_access_key")?,
+        optional_s3_string(s3_connection.session_token, "s3_session_token")?,
+        optional_s3_string(s3_connection.region, "s3_region")?,
+        s3_connection.path_style,
+        s3_connection.use_ssl,
+    )))
+}
+
+fn is_s3_data_path(path: &Path) -> bool {
+    path.to_string_lossy().starts_with("s3://")
+}
+
+fn required_s3_string(value: Option<String>, name: &str) -> PyResult<String> {
+    let value = optional_s3_string(value, name)?;
+    value.ok_or_else(|| {
+        InvalidConfigurationError::new_err(format!("{name} is required when data_path is s3://"))
+    })
+}
+
+fn optional_s3_string(value: Option<String>, name: &str) -> PyResult<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.trim().is_empty() {
+        return Err(InvalidConfigurationError::new_err(format!(
+            "{name} must not be empty"
+        )));
+    }
+    Ok(Some(value))
 }
 
 fn duration_from_seconds(name: &str, seconds: f64) -> PyResult<Duration> {
