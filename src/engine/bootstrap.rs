@@ -449,14 +449,17 @@ mod tests {
     }
 
     #[test]
-    fn catalog_adapter_accepts_s3_data_path() {
-        let adapter = CatalogAdapter::duckdb();
-        let statement = adapter.attach_ducklake_statement(
-            Path::new("catalog.ducklake"),
-            Path::new("s3://bucket/prefix"),
-        );
+    fn catalog_adapters_accept_s3_data_path() {
+        let adapters = [CatalogAdapter::duckdb(), CatalogAdapter::sqlite()];
 
-        assert!(statement.contains("DATA_PATH 's3://bucket/prefix'"));
+        for adapter in adapters {
+            let statement = adapter.attach_ducklake_statement(
+                Path::new("catalog.ducklake"),
+                Path::new("s3://bucket/prefix"),
+            );
+
+            assert!(statement.contains("DATA_PATH 's3://bucket/prefix'"));
+        }
     }
 
     #[test]

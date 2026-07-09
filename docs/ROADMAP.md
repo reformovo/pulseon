@@ -38,7 +38,7 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 
 - [x] Preserve local data-path behavior at the PulseOn API level for writes,
   queries, terminal flush, and `flush_run_data(run_id)`.
-- [ ] Support S3-backed `data_path` with both DuckDB and SQLite catalog
+- [x] Support S3-backed `data_path` with both DuckDB and SQLite catalog
   backends.
 
 ### Phase 4: MinIO Acceptance

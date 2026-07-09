@@ -338,4 +338,32 @@ mod tests {
         assert_eq!(resolved.path_style, Some(true));
         assert_eq!(resolved.use_ssl, Some(true));
     }
+
+    #[test]
+    fn init_config_resolves_s3_data_path_for_supported_catalog_backends() {
+        for catalog_backend in ["duckdb", "sqlite"] {
+            let resolved = resolve_init_config(
+                Path::new("."),
+                Some(PathBuf::from("s3://bucket/pulseon")),
+                catalog_backend,
+                None,
+                1024,
+                S3ConnectionOverrides {
+                    endpoint: Some("127.0.0.1:9000".to_owned()),
+                    access_key_id: Some("pulseon-key".to_owned()),
+                    secret_access_key: Some("pulseon-secret".to_owned()),
+                    path_style: Some(true),
+                    use_ssl: Some(false),
+                    ..S3ConnectionOverrides::default()
+                },
+            )
+            .expect("s3 init config should resolve for supported catalog backend");
+
+            assert_eq!(
+                resolved.data_path,
+                Some(PathBuf::from("s3://bucket/pulseon"))
+            );
+            assert!(resolved.s3_connection.is_some());
+        }
+    }
 }
