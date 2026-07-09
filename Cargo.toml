@@ -1,6 +1,6 @@
 [package]
 name = "pulseon"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 edition = "2024"
 description = "Local-first training metrics tracker backed by Rust, PyO3, DuckDB, and DuckLake."
 license = "MIT"

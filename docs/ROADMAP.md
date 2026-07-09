@@ -4,12 +4,12 @@
 > `docs/release-notes/`; durable product boundaries live in
 > `docs/native-storage-boundary.md` and accepted ADRs in `docs/adr/`.
 
-## 0.1.0a3 / V3 Backlog
+## 0.1.0a3 / V3 Shipped
 
-V3/a3 hardens the native local loop before adding object storage or shared
-catalogs. Each item should remain a small, independently reviewable change with
-tests and the smallest relevant verification gate. Existing 0.1.0a2 development
-stores do not need migration support.
+V3/a3 hardened the native local loop before adding object storage or shared
+catalogs. Each shipped item remained a small, independently reviewable change
+with tests and the smallest relevant verification gate. Existing 0.1.0a2
+development stores do not need migration support.
 
 ### Phase 1: Public API Defaults
 
@@ -97,6 +97,9 @@ stores do not need migration support.
 
 ## V4 Backlog
 
+- [ ] Narrow the Python public type hints for `catalog_backend` from `str` to
+  `Literal["duckdb", "sqlite"]` in `python/pulseon/__init__.py` and
+  `python/pulseon/_pulseon.pyi`, while keeping the runtime API string-compatible.
 - [ ] Clean up run-writer lock files only when the release path can prove it is
   deleting the original lock file for the released writer. If that cannot be
   proven safely, leave the file on disk.

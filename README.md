@@ -3,8 +3,7 @@
 PulseOn is a local-first training metrics tracker backed by Rust, PyO3, DuckDB,
 and DuckLake.
 
-Current focus: finish the 0.1.0a3 / v3 native loop after the 0.1.0a2 alpha
-release:
+Current alpha: 0.1.0a3 / v3 native local storage loop:
 
 - create a project
 - start or resume a run
