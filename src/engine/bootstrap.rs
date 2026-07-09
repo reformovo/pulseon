@@ -193,10 +193,10 @@ pub(crate) fn open_native_connection_with_config(
         })?;
     }
     let connection = open_duckdb_connection()?;
-    if is_s3_data_path(&config.data_path) {
-        if let Some(s3_connection) = config.s3_connection.as_ref() {
-            configure_s3_connection(&connection, s3_connection)?;
-        }
+    if is_s3_data_path(&config.data_path)
+        && let Some(s3_connection) = config.s3_connection.as_ref()
+    {
+        configure_s3_connection(&connection, s3_connection)?;
     }
     attach_ducklake_with_backend(
         &connection,
