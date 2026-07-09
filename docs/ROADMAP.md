@@ -9,8 +9,11 @@
 - [x] 0.1.0a3 / V3: default `pulseon.init()`, portable catalog adapters,
   DuckDB and SQLite catalog backends, catalog application tables outside
   DuckLake internal aliases, terminal-run Parquet flush, and V3 release notes.
+- [x] 0.1.0a4 / V4: S3-compatible data paths for the DuckLake data area,
+  MinIO acceptance coverage, local-only catalog paths, narrowed
+  catalog-backend type hints, and V4 release notes.
 
-## 0.1.0a4 / V4 Planned
+## 0.1.0a4 / V4
 
 V4 adds S3-compatible object-storage support for the DuckLake data area while
 keeping the catalog database local. It also narrows the Python type surface for
