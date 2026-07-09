@@ -440,8 +440,12 @@ impl From<MetricAggregate> for PyMetricSummary {
         s3_session_token=None,
         s3_region=None,
         s3_path_style=None,
-        s3_use_ssl=None
+        s3_use_ssl=None,
     )
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "PyO3 exposes init configuration as keyword-only Python API arguments."
 )]
 pub fn init(
     py: Python<'_>,
@@ -460,23 +464,21 @@ pub fn init(
 ) -> PyResult<PyClient> {
     let project_config = load_project_config(py, &path)?;
     let data_path = resolve_data_path(data_path, project_config.as_ref())?;
+    let explicit_s3_params = S3ConnectionParams {
+        endpoint: s3_endpoint,
+        access_key_id: s3_access_key_id,
+        secret_access_key: s3_secret_access_key,
+        session_token: s3_session_token,
+        region: s3_region,
+        path_style: s3_path_style,
+        use_ssl: s3_use_ssl,
+    };
     let s3_config = if data_path.as_deref().is_some_and(is_s3_data_path) {
-        extract_s3_config(project_config.as_ref())?
+        extract_s3_config(project_config.as_ref(), &explicit_s3_params)?
     } else {
         None
     };
-    let s3_connection_params = resolve_s3_connection_params(
-        S3ConnectionParams {
-            endpoint: s3_endpoint,
-            access_key_id: s3_access_key_id,
-            secret_access_key: s3_secret_access_key,
-            session_token: s3_session_token,
-            region: s3_region,
-            path_style: s3_path_style,
-            use_ssl: s3_use_ssl,
-        },
-        s3_config.as_ref(),
-    );
+    let s3_connection_params = resolve_s3_connection_params(explicit_s3_params, s3_config.as_ref());
     let (catalog_backend, metric_queue_capacity, s3_connection) = validate_init_config(
         data_path.as_deref(),
         catalog_backend,
@@ -580,7 +582,10 @@ fn resolve_s3_connection_params(
     }
 }
 
-fn extract_s3_config(config: Option<&Bound<'_, PyDict>>) -> PyResult<Option<S3FileConfig>> {
+fn extract_s3_config(
+    config: Option<&Bound<'_, PyDict>>,
+    explicit: &S3ConnectionParams,
+) -> PyResult<Option<S3FileConfig>> {
     let Some(config) = config else {
         return Ok(None);
     };
@@ -591,26 +596,61 @@ fn extract_s3_config(config: Option<&Bound<'_, PyDict>>) -> PyResult<Option<S3Fi
         .cast_into::<PyDict>()
         .map_err(|_| InvalidConfigurationError::new_err("config.toml s3 must be a table"))?;
     Ok(Some(S3FileConfig {
-        endpoint: optional_config_string(Some(&config), "endpoint", "config.toml s3.endpoint")?,
-        access_key_id: optional_config_string(
-            Some(&config),
+        endpoint: optional_config_string_unless_explicit(
+            &config,
+            explicit.endpoint.is_some(),
+            "endpoint",
+            "config.toml s3.endpoint",
+        )?,
+        access_key_id: optional_config_string_unless_explicit(
+            &config,
+            explicit.access_key_id.is_some(),
             "access_key_id",
             "config.toml s3.access_key_id",
         )?,
-        secret_access_key: optional_config_string(
-            Some(&config),
+        secret_access_key: optional_config_string_unless_explicit(
+            &config,
+            explicit.secret_access_key.is_some(),
             "secret_access_key",
             "config.toml s3.secret_access_key",
         )?,
-        session_token: optional_config_string(
-            Some(&config),
+        session_token: optional_config_string_unless_explicit(
+            &config,
+            explicit.session_token.is_some(),
             "session_token",
             "config.toml s3.session_token",
         )?,
-        region: optional_config_string(Some(&config), "region", "config.toml s3.region")?,
-        path_style: optional_config_bool(&config, "path_style", "config.toml s3.path_style")?,
-        use_ssl: optional_config_bool(&config, "use_ssl", "config.toml s3.use_ssl")?,
+        region: optional_config_string_unless_explicit(
+            &config,
+            explicit.region.is_some(),
+            "region",
+            "config.toml s3.region",
+        )?,
+        path_style: optional_config_bool_unless_explicit(
+            &config,
+            explicit.path_style.is_some(),
+            "path_style",
+            "config.toml s3.path_style",
+        )?,
+        use_ssl: optional_config_bool_unless_explicit(
+            &config,
+            explicit.use_ssl.is_some(),
+            "use_ssl",
+            "config.toml s3.use_ssl",
+        )?,
     }))
+}
+
+fn optional_config_string_unless_explicit(
+    config: &Bound<'_, PyDict>,
+    is_explicit: bool,
+    key: &str,
+    label: &str,
+) -> PyResult<Option<String>> {
+    if is_explicit {
+        return Ok(None);
+    }
+    optional_config_string(Some(config), key, label)
 }
 
 fn optional_config_string(
@@ -628,6 +668,18 @@ fn optional_config_string(
         .extract::<String>()
         .map(Some)
         .map_err(|_| InvalidConfigurationError::new_err(format!("{label} must be a string")))
+}
+
+fn optional_config_bool_unless_explicit(
+    config: &Bound<'_, PyDict>,
+    is_explicit: bool,
+    key: &str,
+    label: &str,
+) -> PyResult<Option<bool>> {
+    if is_explicit {
+        return Ok(None);
+    }
+    optional_config_bool(config, key, label)
 }
 
 fn optional_config_bool(

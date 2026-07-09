@@ -159,6 +159,29 @@ def test_init_rejects_invalid_config_toml_s3_setting(
         pulseon.init(root_path)
 
 
+def test_init_s3_keyword_override_skips_invalid_config_value(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    _write_project_config(root_path, _INVALID_S3_BOOL_CONFIG)
+
+    try:
+        client = pulseon.init(
+            root_path,
+            data_path="s3://bucket/pulseon",
+            s3_endpoint="127.0.0.1:9000",
+            s3_access_key_id="pulseon",
+            s3_secret_access_key="secret",
+            s3_path_style=True,
+        )
+    except pulseon.StorageError:
+        return
+
+    client.shutdown()
+
+
 def test_init_rejects_invalid_config_toml_data_path(
     tmp_path: pathlib.Path,
 ) -> None:
