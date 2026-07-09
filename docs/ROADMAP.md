@@ -51,12 +51,12 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
 
 ### Phase 5: Python Type Surface
 
-- [ ] Narrow the Python public type hints for `catalog_backend` from `str` to
+- [x] Narrow the Python public type hints for `catalog_backend` from `str` to
   `Literal["duckdb", "sqlite"]` in `python/pulseon/__init__.py` and
   `python/pulseon/_pulseon.pyi`.
-- [ ] Keep the runtime API string-compatible: unsupported strings still fail at
+- [x] Keep the runtime API string-compatible: unsupported strings still fail at
   runtime through the existing validation path.
-- [ ] Add or update Python type-check coverage that proves `"duckdb"` and
+- [x] Add or update Python type-check coverage that proves `"duckdb"` and
   `"sqlite"` are accepted by type checkers and unknown literals are rejected.
 
 ### Phase 6: Release Gate

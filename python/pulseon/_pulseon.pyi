@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 
 class PulseOnError(RuntimeError): ...
 class MetricQueueFullError(PulseOnError): ...
@@ -102,7 +103,7 @@ def init(
     path: str | os.PathLike[str] = ".",
     *,
     data_path: str | os.PathLike[str] | None = None,
-    catalog_backend: str = "duckdb",
+    catalog_backend: Literal["duckdb", "sqlite"] = "duckdb",
     catalog_path: str | os.PathLike[str] | None = None,
     metric_queue_capacity: int = 65536,
     s3_endpoint: str | None = None,
