@@ -35,6 +35,15 @@ restart.
 A metric point that has been written to native storage and is visible to
 PulseOn queries.
 
+**Data discovery**:
+The traversal from stored projects to runs, metric series, and persisted metric
+points without requiring their identifiers in advance.
+
+**Read surface**:
+The read-only product boundary through which trainers and agents discover and
+consume stored PulseOn data.
+_Avoid_: Agent API, storage API
+
 **Closed run**:
 A run that no longer accepts metric reports because it is being finalized or has
 already reached a terminal state.
@@ -56,7 +65,7 @@ A PulseOn-owned catalog table for control-plane or query-index state.
 _Avoid_: DuckLake logical table, DuckLake internal table
 
 **Data path**:
-The local filesystem location used for Parquet metric data.
+The local filesystem or S3-compatible location used for Parquet metric data.
 
 **Metric key encoded**:
 A storage-facing percent-encoded form of a metric key used for data-path

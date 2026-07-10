@@ -5,7 +5,7 @@ notes, and historical architecture snapshots.
 
 ## Current Docs
 
-- `docs/ROADMAP.md` for the shipped v4/a4 scope and current backlog.
+- `docs/ROADMAP.md` for the current release plan and later backlog.
 - `docs/native-storage-boundary.md` for the current native storage boundary.
 - `docs/catalog-application-tables.md` for project, run, and aggregate catalog
   table schemas.

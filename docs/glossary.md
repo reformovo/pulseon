@@ -28,6 +28,11 @@ release.
 - **Persisted metric point**: A metric point that has been written to the
   native storage engine and is visible to PulseOn queries under effective-series
   semantics.
+- **Data discovery**: Traversal from stored projects to runs, metric series,
+  and persisted metric points without requiring their identifiers in advance.
+- **Read surface**: The read-only product boundary through which trainers and
+  agents discover and consume stored PulseOn data. It is not an agent-specific
+  API or direct access to storage internals.
 - **Run summary**: Derived per-run values for run lists and comparisons.
 - **Metric aggregate**: Materialized-view-like index/state from metric writes.
 - **Reporting diagnostics**: Minimal observable state for pending reports,
