@@ -15,6 +15,7 @@ target/
 # Local environment files
 .env
 .env.*
+.pulseon/
 
 # IDE and editor files
 .omo/

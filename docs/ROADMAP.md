@@ -79,6 +79,10 @@ cleanup are deferred unless the V4 scope is explicitly expanded.
   can prove it is deleting the original lock file for the released writer.
 - [ ] Add environment-variable or AWS credential-chain discovery for S3
   credentials if explicit config-file credentials become too limiting.
+- [x] Extend `scripts/bench_log_persistence.py` to benchmark configured
+  S3/OSS data paths alongside the existing local persistence benchmark, reusing
+  the current reports/repeats/drain/summary flow instead of adding a separate
+  benchmark script.
 - [ ] Add an explicit debug dump or verbose diagnostics facility for local
   troubleshooting, including full path details when the caller opts in.
 - [ ] Revisit cloud, workspace hierarchy, config/tag filtering, built-in

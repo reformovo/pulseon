@@ -60,17 +60,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="keep the benchmark project directory after completion",
     )
-    parser.add_argument(
-        "--drain-shutdown",
-        action="store_true",
-        help="drain and shut down the client after the timed admission loop",
-    )
-    parser.add_argument(
-        "--shutdown-timeout",
-        type=non_negative_float,
-        default=None,
-        help="optional shutdown timeout in seconds",
-    )
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     return parser
 
@@ -96,11 +85,6 @@ def parent_main(args: argparse.Namespace) -> int:
             "--path",
             str(project_path),
         ]
-        if args.drain_shutdown:
-            command.append("--drain-shutdown")
-        if args.shutdown_timeout is not None:
-            command.extend(["--shutdown-timeout", str(args.shutdown_timeout)])
-
         completed = subprocess.run(
             command,
             check=False,
@@ -124,11 +108,10 @@ def child_main(args: argparse.Namespace) -> int:
         project_path=args.path,
         reports=args.reports,
         queue_capacity=args.queue_capacity,
-        drain_shutdown=args.drain_shutdown,
-        shutdown_timeout=args.shutdown_timeout,
     )
     print_result(result)
-    return 0
+    # The parent owns cleanup; skip implicit client drain in this timed benchmark.
+    os._exit(0)
 
 
 def run_benchmark(
@@ -136,8 +119,6 @@ def run_benchmark(
     project_path: Path,
     reports: int,
     queue_capacity: int,
-    drain_shutdown: bool,
-    shutdown_timeout: float | None,
 ) -> dict[str, Any]:
     import pulseon
 
@@ -150,37 +131,16 @@ def run_benchmark(
         run.log("train/loss", step, float(step))
     elapsed = time.perf_counter() - started
 
-    diagnostics_after_log = client.diagnostics()
-    shutdown_elapsed = None
-    diagnostics_after_shutdown = None
-    if drain_shutdown:
-        shutdown_started = time.perf_counter()
-        client.shutdown(timeout=shutdown_timeout)
-        shutdown_elapsed = time.perf_counter() - shutdown_started
-        diagnostics_after_shutdown = client.diagnostics()
-
-    calls_per_second = reports / elapsed
-    result = {
+    return {
         "benchmark": "explicit_step_run_log_admission",
         "reports": reports,
         "elapsed_seconds": elapsed,
-        "calls_per_second": calls_per_second,
+        "calls_per_second": reports / elapsed,
         "queue_capacity": queue_capacity,
-        "shutdown_mode": "drain" if drain_shutdown else "skipped",
-        "diagnostics_after_log": diagnostics_to_dict(diagnostics_after_log),
-        "shutdown_elapsed_seconds": shutdown_elapsed,
-        "diagnostics_after_shutdown": (
-            diagnostics_to_dict(diagnostics_after_shutdown)
-            if diagnostics_after_shutdown is not None
-            else None
-        ),
+        "diagnostics_after_log": diagnostics_to_dict(client.diagnostics()),
         "environment": environment(getattr(pulseon, "__version__", "unknown")),
         "project_path": str(project_path),
     }
-    if not drain_shutdown:
-        print_result(result)
-        os._exit(0)
-    return result
 
 
 def print_result(result: dict[str, Any]) -> None:
@@ -216,13 +176,6 @@ def positive_int(value: str) -> int:
     parsed = int(value)
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be greater than zero")
-    return parsed
-
-
-def non_negative_float(value: str) -> float:
-    parsed = float(value)
-    if parsed < 0.0:
-        raise argparse.ArgumentTypeError("must be non-negative")
     return parsed
 
 
