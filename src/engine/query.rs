@@ -192,7 +192,7 @@ impl<'connection> NativeQueryStore<'connection> {
              )
              WHERE write_rank = 1
                AND (? IS NULL OR step >= ?)
-               AND (? IS NULL OR step <= ?)
+               AND (? IS NULL OR step < ?)
              ORDER BY step",
         )?;
         let rows = statement.query_map(
@@ -235,7 +235,7 @@ impl<'connection> NativeQueryStore<'connection> {
                  )
                  WHERE write_rank = 1
                    AND (? IS NULL OR step >= ?)
-                   AND (? IS NULL OR step <= ?)
+                   AND (? IS NULL OR step < ?)
              ),
              sampled AS (
                  SELECT unnest(lttb(step, value_f64, ?)) AS point
@@ -277,7 +277,7 @@ impl<'connection> NativeQueryStore<'connection> {
              FROM dl.metric_points
              WHERE run_id = ? AND metric_key = ?
                AND (? IS NULL OR step >= ?)
-               AND (? IS NULL OR step <= ?)",
+               AND (? IS NULL OR step < ?)",
             (
                 run_id.as_str(),
                 metric_key.as_str(),

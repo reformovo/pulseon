@@ -146,13 +146,20 @@ def test_client_query_metric_applies_range_filters_and_short_max_points(
         start_step=10,
         end_step=15,
     )
+    empty_points = client.query_metric(
+        run.run_id,
+        "train/loss",
+        start_step=10,
+        end_step=10,
+    )
     unchanged_points = client.query_metric(
         run.run_id,
         "train/loss",
         max_points=100,
     )
 
-    assert [point.step for point in ranged_points] == [10, 11, 12, 13, 14, 15]
+    assert [point.step for point in ranged_points] == [10, 11, 12, 13, 14]
+    assert empty_points == []
     assert len(unchanged_points) == 100
     assert unchanged_points[0].step == 0
     assert unchanged_points[-1].step == 99

@@ -106,7 +106,14 @@ An effective metric series contains at most one point for each
 `(run_id, metric_key, step)`. When a step has been written more than once, the
 point with the latest writer-assigned `ingested_at` wins; the persisted row
 order breaks a remaining timestamp tie. Point queries return this effective
-series in ascending step order.
+series in ascending step order. Step ranges are half-open: `start_step` is
+inclusive and `end_step` is exclusive, so a bounded query selects
+`[start_step, end_step)`.
+
+Before 0.1.0a5, `end_step` was inclusive. Callers migrating a query that must
+retain its old final step should increase a finite upper bound by one; callers
+already treating the bound as a slice endpoint should remove any compensating
+increment.
 
 A report waiting in the current client's in-process queue is not persisted and
 is outside query visibility. A successful `run.log(...)` call means the report

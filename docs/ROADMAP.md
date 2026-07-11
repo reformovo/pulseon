@@ -30,7 +30,7 @@ the release.
   runs, while retaining aggregate-backed terminal-run fast paths.
 - [x] Support mixed running and terminal runs in summary comparisons without
   changing requested run ordering.
-- [ ] Change metric-query `end_step` semantics from inclusive to exclusive so
+- [x] Change metric-query `end_step` semantics from inclusive to exclusive so
   ranges consistently use `[start_step, end_step)`. Update native predicates,
   Python documentation and types, behavioral tests, and migration notes
   together as an explicit compatibility change.
