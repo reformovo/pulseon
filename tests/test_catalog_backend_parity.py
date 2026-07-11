@@ -32,6 +32,7 @@ def test_catalog_backend_round_trips_native_storage_workflow(
     run = client.create_run(project.project_id, "baseline", run_id="run-1")
     run.log("train/loss", 0, 0.25)
     run.log("train/loss", 1, 0.125)
+    run.log("train/loss", 1, 0.0625)
     run.log("eval/accuracy", 0, 0.8)
 
     active_points = helpers.wait_for_metric_points(
@@ -59,13 +60,15 @@ def test_catalog_backend_round_trips_native_storage_workflow(
     reopened_project = reopened.get_project(project.project_id)
     reopened_run = reopened.get_run(finished.run_id)
     reopened_runs = reopened.list_runs(project.project_id)
+    reopened_points = reopened.query_metric(finished.run_id, "train/loss")
 
-    assert [point.value_f64 for point in active_points] == [0.25, 0.125]
+    assert [point.step for point in active_points] == [0, 1]
     assert active_metrics == []
     assert finished.status == "finished"
     assert [point.step for point in terminal_points] == [0, 1]
+    assert [point.value_f64 for point in terminal_points] == [0.25, 0.0625]
     assert [summary.effective_count for summary in summaries] == [2]
-    assert [summary.last_value_f64 for summary in summaries] == [0.125]
+    assert [summary.last_value_f64 for summary in summaries] == [0.0625]
     assert [metric.metric_key for metric in metrics] == [
         "eval/accuracy",
         "train/loss",
@@ -85,6 +88,7 @@ def test_catalog_backend_round_trips_native_storage_workflow(
     assert reopened_project.name == "local training"
     assert reopened_run.status == "finished"
     assert [stored_run.run_id for stored_run in reopened_runs] == ["run-1"]
+    assert [point.value_f64 for point in reopened_points] == [0.25, 0.0625]
 
 
 @pytest.mark.parametrize("catalog_backend", _CATALOG_BACKENDS)
