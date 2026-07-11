@@ -91,6 +91,34 @@ file as DuckLake metadata for both DuckDB and SQLite local backends.
   DuckDB, DuckLake, or Parquet flush work.
 - Flush inline metric data to Parquet when a run ends.
 
+## Read Contract
+
+The PulseOn read surface exposes catalog-backed project and run metadata plus
+persisted effective metric points:
+
+- Project discovery reads `pulseon_projects`.
+- Run discovery reads `pulseon_runs`, including lifecycle status.
+- Metric discovery, summaries, and point queries derive their results from
+  persisted `dl.metric_points` or from terminal-run aggregate indexes rebuilt
+  from those points.
+
+An effective metric series contains at most one point for each
+`(run_id, metric_key, step)`. When a step has been written more than once, the
+point with the latest writer-assigned `ingested_at` wins; the persisted row
+order breaks a remaining timestamp tie. Point queries return this effective
+series in ascending step order.
+
+A report waiting in the current client's in-process queue is not persisted and
+is outside query visibility. A successful `run.log(...)` call means the report
+was queued, not that a concurrent read must already observe it. Callers that
+need visibility during a running run must wait for persistence; run
+finalization establishes the drain barrier before terminal state is written.
+
+Persisted inline DuckLake rows and flushed Parquet rows have the same logical
+query visibility. Parquet visibility is an export property for terminal runs,
+not an additional condition for PulseOn reads. Catalog metadata and derived
+aggregate indexes are not part of the Parquet compatibility boundary.
+
 ## Metric Point Partitioning
 
 Metric data means the `metric_points` fact table.
