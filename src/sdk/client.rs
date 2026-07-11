@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use pyo3::create_exception;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
@@ -119,10 +119,18 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
-    pub fn list_runs(&self, project_id: &str) -> PyResult<Vec<PyRun>> {
+    #[pyo3(signature = (project_id, *, status=None, limit=None, offset=0))]
+    pub fn list_runs(
+        &self,
+        project_id: &str,
+        status: Option<&str>,
+        limit: Option<usize>,
+        offset: usize,
+    ) -> PyResult<Vec<PyRun>> {
         let project_id = ProjectId::from_string(project_id);
+        let status = parse_run_status(status)?;
         self._inner
-            .list_runs(&project_id)
+            .list_runs_filtered(&project_id, status, limit, offset)
             .map(|runs| {
                 runs.into_iter()
                     .map(|run| PyRun::from(self._inner.run_handle(run)))
@@ -560,4 +568,16 @@ fn status_as_string(status: RunStatus) -> String {
         RunStatus::Failed => "failed",
     }
     .to_owned()
+}
+
+fn parse_run_status(status: Option<&str>) -> PyResult<Option<RunStatus>> {
+    match status {
+        None => Ok(None),
+        Some("running") => Ok(Some(RunStatus::Running)),
+        Some("finished") => Ok(Some(RunStatus::Finished)),
+        Some("failed") => Ok(Some(RunStatus::Failed)),
+        Some(status) => Err(PyValueError::new_err(format!(
+            "status must be one of 'running', 'finished', or 'failed', got {status:?}"
+        ))),
+    }
 }

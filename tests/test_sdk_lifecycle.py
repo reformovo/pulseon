@@ -477,6 +477,47 @@ def test_client_lists_project_runs_for_terminal_summary_queries(
     assert [summary.last_value_f64 for summary in summaries] == [0.25, 0.125]
 
 
+def test_client_filters_and_paginates_runs_in_stable_created_order(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    first = client.create_run(project.project_id, "first", run_id="run-1")
+    second = client.create_run(project.project_id, "second", run_id="run-2")
+    third = client.create_run(project.project_id, "third", run_id="run-3")
+    client.finish_run(first.run_id)
+    client.fail_run(third.run_id)
+
+    runs = client.list_runs(project.project_id)
+    page = client.list_runs(project.project_id, limit=1, offset=1)
+    tail = client.list_runs(project.project_id, offset=2)
+
+    assert [run.run_id for run in runs] == [first.run_id, second.run_id, third.run_id]
+    assert [run.run_id for run in page] == [second.run_id]
+    assert [run.run_id for run in tail] == [third.run_id]
+    assert [run.run_id for run in client.list_runs(project.project_id, status="running")] == [
+        second.run_id
+    ]
+    assert [run.run_id for run in client.list_runs(project.project_id, status="finished")] == [
+        first.run_id
+    ]
+    assert [run.run_id for run in client.list_runs(project.project_id, status="failed")] == [
+        third.run_id
+    ]
+
+
+def test_client_list_runs_rejects_unknown_status(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+
+    with pytest.raises(ValueError, match="status must be one of"):
+        client.list_runs(project.project_id, status="paused")
+
+
 def test_client_detects_orphan_running_runs(tmp_path: pathlib.Path) -> None:
     import pulseon
 

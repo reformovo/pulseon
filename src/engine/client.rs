@@ -13,6 +13,7 @@ use crate::engine::query::NativeQueryStore;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
 use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
 use crate::engine::write::NativeWriteStore;
+use crate::engine::write_rows::status_as_str;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
@@ -232,6 +233,16 @@ impl NativeClient {
     }
 
     pub fn list_runs(&self, project_id: &ProjectId) -> Result<Vec<Run>, EngineError> {
+        self.list_runs_filtered(project_id, None, None, 0)
+    }
+
+    pub fn list_runs_filtered(
+        &self,
+        project_id: &ProjectId,
+        status: Option<RunStatus>,
+        limit: Option<usize>,
+        offset: usize,
+    ) -> Result<Vec<Run>, EngineError> {
         if !self.project_exists(project_id)? {
             return Err(EngineError::ProjectNotFound {
                 project_id: project_id.as_str().to_owned(),
@@ -240,15 +251,26 @@ impl NativeClient {
 
         let run_ids = {
             let connection = self.connection()?;
-            let mut statement = connection.prepare(
+            let mut sql = String::from(
                 "SELECT run_id
                  FROM pulseon_runs
                  WHERE project_id = ?
+                   AND status = COALESCE(?, status)
                  ORDER BY created_at, run_id",
-            )?;
-            let rows = statement.query_map([project_id.as_str()], |row| {
-                Ok(RunId::from_string(row.get::<_, String>(0)?))
-            })?;
+            );
+            if let Some(limit) = limit {
+                sql.push_str(&format!(" LIMIT {limit}"));
+            } else if offset > 0 {
+                sql.push_str(" LIMIT ALL");
+            }
+            if offset > 0 {
+                sql.push_str(&format!(" OFFSET {offset}"));
+            }
+            let mut statement = connection.prepare(&sql)?;
+            let rows = statement
+                .query_map((project_id.as_str(), status.map(status_as_str)), |row| {
+                    Ok(RunId::from_string(row.get::<_, String>(0)?))
+                })?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
 
@@ -991,6 +1013,44 @@ mod tests {
         let second = client.create_project("sweep", Some(ProjectId::from_string("project-2")))?;
 
         assert_eq!(client.list_projects()?, [first, second]);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn list_runs_filters_status_and_paginates_stable_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project = client.create_project(
+            "local training",
+            Some(ProjectId::from_string("project-runs")),
+        )?;
+        let first = client.create_run(
+            &project.project_id,
+            "first",
+            Some(RunId::from_string("run-1")),
+        )?;
+        let second = client.create_run(
+            &project.project_id,
+            "second",
+            Some(RunId::from_string("run-2")),
+        )?;
+        let third = client.create_run(
+            &project.project_id,
+            "third",
+            Some(RunId::from_string("run-3")),
+        )?;
+        client.finish_run(&first.run_id)?;
+        client.fail_run(&third.run_id)?;
+
+        let page = client.list_runs_filtered(&project.project_id, None, Some(1), 1)?;
+        let finished =
+            client.list_runs_filtered(&project.project_id, Some(RunStatus::Finished), None, 0)?;
+
+        assert_eq!(page, [second]);
+        assert_eq!([finished[0].run_id.as_str()], [first.run_id.as_str()]);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }
