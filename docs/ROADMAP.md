@@ -26,7 +26,7 @@ the release.
 
 ### Phase 2: Fresh Queries and Built-in Downsampling
 
-- [ ] Make metric discovery and summaries reflect persisted points for running
+- [x] Make metric discovery and summaries reflect persisted points for running
   runs, while retaining aggregate-backed terminal-run fast paths.
 - [ ] Support mixed running and terminal runs in summary comparisons without
   changing requested run ordering.

@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::engine::EngineError;
 use crate::engine::write_rows::{StoredMetricAggregate, StoredMetricPoint};
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
-use crate::model::run::RunId;
+use crate::model::run::{RunId, RunStatus};
 
 const LTTB_AUTO_INSTALL_ENV: &str = "PULSEON_LTTB_AUTO_INSTALL";
 const LTTB_EXTENSION_PATH_ENV: &str = "PULSEON_LTTB_EXTENSION_PATH";
@@ -91,30 +91,80 @@ impl<'connection> NativeQueryStore<'connection> {
             .join(", ");
         let sql = format!(
             "WITH requested(run_id, ordinal) AS (VALUES {requested_rows})
-             SELECT summary.run_id, summary.metric_key, summary.effective_count,
-                    summary.last_step, summary.last_value_f64, summary.min_value_f64,
-                    summary.max_value_f64
-             FROM pulseon_metric_aggregates AS summary
-             JOIN requested ON summary.run_id = requested.run_id
-             WHERE summary.metric_key = ?
-             ORDER BY requested.ordinal"
+             SELECT run_id, metric_key, effective_count, last_step, last_value_f64,
+                    min_value_f64, max_value_f64
+             FROM (
+                 SELECT requested.ordinal, summary.*
+                 FROM requested
+                 JOIN pulseon_runs AS run USING (run_id)
+                 JOIN pulseon_metric_aggregates AS summary USING (run_id)
+                 WHERE run.status <> 'running' AND summary.metric_key = ?
+                 UNION ALL
+                 SELECT requested.ordinal, points.run_id, points.metric_key,
+                        count(*) AS effective_count, max(points.step) AS last_step,
+                        arg_max(points.value_f64, points.step) AS last_value_f64,
+                        min(points.value_f64) AS min_value_f64,
+                        max(points.value_f64) AS max_value_f64
+                 FROM requested
+                 JOIN pulseon_runs AS run USING (run_id)
+                 JOIN (
+                     SELECT *, row_number() OVER (
+                         PARTITION BY run_id, metric_key, step
+                         ORDER BY ingested_at DESC, rowid DESC
+                     ) AS write_rank
+                     FROM dl.metric_points
+                     WHERE metric_key = ?
+                 ) AS points USING (run_id)
+                 WHERE run.status = 'running' AND points.write_rank = 1
+                 GROUP BY requested.ordinal, points.run_id, points.metric_key
+             )
+             ORDER BY ordinal"
         );
 
-        let mut params: Vec<&str> = Vec::with_capacity(run_ids.len() + 1);
+        let mut params: Vec<&str> = Vec::with_capacity(run_ids.len() + 2);
         params.extend(run_ids.iter().map(RunId::as_str));
         params.push(metric_key.as_str());
+        params.push(metric_key.as_str());
         let mut statement = self.connection.prepare(&sql)?;
-        let rows = statement.query_map(duckdb::params_from_iter(params), |row| {
-            Ok(StoredMetricAggregate {
-                run_id: row.get(0)?,
-                metric_key: row.get(1)?,
-                effective_count: row.get(2)?,
-                last_step: row.get(3)?,
-                last_value_f64: row.get(4)?,
-                min_value_f64: row.get(5)?,
-                max_value_f64: row.get(6)?,
-            })
-        })?;
+        let rows = statement.query_map(
+            duckdb::params_from_iter(params),
+            stored_metric_aggregate_from_row,
+        )?;
+
+        rows.map(|row| Ok(row?.into_metric_aggregate())).collect()
+    }
+
+    pub fn list_metrics(
+        &self,
+        run_id: &RunId,
+        run_status: RunStatus,
+    ) -> Result<Vec<MetricAggregate>, EngineError> {
+        let sql = match run_status {
+            RunStatus::Running => {
+                "WITH effective AS (
+                     SELECT *, row_number() OVER (
+                         PARTITION BY run_id, metric_key, step
+                         ORDER BY ingested_at DESC, rowid DESC
+                     ) AS write_rank
+                     FROM dl.metric_points WHERE run_id = ?
+                 )
+                 SELECT run_id, metric_key, count(*) AS effective_count,
+                        max(step) AS last_step,
+                        arg_max(value_f64, step) AS last_value_f64,
+                        min(value_f64) AS min_value_f64,
+                        max(value_f64) AS max_value_f64
+                 FROM effective WHERE write_rank = 1
+                 GROUP BY run_id, metric_key ORDER BY metric_key"
+            }
+            RunStatus::Finished | RunStatus::Failed => {
+                "SELECT run_id, metric_key, effective_count, last_step, last_value_f64,
+                        min_value_f64, max_value_f64
+                 FROM pulseon_metric_aggregates
+                 WHERE run_id = ? ORDER BY metric_key"
+            }
+        };
+        let mut statement = self.connection.prepare(sql)?;
+        let rows = statement.query_map([run_id.as_str()], stored_metric_aggregate_from_row)?;
 
         rows.map(|row| Ok(row?.into_metric_aggregate())).collect()
     }
@@ -320,6 +370,20 @@ fn stored_metric_point_from_row(row: &duckdb::Row<'_>) -> duckdb::Result<StoredM
         timestamp_millis: row.get(3)?,
         value_f64: row.get(4)?,
         ingested_at_millis: row.get(5)?,
+    })
+}
+
+fn stored_metric_aggregate_from_row(
+    row: &duckdb::Row<'_>,
+) -> duckdb::Result<StoredMetricAggregate> {
+    Ok(StoredMetricAggregate {
+        run_id: row.get(0)?,
+        metric_key: row.get(1)?,
+        effective_count: row.get(2)?,
+        last_step: row.get(3)?,
+        last_value_f64: row.get(4)?,
+        min_value_f64: row.get(5)?,
+        max_value_f64: row.get(6)?,
     })
 }
 

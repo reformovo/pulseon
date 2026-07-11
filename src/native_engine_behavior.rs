@@ -372,9 +372,6 @@ mod tests {
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(0), 0.4)?;
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(1), 0.2)?;
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(2), 0.1)?;
-        store.rebuild_metric_aggregates_for_run(&run_a.run_id)?;
-        store.rebuild_metric_aggregates_for_run(&run_b.run_id)?;
-
         // When
         let summaries = query
             .query_metric_summaries(&[run_b.run_id.clone(), run_a.run_id.clone()], &metric_key)?;

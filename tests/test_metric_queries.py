@@ -42,7 +42,7 @@ def test_client_queries_metric_points_and_terminal_summaries(
     assert diagnostics.last_write_error is None
 
 
-def test_active_run_point_queries_do_not_depend_on_aggregate_state(
+def test_active_run_discovery_and_summaries_use_persisted_points(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
@@ -67,9 +67,12 @@ def test_active_run_point_queries_do_not_depend_on_aggregate_state(
 
     points = client.query_metric(run.run_id, "train/loss")
     metrics = client.list_metrics(run.run_id)
+    summaries = client.query_metric_summaries([run.run_id], "train/loss")
 
     assert [point.value_f64 for point in points] == [0.25]
-    assert metrics == []
+    assert [metric.metric_key for metric in metrics] == ["eval/accuracy", "train/loss"]
+    assert [metric.last_value_f64 for metric in metrics] == [0.8, 0.25]
+    assert [summary.last_value_f64 for summary in summaries] == [0.25]
 
 
 def test_terminal_run_metric_discovery_uses_rebuilt_aggregate_state(
