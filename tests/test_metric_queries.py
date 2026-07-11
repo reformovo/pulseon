@@ -97,6 +97,32 @@ def test_terminal_run_metric_discovery_uses_rebuilt_aggregate_state(
     assert isinstance(metrics[0], pulseon.MetricSummary)
 
 
+def test_summary_comparison_preserves_mixed_run_order(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    terminal = client.create_run(project.project_id, "terminal", run_id="terminal")
+    terminal.log("train/loss", 0, 0.5)
+    client.finish_run(terminal.run_id)
+    running = client.create_run(project.project_id, "running", run_id="running")
+    running.log("train/loss", 0, 0.25)
+    helpers.wait_for_metric_points(
+        client,
+        running.run_id,
+        "train/loss",
+        expected_count=1,
+    )
+
+    summaries = client.query_metric_summaries(
+        [running.run_id, terminal.run_id],
+        "train/loss",
+    )
+
+    assert [summary.run_id for summary in summaries] == ["running", "terminal"]
+    assert [summary.last_value_f64 for summary in summaries] == [0.25, 0.5]
+
+
 def test_client_query_metric_applies_range_filters_and_short_max_points(
     tmp_path: pathlib.Path,
 ) -> None:

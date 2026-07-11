@@ -28,7 +28,7 @@ the release.
 
 - [x] Make metric discovery and summaries reflect persisted points for running
   runs, while retaining aggregate-backed terminal-run fast paths.
-- [ ] Support mixed running and terminal runs in summary comparisons without
+- [x] Support mixed running and terminal runs in summary comparisons without
   changing requested run ordering.
 - [ ] Change metric-query `end_step` semantics from inclusive to exclusive so
   ranges consistently use `[start_step, end_step)`. Update native predicates,
