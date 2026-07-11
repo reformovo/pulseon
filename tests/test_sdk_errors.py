@@ -11,6 +11,7 @@ from tests import helpers
 
 def test_client_raises_actionable_sdk_errors(
     tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import pulseon
 
@@ -40,6 +41,10 @@ def test_client_raises_actionable_sdk_errors(
     with pytest.raises(pulseon.StorageError):
         client.get_run("missing-run")
 
+    monkeypatch.setenv(
+        "PULSEON_LTTB_EXTENSION_PATH",
+        str(tmp_path / "missing-lttb.duckdb_extension"),
+    )
     query_client = pulseon.init(tmp_path / "query-pulseon")
     query_project = query_client.create_project("query", project_id="query-project")
     query_run = query_client.create_run(
@@ -55,10 +60,10 @@ def test_client_raises_actionable_sdk_errors(
         "train/loss",
         expected_count=3,
     )
-    sampled = query_client.query_metric(query_run.run_id, "train/loss", max_points=2)
-    assert [point.step for point in sampled] == [0, 2]
     with pytest.raises(pulseon.PulseOnError, match="max_points must be at least 2"):
         query_client.query_metric(query_run.run_id, "train/loss", max_points=1)
+    with pytest.raises(pulseon.StorageError, match="LTTB extension is unavailable"):
+        query_client.query_metric(query_run.run_id, "train/loss", max_points=2)
 
 
 def test_ducklake_attach_storage_error_is_sanitized(tmp_path: pathlib.Path) -> None:

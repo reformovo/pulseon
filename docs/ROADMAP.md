@@ -34,10 +34,10 @@ the release.
   ranges consistently use `[start_step, end_step)`. Update native predicates,
   Python documentation and types, behavioral tests, and migration notes
   together as an explicit compatibility change.
-- [x] Replace the optional runtime-downloaded LTTB extension path with built-in,
-  deterministic downsampling. Require `max_points >= 2`, preserve endpoints,
-  keep short series unchanged, and apply range and last-write-wins semantics
-  before downsampling.
+- [x] Keep LTTB as an optional DuckDB extension rather than bundling it in
+  wheels or reimplementing it in PulseOn. Require `max_points >= 2`, preserve
+  endpoints, keep short series unchanged, and apply range and last-write-wins
+  semantics before downsampling.
 
 ### Phase 3: Arrow-compatible Python Results
 
@@ -96,8 +96,8 @@ the release.
 - [ ] Update README examples, public type documentation, and 0.1.0a5 release
   notes. Include migration notes for half-open ranges, config-relative paths,
   and `max_points < 2`.
-- [ ] Remove the public LTTB download/configuration guidance after built-in
-  downsampling is verified.
+- [ ] Verify the public LTTB installation and configuration guidance against
+  the supported DuckDB extension version.
 - [ ] Run `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
   `cargo check`, `cargo test`, `uv run maturin develop --uv`,

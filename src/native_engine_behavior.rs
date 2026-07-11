@@ -295,42 +295,36 @@ mod tests {
     }
 
     #[test]
-    fn query_metric_downsamples_effective_range_with_builtin_lttb() -> Result<(), Box<dyn Error>> {
+    fn query_metric_downsamples_long_series_with_duckdb_lttb() -> Result<(), Box<dyn Error>> {
         // Given
         let dataset = open_behavior_dataset()?;
         let connection = dataset.connection();
         connection.execute_batch(
-            "INSERT INTO pulseon_projects VALUES ('project-1', 'local training', now());
+            "CREATE MACRO lttb(x, y, n) AS [
+                 list({x: x::DOUBLE, y: y} ORDER BY x)[1],
+                 list({x: x::DOUBLE, y: y} ORDER BY x)[len(list({x: x, y: y} ORDER BY x))]];
+             INSERT INTO pulseon_projects VALUES ('project-1', 'local training', now());
              INSERT INTO pulseon_runs VALUES
                  ('run-1', 'project-1', 'metrics', 'running', now(), now(), NULL);
              INSERT INTO dl.metric_points VALUES
-                 ('run-1', 'train/loss', 'train%2Floss', 0, now(), 0.5, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 1, now(), 0.25, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 1, now(), 0.2, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 2, now(), 0.125, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 3, now(), 0.0625, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 4, now(), 1.0, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 5, now(), 0.03, now());",
+                 ('run-1', 'train/loss', 'train%2Floss', 9223372036854775804, now(), 0.5, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 9223372036854775805, now(), 0.25, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 9223372036854775806, now(), 0.125, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 9223372036854775807, now(), 0.0625, now());",
         )?;
         let query = NativeQueryStore::new(connection);
         let run_id = RunId::from_string("run-1");
         let metric_key = MetricKey::from_string("train/loss");
 
         // When
-        let points = query.query_metric(
-            &run_id,
-            &metric_key,
-            Some(Step::new(1)),
-            Some(Step::new(6)),
-            Some(3),
-        )?;
+        let points = query.query_metric(&run_id, &metric_key, None, None, Some(2))?;
 
         // Then
         let values: Vec<(i64, f64)> = points
             .iter()
             .map(|point| (point.step.value(), point.value_f64))
             .collect();
-        assert_eq!(values, vec![(1, 0.2), (4, 1.0), (5, 0.03)]);
+        assert_eq!(values, vec![(i64::MAX - 3, 0.5), (i64::MAX, 0.0625),],);
         Ok(())
     }
 

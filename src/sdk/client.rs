@@ -543,9 +543,11 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         | crate::engine::EngineError::ProjectAlreadyExists { .. }
         | crate::engine::EngineError::ProjectNotFound { .. }
         | crate::engine::EngineError::RunNotFound { .. }
+        | crate::engine::EngineError::LttbExtensionUnavailable { .. }
         | crate::engine::EngineError::Storage { .. }
         | crate::engine::EngineError::StorageDuckDb { .. } => StorageError::new_err(message),
-        crate::engine::EngineError::MetricQueryMaxPointsTooSmall { .. } => {
+        crate::engine::EngineError::MetricQueryMaxPointsTooSmall { .. }
+        | crate::engine::EngineError::MetricQueryMaxPointsTooLarge { .. } => {
             PulseOnError::new_err(message)
         }
         crate::engine::EngineError::MetricQueueFull => MetricQueueFullError::new_err(message),

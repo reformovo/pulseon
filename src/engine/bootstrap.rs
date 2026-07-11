@@ -264,7 +264,11 @@ pub(crate) fn setup_duckdb_catalog_adapter(
 }
 
 fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
-    Ok(duckdb::Connection::open_in_memory()?)
+    let mut config = duckdb::Config::default();
+    if std::env::var_os("PULSEON_LTTB_EXTENSION_PATH").is_some() {
+        config = config.allow_unsigned_extensions()?;
+    }
+    Ok(duckdb::Connection::open_in_memory_with_flags(config)?)
 }
 
 fn configure_s3_connection(
