@@ -38,8 +38,8 @@ pub enum EngineError {
         from: &'static str,
         to: &'static str,
     },
-    #[error("metric query max_points is too large for DuckDB LTTB: {max_points}")]
-    MetricQueryMaxPointsTooLarge { max_points: usize },
+    #[error("metric query max_points must be at least 2, got {max_points}")]
+    MetricQueryMaxPointsTooSmall { max_points: usize },
     #[error("metric queue is full")]
     MetricQueueFull,
     #[error("metric writer failed: {message}")]
@@ -66,8 +66,6 @@ pub enum EngineError {
         #[source]
         source: duckdb::Error,
     },
-    #[error("DuckDB LTTB extension is unavailable: {message}")]
-    LttbExtensionUnavailable { message: String },
     #[error("invalid stored run status: {status}")]
     InvalidRunStatus { status: String },
     #[error("invalid stored timestamp for {field}: {millis}")]

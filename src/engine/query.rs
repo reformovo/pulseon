@@ -1,12 +1,7 @@
-use std::path::Path;
-
 use crate::engine::EngineError;
 use crate::engine::write_rows::{StoredMetricAggregate, StoredMetricPoint};
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{RunId, RunStatus};
-
-const LTTB_AUTO_INSTALL_ENV: &str = "PULSEON_LTTB_AUTO_INSTALL";
-const LTTB_EXTENSION_PATH_ENV: &str = "PULSEON_LTTB_EXTENSION_PATH";
 
 pub struct NativeQueryStore<'connection> {
     connection: &'connection duckdb::Connection,
@@ -36,16 +31,12 @@ impl<'connection> NativeQueryStore<'connection> {
         let Some(max_points) = max_points else {
             return self.query_metric_full(run_id, metric_key, start_step, end_step);
         };
-
-        let row_count = self.count_metric_effective(run_id, metric_key, start_step, end_step)?;
-        if row_count <= max_points as u64 {
-            return self.query_metric_full(run_id, metric_key, start_step, end_step);
+        if max_points < 2 {
+            return Err(EngineError::MetricQueryMaxPointsTooSmall { max_points });
         }
 
-        let max_points_i64 = i64::try_from(max_points)
-            .map_err(|_| EngineError::MetricQueryMaxPointsTooLarge { max_points })?;
-        self.ensure_lttb_extension_loaded()?;
-        self.query_metric_downsampled(run_id, metric_key, start_step, end_step, max_points_i64)
+        let points = self.query_metric_full(run_id, metric_key, start_step, end_step)?;
+        Ok(downsample_metric_points(points, max_points))
     }
 
     pub fn metric_aggregate(
@@ -212,154 +203,78 @@ impl<'connection> NativeQueryStore<'connection> {
 
         Ok(points)
     }
+}
 
-    fn query_metric_downsampled(
-        &self,
-        run_id: &RunId,
-        metric_key: &MetricKey,
-        start_step: Option<Step>,
-        end_step: Option<Step>,
-        max_points: i64,
-    ) -> Result<Vec<MetricPoint>, EngineError> {
-        let start_step = start_step.map(Step::value);
-        let end_step = end_step.map(Step::value);
-        let mut statement = self.connection.prepare(
-            "WITH effective AS (
-                 SELECT run_id, metric_key, step, timestamp, value_f64, ingested_at
-                 FROM (
-                     SELECT *, row_number() OVER
-                                (PARTITION BY run_id, metric_key, step
-                                 ORDER BY ingested_at DESC, rowid DESC) AS write_rank
-                     FROM dl.metric_points
-                     WHERE run_id = ? AND metric_key = ?
-                 )
-                 WHERE write_rank = 1
-                   AND (? IS NULL OR step >= ?)
-                   AND (? IS NULL OR step < ?)
-             ),
-             sampled AS (
-                 SELECT unnest(lttb(step, value_f64, ?)) AS point
-                 FROM effective
-             )
-             SELECT effective.run_id, effective.metric_key, effective.step,
-                    epoch_ms(effective.timestamp), effective.value_f64,
-                    epoch_ms(effective.ingested_at)
-             FROM sampled
-             JOIN effective ON effective.step = sampled.point.x ORDER BY effective.step",
-        )?;
-        let rows = statement.query_map(
-            (
-                run_id.as_str(),
-                metric_key.as_str(),
-                start_step,
-                start_step,
-                end_step,
-                end_step,
-                max_points,
-            ),
-            stored_metric_point_from_row,
-        )?;
-
-        rows.map(|row| row?.into_metric_point()).collect()
+fn downsample_metric_points(points: Vec<MetricPoint>, max_points: usize) -> Vec<MetricPoint> {
+    if points.len() <= max_points {
+        return points;
+    }
+    if max_points == 2 {
+        let last = points.len() - 1;
+        return take_metric_points(points, [0, last]);
     }
 
-    fn count_metric_effective(
-        &self,
-        run_id: &RunId,
-        metric_key: &MetricKey,
-        start_step: Option<Step>,
-        end_step: Option<Step>,
-    ) -> Result<u64, EngineError> {
-        let start_step = start_step.map(Step::value);
-        let end_step = end_step.map(Step::value);
-        let count = self.connection.query_row(
-            "SELECT count(DISTINCT step)
-             FROM dl.metric_points
-             WHERE run_id = ? AND metric_key = ?
-               AND (? IS NULL OR step >= ?)
-               AND (? IS NULL OR step < ?)",
-            (
-                run_id.as_str(),
-                metric_key.as_str(),
-                start_step,
-                start_step,
-                end_step,
-                end_step,
-            ),
-            |row| row.get(0),
-        )?;
-        Ok(count)
+    let bucket_width = (points.len() - 2) as f64 / (max_points - 2) as f64;
+    let mut selected = Vec::with_capacity(max_points);
+    selected.push(0);
+    let mut anchor = 0;
+    for bucket in 0..(max_points - 2) {
+        let average_start = ((bucket + 1) as f64 * bucket_width).floor() as usize + 1;
+        let average_end =
+            (((bucket + 2) as f64 * bucket_width).floor() as usize + 1).min(points.len());
+        let average_len = (average_end - average_start) as f64;
+        let average_step = points[average_start..average_end]
+            .iter()
+            .map(|point| point.step.value() as f64)
+            .sum::<f64>()
+            / average_len;
+        let average_value = points[average_start..average_end]
+            .iter()
+            .map(|point| point.value_f64)
+            .sum::<f64>()
+            / average_len;
+        let range_start = (bucket as f64 * bucket_width).floor() as usize + 1;
+        let range_end =
+            (((bucket + 1) as f64 * bucket_width).floor() as usize + 1).min(points.len() - 1);
+        let anchor_step = points[anchor].step.value() as f64;
+        let anchor_value = points[anchor].value_f64;
+        let mut largest_area = -1.0;
+        let mut next_anchor = range_start;
+        for (index, point) in points[range_start..range_end].iter().enumerate() {
+            let point_step = point.step.value() as f64;
+            let area = ((anchor_step - average_step) * (point.value_f64 - anchor_value)
+                - (anchor_step - point_step) * (average_value - anchor_value))
+                .abs();
+            if area > largest_area {
+                largest_area = area;
+                next_anchor = range_start + index;
+            }
+        }
+        selected.push(next_anchor);
+        anchor = next_anchor;
     }
+    selected.push(points.len() - 1);
+    take_metric_points(points, selected)
+}
 
-    fn ensure_lttb_extension_loaded(&self) -> Result<(), EngineError> {
-        if self.lttb_function_available() {
-            return Ok(());
-        }
-
-        let load_error = match self.connection.execute_batch("LOAD lttb;") {
-            Ok(()) if self.lttb_function_available() => return Ok(()),
-            Ok(()) => None,
-            Err(source) => Some(source.to_string()),
-        };
-
-        if let Some(path) = std::env::var_os(LTTB_EXTENSION_PATH_ENV) {
-            return self.load_lttb_extension_from_path(Path::new(&path));
-        }
-
-        if lttb_auto_install_allowed(std::env::var_os(LTTB_AUTO_INSTALL_ENV).as_deref()) {
-            return self.install_and_load_lttb_extension();
-        }
-
-        let mut message = format!(
-            "lttb is not loaded and PulseOn will not download it automatically; \
-             set {LTTB_AUTO_INSTALL_ENV}=1 to allow INSTALL lttb FROM community, \
-             or set {LTTB_EXTENSION_PATH_ENV} to a local lttb.duckdb_extension"
-        );
-        if let Some(load_error) = load_error {
-            message.push_str("; LOAD lttb failed: ");
-            message.push_str(&load_error);
-        }
-        Err(EngineError::LttbExtensionUnavailable { message })
-    }
-
-    fn install_and_load_lttb_extension(&self) -> Result<(), EngineError> {
-        match self
-            .connection
-            .execute_batch("INSTALL lttb FROM community; LOAD lttb;")
-        {
-            Ok(()) if self.lttb_function_available() => Ok(()),
-            Ok(()) => Err(EngineError::LttbExtensionUnavailable {
-                message: "INSTALL/LOAD lttb did not register lttb".to_owned(),
-            }),
-            Err(source) => Err(EngineError::LttbExtensionUnavailable {
-                message: source.to_string(),
-            }),
-        }
-    }
-
-    fn load_lttb_extension_from_path(&self, path: &Path) -> Result<(), EngineError> {
-        let path = sql_string_literal(path.to_string_lossy().as_ref());
-        match self.connection.execute_batch(&format!("LOAD {path};")) {
-            Ok(()) if self.lttb_function_available() => Ok(()),
-            Ok(()) => Err(EngineError::LttbExtensionUnavailable {
-                message: "LOAD lttb from PULSEON_LTTB_EXTENSION_PATH did not register lttb"
-                    .to_owned(),
-            }),
-            Err(source) => Err(EngineError::LttbExtensionUnavailable {
-                message: source.to_string(),
-            }),
-        }
-    }
-
-    fn lttb_function_available(&self) -> bool {
-        self.connection
-            .query_row(
-                "SELECT count(*) FROM (SELECT lttb(1::BIGINT, 1::DOUBLE, 1::BIGINT))",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .is_ok()
-    }
+fn take_metric_points(
+    points: Vec<MetricPoint>,
+    selected: impl IntoIterator<Item = usize>,
+) -> Vec<MetricPoint> {
+    let mut selected = selected.into_iter();
+    let mut next = selected.next();
+    points
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, point)| {
+            if next == Some(index) {
+                next = selected.next();
+                Some(point)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn stored_metric_point_from_row(row: &duckdb::Row<'_>) -> duckdb::Result<StoredMetricPoint> {
@@ -385,35 +300,4 @@ fn stored_metric_aggregate_from_row(
         min_value_f64: row.get(5)?,
         max_value_f64: row.get(6)?,
     })
-}
-
-fn sql_string_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-fn lttb_auto_install_allowed(value: Option<&std::ffi::OsStr>) -> bool {
-    value
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::ffi::OsStr;
-
-    use super::*;
-
-    fn allows(value: &str) -> bool {
-        lttb_auto_install_allowed(Some(OsStr::new(value)))
-    }
-
-    #[test]
-    fn lttb_auto_install_is_opt_in() {
-        assert!(!lttb_auto_install_allowed(None));
-        assert!(!allows("0"));
-        assert!(allows("1"));
-        assert!(allows("true"));
-        assert!(allows("yes"));
-        assert!(allows("on"));
-    }
 }

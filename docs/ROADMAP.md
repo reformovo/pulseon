@@ -34,7 +34,7 @@ the release.
   ranges consistently use `[start_step, end_step)`. Update native predicates,
   Python documentation and types, behavioral tests, and migration notes
   together as an explicit compatibility change.
-- [ ] Replace the optional runtime-downloaded LTTB extension path with built-in,
+- [x] Replace the optional runtime-downloaded LTTB extension path with built-in,
   deterministic downsampling. Require `max_points >= 2`, preserve endpoints,
   keep short series unchanged, and apply range and last-write-wins semantics
   before downsampling.
