@@ -14,14 +14,14 @@ the release.
 
 ### Phase 1: Read Contract and Discovery
 
-- [ ] Add `Client.list_projects()` so callers can begin data discovery without
+- [x] Add `Client.list_projects()` so callers can begin data discovery without
   a known project identifier.
-- [ ] Extend run discovery with optional lifecycle-status filtering, stable
+- [x] Extend run discovery with optional lifecycle-status filtering, stable
   created-time ordering, and `limit`/`offset` pagination while preserving the
   existing `list_runs(project_id)` default behavior.
-- [ ] Define the read contract as catalog project/run metadata plus persisted
+- [x] Define the read contract as catalog project/run metadata plus persisted
   effective metric points. Queued reports remain outside query visibility.
-- [ ] Preserve last-write-wins metric semantics and a4 catalog and Parquet
+- [x] Preserve last-write-wins metric semantics and a4 catalog and Parquet
   compatibility for both DuckDB and SQLite catalog backends.
 
 ### Phase 2: Fresh Queries and Built-in Downsampling
