@@ -24,7 +24,7 @@ the release.
 - [x] Preserve last-write-wins metric semantics and a4 catalog and Parquet
   compatibility for both DuckDB and SQLite catalog backends.
 
-### Phase 2: Fresh Queries and Built-in Downsampling
+### Phase 2: Fresh Queries and Downsampling
 
 - [x] Make metric discovery and summaries reflect persisted points for running
   runs, while retaining aggregate-backed terminal-run fast paths.
