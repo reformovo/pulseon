@@ -41,6 +41,12 @@ def test_catalog_backend_round_trips_native_storage_workflow(
         "train/loss",
         expected_count=2,
     )
+    helpers.wait_for_metric_points(
+        client,
+        run.run_id,
+        "eval/accuracy",
+        expected_count=1,
+    )
     active_metrics = client.list_metrics(run.run_id)
     finished = client.finish_run(run.run_id)
     client.flush_run_data(run.run_id)
@@ -63,7 +69,11 @@ def test_catalog_backend_round_trips_native_storage_workflow(
     reopened_points = reopened.query_metric(finished.run_id, "train/loss")
 
     assert [point.step for point in active_points] == [0, 1]
-    assert active_metrics == []
+    assert [metric.metric_key for metric in active_metrics] == [
+        "eval/accuracy",
+        "train/loss",
+    ]
+    assert [metric.effective_count for metric in active_metrics] == [1, 2]
     assert finished.status == "finished"
     assert [point.step for point in terminal_points] == [0, 1]
     assert [point.value_f64 for point in terminal_points] == [0.25, 0.0625]
