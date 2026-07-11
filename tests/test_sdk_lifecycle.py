@@ -309,6 +309,29 @@ def test_client_selects_existing_project_and_run(tmp_path: pathlib.Path) -> None
     assert selected_run.status == "running"
 
 
+def test_client_lists_projects_in_stable_catalog_order(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    client = pulseon.init(root_path)
+
+    assert client.list_projects() == []
+
+    first = client.create_project("local training", project_id="project-1")
+    second = client.create_project("sweep", project_id="project-2")
+    del client
+
+    projects = pulseon.init(root_path).list_projects()
+
+    assert [project.project_id for project in projects] == [
+        first.project_id,
+        second.project_id,
+    ]
+    assert [project.name for project in projects] == ["local training", "sweep"]
+
+
 def test_client_resumes_existing_run_for_logging(tmp_path: pathlib.Path) -> None:
     import pulseon
 

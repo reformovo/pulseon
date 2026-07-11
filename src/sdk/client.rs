@@ -81,6 +81,13 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
+    pub fn list_projects(&self) -> PyResult<Vec<PyProject>> {
+        self._inner
+            .list_projects()
+            .map(|projects| projects.into_iter().map(PyProject::from).collect())
+            .map_err(runtime_error)
+    }
+
     #[pyo3(signature = (project_id, name, run_id=None))]
     pub fn create_run(
         &self,

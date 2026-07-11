@@ -149,6 +149,35 @@ impl NativeClient {
         })
     }
 
+    pub fn list_projects(&self) -> Result<Vec<Project>, EngineError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT project_id, name, epoch_ms(created_at::TIMESTAMPTZ)
+             FROM pulseon_projects
+             ORDER BY created_at, project_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+
+        rows.map(|row| {
+            let (project_id, name, created_at_millis) = row?;
+            Ok(Project {
+                project_id: ProjectId::from_string(project_id),
+                name,
+                created_at: crate::engine::time::timestamp_from_millis(
+                    "created_at",
+                    created_at_millis,
+                )?,
+            })
+        })
+        .collect()
+    }
+
     pub fn create_run(
         &self,
         project_id: &ProjectId,
@@ -944,6 +973,24 @@ mod tests {
 
         assert_eq!(selected_project, created_project);
         assert_eq!(selected_run, created_run);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn list_projects_returns_projects_in_stable_catalog_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+
+        assert_eq!(client.list_projects()?, []);
+
+        let first =
+            client.create_project("local training", Some(ProjectId::from_string("project-1")))?;
+        let second = client.create_project("sweep", Some(ProjectId::from_string("project-2")))?;
+
+        assert_eq!(client.list_projects()?, [first, second]);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }
