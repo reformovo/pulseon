@@ -78,7 +78,7 @@ the release.
 - [x] Define JSON success output with `schema_version`, `kind`, `data`, `page`,
   and `meta`; include pagination state and metric-query source/downsampling
   metadata where applicable.
-- [ ] Write JSON errors to stderr with stable error codes and sanitized messages.
+- [x] Write JSON errors to stderr with stable error codes and sanitized messages.
   Reserve exit status 1 for operation failures and 2 for CLI usage failures.
 - [ ] Add an opt-in MinIO/S3 metric-query benchmark covering realistic run,
   metric-key, file-count, and step-range selections for both catalog backends.

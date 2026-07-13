@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+import contextlib
+import io
 import json
 import pathlib
 import sys
@@ -11,6 +13,20 @@ import sys
 from pulseon import _pulseon
 
 _JSON_SCHEMA_VERSION = 1
+_OPERATION_ERROR_CODES = {
+    "ClientClosedError": "client_closed",
+    "InvalidConfigurationError": "invalid_configuration",
+    "InvalidRunStateError": "invalid_run_state",
+    "MetricDrainTimeoutError": "metric_drain_timeout",
+    "MetricFlushError": "metric_flush_failed",
+    "MetricFlushTimeoutError": "metric_flush_timeout",
+    "MetricQueueFullError": "metric_queue_full",
+    "MetricWriterFailedError": "metric_writer_failed",
+    "RunAlreadyActiveError": "run_already_active",
+    "RunAlreadyExistsError": "run_already_exists",
+    "RunClosedError": "run_closed",
+    "StorageError": "storage_error",
+}
 
 
 def _non_negative_int(value: str) -> int:
@@ -58,6 +74,45 @@ def _build_parser() -> argparse.ArgumentParser:
     metrics_compare.add_argument("metric_key")
     metrics_compare.add_argument("run_ids", nargs="+")
     return parser
+
+
+def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
+    error_output = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(error_output):
+            return _build_parser().parse_args(argv)
+    except SystemExit as error:
+        if error.code == 2 and _json_requested(argv):
+            print(
+                _render_error("cli_usage_error", _usage_message(error_output.getvalue())),
+                file=sys.stderr,
+            )
+        else:
+            print(error_output.getvalue(), end="", file=sys.stderr)
+        raise
+
+
+def _json_requested(argv: Sequence[str] | None) -> bool:
+    arguments = tuple(sys.argv[1:] if argv is None else argv)
+    for index, value in enumerate(arguments):
+        if value == "--format=json":
+            return True
+        if value == "--format" and arguments[index + 1 : index + 2] == ("json",):
+            return True
+    return False
+
+
+def _usage_message(output: str) -> str:
+    marker = ": error: "
+    return output.rsplit(marker, maxsplit=1)[-1].strip()
+
+
+def _render_error(code: str, message: str) -> str:
+    document = {
+        "schema_version": _JSON_SCHEMA_VERSION,
+        "error": {"code": code, "message": message},
+    }
+    return json.dumps(document, sort_keys=True, separators=(",", ":"))
 
 
 def _render_table(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> str:
@@ -222,7 +277,7 @@ def _resolve_cli_path(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Runs the PulseOn CLI and returns its process exit status."""
-    args = _build_parser().parse_args(argv)
+    args = _parse_args(argv)
     project_path = args.path.absolute()
     try:
         with _pulseon.init(
@@ -234,7 +289,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         ) as client:
             print(_run(client, args))
     except _pulseon.PulseOnError as error:
-        print(str(error), file=sys.stderr)
+        message = str(error)
+        if args.format == "json":
+            code = _OPERATION_ERROR_CODES.get(type(error).__name__, "operation_failed")
+            message = _render_error(code, message)
+        print(message, file=sys.stderr)
         return 1
     return 0
 

@@ -65,6 +65,29 @@ def test_cli_missing_store_fails_without_creating_it(
     assert not (root_path / ".pulseon").exists()
 
 
+def test_cli_json_operation_errors_are_structured(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root_path = tmp_path / "missing"
+    root_path.mkdir()
+
+    status = cli.main(
+        ["--path", str(root_path), "--format", "json", "projects", "list"]
+    )
+
+    assert status == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "schema_version": 1,
+        "error": {
+            "code": "storage_error",
+            "message": "catalog not found: catalog.ducklake",
+        },
+    }
+
+
 def test_cli_resolves_global_path_overrides_against_project(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -239,6 +262,33 @@ def test_cli_rejects_negative_unsigned_arguments(
     assert "Traceback" not in captured.err
 
 
+def test_cli_json_usage_errors_are_structured(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as error_info:
+        cli.main(
+            [
+                "--format",
+                "json",
+                "metrics",
+                "query",
+                "run-1",
+                "loss",
+                "--max-points",
+                "-1",
+            ]
+        )
+
+    assert error_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    document = json.loads(captured.err)
+    assert document["schema_version"] == 1
+    assert document["error"]["code"] == "cli_usage_error"
+    assert "expected a non-negative integer" in document["error"]["message"]
+    assert "usage:" not in captured.err
+
+
 def test_cli_table_output_is_deterministic_and_uncolored() -> None:
     first = cli._render_table(("STEP", "VALUE"), ((0, 0.5), (10, 0.25)))
     second = cli._render_table(("STEP", "VALUE"), ((0, 0.5), (10, 0.25)))
@@ -278,6 +328,8 @@ def test_cli_sanitizes_config_credentials_and_catalog_paths(
         [
             "--path",
             str(root_path),
+            "--format",
+            "json",
             "--catalog-path",
             str(private_catalog),
             "projects",
@@ -287,6 +339,10 @@ def test_cli_sanitizes_config_credentials_and_catalog_paths(
 
     assert status == 1
     error = capsys.readouterr().err
-    assert error == "catalog not found: catalog.ducklake\n"
+    document = json.loads(error)
+    assert document["error"] == {
+        "code": "storage_error",
+        "message": "catalog not found: catalog.ducklake",
+    }
     assert secret not in error
     assert str(private_catalog.parent) not in error
