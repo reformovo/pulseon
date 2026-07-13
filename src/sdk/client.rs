@@ -523,7 +523,7 @@ pub fn init(
     let init_config = resolve_init_config(
         &path,
         data_path,
-        catalog_backend,
+        Some(catalog_backend),
         catalog_path,
         metric_queue_capacity,
         S3ConnectionOverrides {
