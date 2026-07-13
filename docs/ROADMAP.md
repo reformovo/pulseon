@@ -80,7 +80,7 @@ the release.
   metadata where applicable.
 - [x] Write JSON errors to stderr with stable error codes and sanitized messages.
   Reserve exit status 1 for operation failures and 2 for CLI usage failures.
-- [ ] Add an opt-in MinIO/S3 metric-query benchmark covering realistic run,
+- [x] Add an opt-in MinIO/S3 metric-query benchmark covering realistic run,
   metric-key, file-count, and step-range selections for both catalog backends.
 - [ ] Measure repeated query latency, remote response bytes, and read
   amplification. Treat reads from unrelated `run_id` or
