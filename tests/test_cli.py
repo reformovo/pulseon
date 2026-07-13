@@ -133,3 +133,47 @@ def test_cli_table_output_is_deterministic_and_uncolored() -> None:
     assert first == "STEP  VALUE\n----  -----\n0     0.5\n10    0.25"
     assert second == first
     assert "\x1b" not in first
+
+
+def test_cli_keeps_s3_credentials_out_of_arguments() -> None:
+    help_text = cli._build_parser().format_help()
+
+    assert "secret" not in help_text.lower()
+    assert "access-key" not in help_text.lower()
+    assert "session-token" not in help_text.lower()
+
+
+def test_cli_sanitizes_config_credentials_and_catalog_paths(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root_path = tmp_path / "project"
+    config_path = root_path / ".pulseon" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    secret = "credential-must-not-leak"
+    config_path.write_text(
+        'data_path = "s3://private-bucket/metrics"\n'
+        "[s3]\n"
+        'endpoint = "127.0.0.1:9000"\n'
+        'access_key_id = "private-access-key"\n'
+        f'secret_access_key = "{secret}"\n',
+        encoding="utf-8",
+    )
+    private_catalog = tmp_path / "private" / "tenant" / "catalog.ducklake"
+
+    status = cli.main(
+        [
+            "--path",
+            str(root_path),
+            "--catalog-path",
+            str(private_catalog),
+            "projects",
+            "list",
+        ]
+    )
+
+    assert status == 1
+    error = capsys.readouterr().err
+    assert error == "catalog not found: catalog.ducklake\n"
+    assert secret not in error
+    assert str(private_catalog.parent) not in error
