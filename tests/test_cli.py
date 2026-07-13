@@ -98,3 +98,38 @@ def test_cli_resolves_global_path_overrides_against_project(
             "project_id": "project-1",
         }
     ]
+
+
+def test_cli_metric_query_point_limits_are_mutually_exclusive() -> None:
+    parser = cli._build_parser()
+
+    defaults = parser.parse_args(["metrics", "query", "run-1", "loss"])
+    all_points = parser.parse_args(
+        ["metrics", "query", "run-1", "loss", "--all"]
+    )
+
+    assert defaults.max_points == 200
+    assert defaults.all is False
+    assert all_points.all is True
+    with pytest.raises(SystemExit) as error_info:
+        parser.parse_args(
+            [
+                "metrics",
+                "query",
+                "run-1",
+                "loss",
+                "--max-points",
+                "20",
+                "--all",
+            ]
+        )
+    assert error_info.value.code == 2
+
+
+def test_cli_table_output_is_deterministic_and_uncolored() -> None:
+    first = cli._render_table(("STEP", "VALUE"), ((0, 0.5), (10, 0.25)))
+    second = cli._render_table(("STEP", "VALUE"), ((0, 0.5), (10, 0.25)))
+
+    assert first == "STEP  VALUE\n----  -----\n0     0.5\n10    0.25"
+    assert second == first
+    assert "\x1b" not in first

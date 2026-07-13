@@ -39,7 +39,9 @@ def _build_parser() -> argparse.ArgumentParser:
     metrics_query.add_argument("metric_key")
     metrics_query.add_argument("--start-step", type=int)
     metrics_query.add_argument("--end-step", type=int)
-    metrics_query.add_argument("--max-points", type=int)
+    point_limit = metrics_query.add_mutually_exclusive_group()
+    point_limit.add_argument("--max-points", type=int, default=200)
+    point_limit.add_argument("--all", action="store_true")
     metrics_compare = metric_actions.add_parser("compare")
     metrics_compare.add_argument("metric_key")
     metrics_compare.add_argument("run_ids", nargs="+")
@@ -106,7 +108,7 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
             args.metric_key,
             start_step=args.start_step,
             end_step=args.end_step,
-            max_points=args.max_points,
+            max_points=None if args.all else args.max_points,
         )
         return _render(
             ("STEP", "VALUE", "TIMESTAMP"),
