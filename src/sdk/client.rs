@@ -490,7 +490,7 @@ impl From<MetricAggregate> for PyMetricSummary {
         path=PathBuf::from("."),
         *,
         data_path=None,
-        catalog_backend="duckdb",
+        catalog_backend=None,
         catalog_path=None,
         metric_queue_capacity=65536,
         s3_endpoint=None,
@@ -509,7 +509,7 @@ impl From<MetricAggregate> for PyMetricSummary {
 pub fn init(
     path: PathBuf,
     data_path: Option<PathBuf>,
-    catalog_backend: &str,
+    catalog_backend: Option<&str>,
     catalog_path: Option<PathBuf>,
     metric_queue_capacity: i64,
     s3_endpoint: Option<String>,
@@ -523,7 +523,7 @@ pub fn init(
     let init_config = resolve_init_config(
         &path,
         data_path,
-        Some(catalog_backend),
+        catalog_backend,
         catalog_path,
         metric_queue_capacity,
         S3ConnectionOverrides {

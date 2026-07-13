@@ -114,6 +114,51 @@ def test_init_data_path_keyword_overrides_config(
     assert not configured_data_path.exists()
 
 
+def test_init_uses_configured_catalog_backend_and_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    catalog_path = tmp_path / "configured" / "catalog.sqlite"
+    _write_project_config(
+        root_path,
+        'catalog_backend = "sqlite"\n'
+        f'catalog_path = "{catalog_path.as_posix()}"\n',
+    )
+
+    client = pulseon.init(root_path, catalog_backend=None)
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert catalog_path.is_file()
+    assert not (root_path / ".pulseon" / "catalog.ducklake").exists()
+
+
+def test_init_catalog_keywords_override_config(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    root_path = tmp_path / "pulseon"
+    configured_path = tmp_path / "configured" / "catalog.sqlite"
+    explicit_path = tmp_path / "explicit" / "catalog.db"
+    _write_project_config(
+        root_path,
+        'catalog_backend = "sqlite"\n'
+        f'catalog_path = "{configured_path.as_posix()}"\n',
+    )
+
+    client = pulseon.init(
+        root_path,
+        catalog_backend="duckdb",
+        catalog_path=explicit_path,
+    )
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert explicit_path.is_file()
+    assert not configured_path.exists()
+
+
 def test_init_data_path_keyword_ignores_configured_s3(
     tmp_path: pathlib.Path,
 ) -> None:

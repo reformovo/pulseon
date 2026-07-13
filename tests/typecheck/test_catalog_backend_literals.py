@@ -6,6 +6,7 @@ import pulseon
 
 
 def accepts_supported_catalog_backend_literals() -> None:
+    pulseon.init(catalog_backend=None)
     pulseon.init(catalog_backend="duckdb")
     pulseon.init(catalog_backend="sqlite")
 
