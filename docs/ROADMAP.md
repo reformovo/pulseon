@@ -96,7 +96,7 @@ the release.
 - [x] Update README examples, public type documentation, and 0.1.0a5 release
   notes. Include migration notes for half-open ranges, config-relative paths,
   and `max_points < 2`.
-- [ ] Verify the public LTTB installation and configuration guidance against
+- [x] Verify the public LTTB installation and configuration guidance against
   the supported DuckDB extension version.
 - [ ] Run `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`,

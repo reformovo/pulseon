@@ -106,8 +106,20 @@ Runtime extensions:
 
 - DuckLake is installed and loaded by the native engine because it is required
   for native storage.
-- DuckDB LTTB is not bundled into the SDK. PulseOn loads an already installed
-  `lttb` extension when downsampling is requested with `max_points >= 2`. To
-  allow PulseOn to download it from the DuckDB community repository at that
-  point, set `PULSEON_LTTB_AUTO_INSTALL=1`. To use a local build instead, set
-  `PULSEON_LTTB_EXTENSION_PATH=/path/to/lttb.duckdb_extension`.
+- DuckDB LTTB is optional and is not bundled into PulseOn wheels. Downsampling
+  first uses an already installed `lttb` extension. Set
+  `PULSEON_LTTB_AUTO_INSTALL=1` to let the first downsampled query run the
+  official `INSTALL lttb FROM community; LOAD lttb;` flow and cache the
+  extension in DuckDB's user extension directory.
+- PulseOn embeds DuckDB 1.5.4. The release gate verifies the LTTB 0.1.0
+  community build for DuckDB 1.5.4. DuckDB extension binaries are specific to
+  a DuckDB version and platform; for offline deployment, set
+  `PULSEON_LTTB_EXTENSION_PATH=/path/to/lttb.duckdb_extension` to a compatible,
+  signed binary rather than reusing one built for another DuckDB version.
+
+See DuckDB's [LTTB extension page][lttb] and [extension installation
+guide][duckdb-extension-install] for the upstream commands and compatibility
+rules.
+
+[lttb]: https://duckdb.org/community_extensions/extensions/lttb.html
+[duckdb-extension-install]: https://duckdb.org/docs/current/extensions/installing_extensions.html
