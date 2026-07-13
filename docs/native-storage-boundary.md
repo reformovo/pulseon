@@ -42,6 +42,12 @@ conventional filenames, but an explicit `catalog_path` is used as provided.
 The catalog database remains local unless a shared-catalog decision says
 otherwise.
 
+Relative paths read from `<project>/.pulseon/config.toml` are resolved against
+the project root. Before 0.1.0a5, a relative configured `data_path` was resolved
+against the process working directory; users who relied on that behavior must
+make the configured path absolute or rewrite it relative to the project root.
+Explicit SDK paths retain their caller-provided resolution behavior.
+
 ## Why
 
 `pulseon_projects`, `pulseon_runs`, and `pulseon_metric_aggregates` are small,

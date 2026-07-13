@@ -55,22 +55,22 @@ the release.
 
 ### Phase 4: Existing-store Configuration and Read-only CLI
 
-- [ ] Extend `<project>/.pulseon/config.toml` with optional `catalog_backend`
+- [x] Extend `<project>/.pulseon/config.toml` with optional `catalog_backend`
   and local-only `catalog_path`. Explicit SDK and CLI values override config,
   and absent values retain the DuckDB defaults.
-- [ ] Let `pulseon.init(..., catalog_backend=None)` select the configured
+- [x] Let `pulseon.init(..., catalog_backend=None)` select the configured
   backend or fall back to DuckDB while preserving no-argument behavior.
-- [ ] Resolve relative `data_path` and `catalog_path` values from config against
+- [x] Resolve relative `data_path` and `catalog_path` values from config against
   the project root, and document the relative-data-path compatibility change.
-- [ ] Add a native existing-store open path for the CLI so a missing catalog is
+- [x] Add a native existing-store open path for the CLI so a missing catalog is
   an error and never creates an empty store.
-- [ ] Add a dependency-free `pulseon` console command with `projects list`,
+- [x] Add a dependency-free `pulseon` console command with `projects list`,
   `runs list`, `metrics list`, `metrics query`, and `metrics compare`.
-- [ ] Support global `--path`, `--format table|json`, and explicit non-secret
+- [x] Support global `--path`, `--format table|json`, and explicit non-secret
   backend/path overrides; resolve relative CLI paths against `--path`.
-- [ ] Default CLI point queries to 200 points, expose mutually exclusive
+- [x] Default CLI point queries to 200 points, expose mutually exclusive
   `--max-points` and `--all`, and keep table output deterministic and uncolored.
-- [ ] Keep S3 credentials in project config rather than command-line arguments,
+- [x] Keep S3 credentials in project config rather than command-line arguments,
   and preserve existing path and credential sanitization in errors.
 
 ### Phase 5: Versioned Machine Output and S3 Query Gate

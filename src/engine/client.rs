@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::engine::EngineError;
 use crate::engine::bootstrap::{
-    CatalogBackend, NativeStorageConfig, S3ConnectionConfig, open_native_connection_with_config,
+    CatalogBackend, NativeStorageConfig, S3ConnectionConfig,
+    open_existing_native_connection_with_config, open_native_connection_with_config,
 };
 use crate::engine::query::NativeQueryStore;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
@@ -63,6 +64,45 @@ impl NativeClient {
         s3_connection: Option<S3ConnectionConfig>,
         metric_queue_capacity: usize,
     ) -> Result<Self, EngineError> {
+        Self::open_with_catalog_backend_storage_config_mode(
+            path,
+            catalog_backend,
+            catalog_path,
+            data_path,
+            s3_connection,
+            metric_queue_capacity,
+            false,
+        )
+    }
+
+    pub(crate) fn open_existing_with_catalog_backend_storage_config(
+        path: impl AsRef<Path>,
+        catalog_backend: CatalogBackend,
+        catalog_path: Option<PathBuf>,
+        data_path: Option<PathBuf>,
+        s3_connection: Option<S3ConnectionConfig>,
+        metric_queue_capacity: usize,
+    ) -> Result<Self, EngineError> {
+        Self::open_with_catalog_backend_storage_config_mode(
+            path,
+            catalog_backend,
+            catalog_path,
+            data_path,
+            s3_connection,
+            metric_queue_capacity,
+            true,
+        )
+    }
+
+    fn open_with_catalog_backend_storage_config_mode(
+        path: impl AsRef<Path>,
+        catalog_backend: CatalogBackend,
+        catalog_path: Option<PathBuf>,
+        data_path: Option<PathBuf>,
+        s3_connection: Option<S3ConnectionConfig>,
+        metric_queue_capacity: usize,
+        must_exist: bool,
+    ) -> Result<Self, EngineError> {
         let root_path = path.as_ref().to_path_buf();
         let storage_config = NativeStorageConfig::with_backend_and_s3_config(
             catalog_backend,
@@ -71,7 +111,11 @@ impl NativeClient {
             data_path,
             s3_connection,
         );
-        let connection = open_native_connection_with_config(storage_config)?;
+        let connection = if must_exist {
+            open_existing_native_connection_with_config(storage_config)?
+        } else {
+            open_native_connection_with_config(storage_config)?
+        };
         let connection = Arc::new(Mutex::new(connection));
         let reporter =
             MetricReporter::open_with_capacity(Arc::clone(&connection), metric_queue_capacity);

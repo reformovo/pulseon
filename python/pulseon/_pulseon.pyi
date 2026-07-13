@@ -135,7 +135,7 @@ def init(
     path: str | os.PathLike[str] = ".",
     *,
     data_path: str | os.PathLike[str] | None = None,
-    catalog_backend: Literal["duckdb", "sqlite"] = "duckdb",
+    catalog_backend: Literal["duckdb", "sqlite"] | None = None,
     catalog_path: str | os.PathLike[str] | None = None,
     metric_queue_capacity: int = 65536,
     s3_endpoint: str | None = None,
@@ -145,4 +145,5 @@ def init(
     s3_region: str | None = None,
     s3_path_style: bool | None = None,
     s3_use_ssl: bool | None = None,
+    _must_exist: bool = False,
 ) -> Client: ...

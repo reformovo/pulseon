@@ -54,6 +54,8 @@ pub enum EngineError {
     MetricFlushTimeout,
     #[error("client is closed")]
     ClientClosed,
+    #[error("catalog not found: {name}")]
+    CatalogNotFound { name: String },
     #[error("storage operation failed while {operation}: {name}")]
     Storage {
         operation: &'static str,

@@ -29,6 +29,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+[project.scripts]
+pulseon = "pulseon.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/reformovo/pulseon"
 Repository = "https://github.com/reformovo/pulseon"
