@@ -381,3 +381,45 @@ def test_cli_sanitizes_config_credentials_and_catalog_paths(
     }
     assert secret not in error
     assert str(private_catalog.parent) not in error
+
+
+def test_cli_json_sanitizes_lttb_extension_path(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("training", project_id="project-1")
+    run = client.create_run(project.project_id, "long", run_id="run-1")
+    for step in range(201):
+        run.log("loss", step, float(step))
+    client.finish_run(run.run_id)
+    client.shutdown()
+    private_extension = (
+        tmp_path / "private" / "tenant" / "missing-lttb.duckdb_extension"
+    )
+    monkeypatch.setenv("PULSEON_LTTB_EXTENSION_PATH", str(private_extension))
+
+    status = cli.main(
+        [
+            "--path",
+            str(root_path),
+            "--format",
+            "json",
+            "metrics",
+            "query",
+            "run-1",
+            "loss",
+        ]
+    )
+
+    assert status == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["code"] == "storage_error"
+    assert private_extension.name in error["message"]
+    assert str(private_extension.parent) not in captured.err

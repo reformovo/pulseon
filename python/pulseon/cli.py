@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import math
+import os
 import pathlib
 import sys
 
@@ -300,6 +301,28 @@ def _resolve_cli_path(
     return path if path.is_absolute() else project_path / path
 
 
+def _sanitize_operation_message(
+    message: str,
+    project_path: pathlib.Path,
+    args: argparse.Namespace,
+) -> str:
+    values = (
+        project_path,
+        _resolve_cli_path(project_path, args.catalog_path),
+        _resolve_cli_path(project_path, args.data_path),
+        os.environ.get("PULSEON_LTTB_EXTENSION_PATH"),
+    )
+    local_paths: set[pathlib.Path] = set()
+    for value in values:
+        if value is None or "://" in str(value):
+            continue
+        path = pathlib.Path(value)
+        local_paths.add(path if path.is_absolute() else project_path / path)
+    for path in sorted(local_paths, key=lambda item: len(str(item)), reverse=True):
+        message = message.replace(str(path), path.name or "storage path")
+    return message
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Runs the PulseOn CLI and returns its process exit status."""
     args = _parse_args(argv)
@@ -314,7 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ) as client:
             print(_run(client, args))
     except _pulseon.PulseOnError as error:
-        message = str(error)
+        message = _sanitize_operation_message(str(error), project_path, args)
         if args.format == "json":
             code = _OPERATION_ERROR_CODES.get(type(error).__name__, "operation_failed")
             message = _render_error(code, message)
