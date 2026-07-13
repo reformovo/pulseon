@@ -98,7 +98,7 @@ the release.
   and `max_points < 2`.
 - [x] Verify the public LTTB installation and configuration guidance against
   the supported DuckDB extension version.
-- [ ] Run `cargo fmt --all --check`,
+- [x] Run `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
   `cargo check`, `cargo test`, `uv run maturin develop --uv`,
   `uv run pyright`, `uv run pytest`, the opt-in MinIO gates, and the release
