@@ -100,6 +100,33 @@ def test_cli_resolves_global_path_overrides_against_project(
     ]
 
 
+def test_cli_preserves_symlinked_project_path(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    real_path = tmp_path / "real-project"
+    real_path.mkdir()
+    linked_path = tmp_path / "linked-project"
+    try:
+        linked_path.symlink_to(real_path, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    client = pulseon.init(linked_path)
+    client.create_project("linked", project_id="project-1")
+    client.shutdown()
+
+    status = cli.main(
+        ["--path", str(linked_path), "projects", "list"]
+    )
+
+    assert status == 0
+    captured = capsys.readouterr()
+    assert "project-1" in captured.out
+    assert captured.err == ""
+
+
 def test_cli_metric_query_point_limits_are_mutually_exclusive() -> None:
     parser = cli._build_parser()
 

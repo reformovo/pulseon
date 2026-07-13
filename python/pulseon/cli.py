@@ -161,7 +161,7 @@ def _resolve_cli_path(
 def main(argv: Sequence[str] | None = None) -> int:
     """Runs the PulseOn CLI and returns its process exit status."""
     args = _build_parser().parse_args(argv)
-    project_path = args.path.resolve()
+    project_path = args.path.absolute()
     try:
         with _pulseon.init(
             project_path,
