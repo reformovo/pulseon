@@ -73,17 +73,7 @@ impl<'connection> NativeQueryStore<'connection> {
         let max_points_i64 = i64::try_from(max_points)
             .map_err(|_| EngineError::MetricQueryMaxPointsTooLarge { max_points })?;
         self.ensure_lttb_extension_loaded()?;
-        let points = self.query_metric_downsampled(
-            run_id,
-            metric_key,
-            start_step,
-            end_step,
-            max_points_i64,
-        )?;
-        Ok(MetricQueryResult {
-            points,
-            source_row_count: row_count,
-        })
+        self.query_metric_downsampled(run_id, metric_key, start_step, end_step, max_points_i64)
     }
 
     pub fn metric_aggregate(
@@ -258,7 +248,7 @@ impl<'connection> NativeQueryStore<'connection> {
         start_step: Option<Step>,
         end_step: Option<Step>,
         max_points: i64,
-    ) -> Result<Vec<MetricPoint>, EngineError> {
+    ) -> Result<MetricQueryResult, EngineError> {
         let start_step = start_step.map(Step::value);
         let end_step = end_step.map(Step::value);
         let mut statement = self.connection.prepare(
@@ -281,12 +271,13 @@ impl<'connection> NativeQueryStore<'connection> {
                  FROM effective
              ),
              sampled AS (
-                 SELECT unnest(lttb(lttb_step, value_f64, ?)) AS point
+                 SELECT unnest(lttb(lttb_step, value_f64, ?)) AS point,
+                        count(*)::UBIGINT AS source_row_count
                  FROM normalized
              )
              SELECT normalized.run_id, normalized.metric_key, normalized.step,
                     epoch_ms(normalized.timestamp), normalized.value_f64,
-                    epoch_ms(normalized.ingested_at)
+                    epoch_ms(normalized.ingested_at), sampled.source_row_count
              FROM sampled
              JOIN normalized ON normalized.lttb_step = sampled.point.x
              ORDER BY normalized.step",
@@ -301,10 +292,20 @@ impl<'connection> NativeQueryStore<'connection> {
                 end_step,
                 max_points,
             ),
-            stored_metric_point_from_row,
+            |row| Ok((stored_metric_point_from_row(row)?, row.get::<_, u64>(6)?)),
         )?;
 
-        rows.map(|row| row?.into_metric_point()).collect()
+        let mut points = Vec::new();
+        let mut source_row_count = 0;
+        for row in rows {
+            let (stored, row_source_count) = row?;
+            source_row_count = row_source_count;
+            points.push(stored.into_metric_point()?);
+        }
+        Ok(MetricQueryResult {
+            points,
+            source_row_count,
+        })
     }
 
     fn count_metric_effective(

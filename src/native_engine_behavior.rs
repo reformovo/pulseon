@@ -326,6 +326,7 @@ mod tests {
             .map(|point| (point.step.value(), point.value_f64))
             .collect();
         assert_eq!(values, vec![(i64::MAX - 3, 0.5), (i64::MAX, 0.0625),],);
+        assert_eq!(result.points.len(), 2);
         assert_eq!(result.source_row_count, 4);
         Ok(())
     }
