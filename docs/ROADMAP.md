@@ -75,7 +75,7 @@ the release.
 
 ### Phase 5: Versioned Machine Output and S3 Query Gate
 
-- [ ] Define JSON success output with `schema_version`, `kind`, `data`, `page`,
+- [x] Define JSON success output with `schema_version`, `kind`, `data`, `page`,
   and `meta`; include pagination state and metric-query source/downsampling
   metadata where applicable.
 - [ ] Write JSON errors to stderr with stable error codes and sanitized messages.

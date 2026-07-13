@@ -37,6 +37,16 @@ def test_cli_exposes_all_read_commands(
         assert cli.main(argv) == 0
         assert expected in capsys.readouterr().out
 
+    kinds = ("projects", "runs", "metrics", "metric_points", "metric_summaries")
+    for (argv, _), kind in zip(commands, kinds, strict=True):
+        assert cli.main(["--format", "json", *argv]) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert document["schema_version"] == 1
+        assert document["kind"] == kind
+        assert isinstance(document["data"], list)
+        assert "page" in document
+        assert "meta" in document
+
 
 def test_cli_missing_store_fails_without_creating_it(
     tmp_path: pathlib.Path,
@@ -91,13 +101,67 @@ def test_cli_resolves_global_path_overrides_against_project(
     )
 
     assert status == 0
-    assert json.loads(capsys.readouterr().out) == [
-        {
-            "created_at": project.created_at,
-            "name": "training",
-            "project_id": "project-1",
-        }
-    ]
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": 1,
+        "kind": "projects",
+        "data": [
+            {
+                "created_at": project.created_at,
+                "name": "training",
+                "project_id": "project-1",
+            }
+        ],
+        "page": None,
+        "meta": {},
+    }
+
+
+def test_cli_json_includes_pagination_and_metric_query_metadata(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("training", project_id="project-1")
+    first_run = client.create_run(project.project_id, "first", run_id="run-1")
+    first_run.log("loss", 0, 0.5)
+    client.finish_run(first_run.run_id)
+    second_run = client.create_run(project.project_id, "second", run_id="run-2")
+    second_run.log("loss", 0, 0.25)
+    client.finish_run(second_run.run_id)
+    client.shutdown()
+
+    global_args = ["--path", str(root_path), "--format", "json"]
+    assert cli.main(
+        [*global_args, "runs", "list", "project-1", "--limit", "1"]
+    ) == 0
+    runs_document = json.loads(capsys.readouterr().out)
+    assert runs_document["schema_version"] == 1
+    assert runs_document["kind"] == "runs"
+    assert len(runs_document["data"]) == 1
+    assert runs_document["page"] == {
+        "offset": 0,
+        "limit": 1,
+        "returned": 1,
+        "has_more": True,
+    }
+    assert runs_document["meta"] == {}
+
+    assert cli.main(
+        [*global_args, "metrics", "query", "run-1", "loss"]
+    ) == 0
+    query_document = json.loads(capsys.readouterr().out)
+    assert query_document["schema_version"] == 1
+    assert query_document["kind"] == "metric_points"
+    assert query_document["page"] is None
+    assert query_document["meta"] == {
+        "source_row_count": 1,
+        "returned_row_count": 1,
+        "downsampled": False,
+    }
+    assert query_document["data"][0]["step"] == 0
 
 
 def test_cli_preserves_symlinked_project_path(

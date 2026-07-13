@@ -114,6 +114,14 @@ class Client:
         max_points: int | None = None,
     ) -> list[MetricPoint]:
         """Queries points in the half-open range [start_step, end_step)."""
+    def _query_metric_with_metadata(
+        self,
+        run_id: str,
+        metric_key: str,
+        start_step: int | None = None,
+        end_step: int | None = None,
+        max_points: int | None = None,
+    ) -> tuple[list[MetricPoint], int, bool]: ...
     def query_metric_summaries(
         self, run_ids: list[str], metric_key: str
     ) -> list[MetricSummary]: ...

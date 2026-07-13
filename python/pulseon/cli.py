@@ -10,6 +10,8 @@ import sys
 
 from pulseon import _pulseon
 
+_JSON_SCHEMA_VERSION = 1
+
 
 def _non_negative_int(value: str) -> int:
     try:
@@ -76,12 +78,23 @@ def _render(
     headers: Sequence[str],
     rows: Sequence[Sequence[object]],
     output_format: str,
+    *,
+    kind: str,
+    page: dict[str, object] | None = None,
+    meta: dict[str, object] | None = None,
 ) -> str:
     if output_format == "table":
         return _render_table(headers, rows)
     keys = [header.lower() for header in headers]
     data = [dict(zip(keys, row, strict=True)) for row in rows]
-    return json.dumps(data, sort_keys=True, separators=(",", ":"))
+    document = {
+        "schema_version": _JSON_SCHEMA_VERSION,
+        "kind": kind,
+        "data": data,
+        "page": page,
+        "meta": {} if meta is None else meta,
+    }
+    return json.dumps(document, sort_keys=True, separators=(",", ":"))
 
 
 def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
@@ -91,14 +104,19 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
             ("PROJECT_ID", "NAME", "CREATED_AT"),
             [(item.project_id, item.name, item.created_at) for item in projects],
             args.format,
+            kind="projects",
         )
     if args.resource == "runs":
+        query_limit = None if args.limit is None else args.limit + 1
         runs = client.list_runs(
             args.project_id,
             status=args.status,
-            limit=args.limit,
+            limit=query_limit,
             offset=args.offset,
         )
+        has_more = args.limit is not None and len(runs) > args.limit
+        if has_more:
+            runs = runs[: args.limit]
         return _render(
             ("RUN_ID", "PROJECT_ID", "NAME", "STATUS", "CREATED_AT"),
             [
@@ -106,28 +124,61 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
                 for item in runs
             ],
             args.format,
+            kind="runs",
+            page={
+                "offset": args.offset,
+                "limit": args.limit,
+                "returned": len(runs),
+                "has_more": has_more,
+            },
         )
     if args.action == "list":
         metrics = client.list_metrics(args.run_id)
         return _render_summaries(
-            metrics, include_metric_key=True, output_format=args.format
+            metrics,
+            include_metric_key=True,
+            output_format=args.format,
+            kind="metrics",
         )
     if args.action == "query":
-        points = client.query_metric(
-            args.run_id,
-            args.metric_key,
-            start_step=args.start_step,
-            end_step=args.end_step,
-            max_points=None if args.all else args.max_points,
-        )
+        max_points = None if args.all else args.max_points
+        meta = None
+        if args.format == "json":
+            points, source_row_count, downsampled = (
+                client._query_metric_with_metadata(
+                    args.run_id,
+                    args.metric_key,
+                    start_step=args.start_step,
+                    end_step=args.end_step,
+                    max_points=max_points,
+                )
+            )
+            meta = {
+                "source_row_count": source_row_count,
+                "returned_row_count": len(points),
+                "downsampled": downsampled,
+            }
+        else:
+            points = client.query_metric(
+                args.run_id,
+                args.metric_key,
+                start_step=args.start_step,
+                end_step=args.end_step,
+                max_points=max_points,
+            )
         return _render(
             ("STEP", "VALUE", "TIMESTAMP"),
             [(item.step, item.value_f64, item.timestamp) for item in points],
             args.format,
+            kind="metric_points",
+            meta=meta,
         )
     summaries = client.query_metric_summaries(args.run_ids, args.metric_key)
     return _render_summaries(
-        summaries, include_metric_key=False, output_format=args.format
+        summaries,
+        include_metric_key=False,
+        output_format=args.format,
+        kind="metric_summaries",
     )
 
 
@@ -136,6 +187,7 @@ def _render_summaries(
     *,
     include_metric_key: bool,
     output_format: str,
+    kind: str,
 ) -> str:
     headers = ["RUN_ID"]
     if include_metric_key:
@@ -156,7 +208,7 @@ def _render_summaries(
             )
         )
         rows.append(row)
-    return _render(headers, rows, output_format)
+    return _render(headers, rows, output_format, kind=kind)
 
 
 def _resolve_cli_path(
