@@ -12,6 +12,11 @@ pub struct NativeQueryStore<'connection> {
     connection: &'connection duckdb::Connection,
 }
 
+pub struct MetricQueryResult {
+    pub points: Vec<MetricPoint>,
+    pub source_row_count: u64,
+}
+
 impl<'connection> NativeQueryStore<'connection> {
     pub const fn new(connection: &'connection duckdb::Connection) -> Self {
         Self { connection }
@@ -33,8 +38,24 @@ impl<'connection> NativeQueryStore<'connection> {
         end_step: Option<Step>,
         max_points: Option<usize>,
     ) -> Result<Vec<MetricPoint>, EngineError> {
+        self.query_metric_with_metadata(run_id, metric_key, start_step, end_step, max_points)
+            .map(|result| result.points)
+    }
+
+    pub fn query_metric_with_metadata(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        start_step: Option<Step>,
+        end_step: Option<Step>,
+        max_points: Option<usize>,
+    ) -> Result<MetricQueryResult, EngineError> {
         let Some(max_points) = max_points else {
-            return self.query_metric_full(run_id, metric_key, start_step, end_step);
+            let points = self.query_metric_full(run_id, metric_key, start_step, end_step)?;
+            return Ok(MetricQueryResult {
+                source_row_count: points.len() as u64,
+                points,
+            });
         };
         if max_points < 2 {
             return Err(EngineError::MetricQueryMaxPointsTooSmall { max_points });
@@ -42,13 +63,27 @@ impl<'connection> NativeQueryStore<'connection> {
 
         let row_count = self.count_metric_effective(run_id, metric_key, start_step, end_step)?;
         if row_count <= max_points as u64 {
-            return self.query_metric_full(run_id, metric_key, start_step, end_step);
+            let points = self.query_metric_full(run_id, metric_key, start_step, end_step)?;
+            return Ok(MetricQueryResult {
+                source_row_count: points.len() as u64,
+                points,
+            });
         }
 
         let max_points_i64 = i64::try_from(max_points)
             .map_err(|_| EngineError::MetricQueryMaxPointsTooLarge { max_points })?;
         self.ensure_lttb_extension_loaded()?;
-        self.query_metric_downsampled(run_id, metric_key, start_step, end_step, max_points_i64)
+        let points = self.query_metric_downsampled(
+            run_id,
+            metric_key,
+            start_step,
+            end_step,
+            max_points_i64,
+        )?;
+        Ok(MetricQueryResult {
+            points,
+            source_row_count: row_count,
+        })
     }
 
     pub fn metric_aggregate(

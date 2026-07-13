@@ -317,14 +317,16 @@ mod tests {
         let metric_key = MetricKey::from_string("train/loss");
 
         // When
-        let points = query.query_metric(&run_id, &metric_key, None, None, Some(2))?;
+        let result = query.query_metric_with_metadata(&run_id, &metric_key, None, None, Some(2))?;
 
         // Then
-        let values: Vec<(i64, f64)> = points
+        let values: Vec<(i64, f64)> = result
+            .points
             .iter()
             .map(|point| (point.step.value(), point.value_f64))
             .collect();
         assert_eq!(values, vec![(i64::MAX - 3, 0.5), (i64::MAX, 0.0625),],);
+        assert_eq!(result.source_row_count, 4);
         Ok(())
     }
 

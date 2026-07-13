@@ -15,14 +15,14 @@ use crate::model::metric::{MetricAggregate, MetricPoint};
 #[pyclass(name = "ArrowTable", module = "pulseon._pulseon")]
 pub struct PyArrowTable {
     batch: RecordBatch,
-    source_row_count: usize,
+    source_row_count: u64,
     downsampled: bool,
 }
 
 impl PyArrowTable {
     pub fn from_metric_points(
         points: &[MetricPoint],
-        source_row_count: usize,
+        source_row_count: u64,
         downsampled: bool,
     ) -> Result<Self, ArrowError> {
         let schema = Arc::new(Schema::new(vec![
@@ -113,7 +113,7 @@ impl PyArrowTable {
         ];
         Ok(Self {
             batch: RecordBatch::try_new(schema, columns)?,
-            source_row_count: summaries.len(),
+            source_row_count: summaries.len() as u64,
             downsampled: false,
         })
     }
@@ -214,7 +214,7 @@ impl PyArrowTable {
     }
 
     #[getter]
-    const fn source_row_count(&self) -> usize {
+    const fn source_row_count(&self) -> u64 {
         self.source_row_count
     }
 

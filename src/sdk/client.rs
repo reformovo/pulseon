@@ -268,37 +268,21 @@ impl PyClient {
     ) -> PyResult<PyArrowTable> {
         let run_id = RunId::from_string(run_id);
         let metric_key = MetricKey::from_string(metric_key);
-        let source_points = self
+        let result = self
             ._inner
-            .query_metric(
+            .query_metric_with_metadata(
                 &run_id,
                 &metric_key,
                 start_step.map(Step::new),
                 end_step.map(Step::new),
-                None,
+                max_points,
             )
             .map_err(runtime_error)?;
-        let (points, source_row_count) = if max_points.is_some() {
-            let source_row_count = source_points.len();
-            let points = self
-                ._inner
-                .query_metric(
-                    &run_id,
-                    &metric_key,
-                    start_step.map(Step::new),
-                    end_step.map(Step::new),
-                    max_points,
-                )
-                .map_err(runtime_error)?;
-            (points, source_row_count)
-        } else {
-            let source_row_count = source_points.len();
-            (source_points, source_row_count)
-        };
-        let downsampled = points.len() < source_row_count;
-        PyArrowTable::from_metric_points(&points, source_row_count, downsampled).map_err(|error| {
-            PyRuntimeError::new_err(format!("failed to build Arrow table: {error}"))
-        })
+        let downsampled = (result.points.len() as u64) < result.source_row_count;
+        PyArrowTable::from_metric_points(&result.points, result.source_row_count, downsampled)
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("failed to build Arrow table: {error}"))
+            })
     }
 
     pub fn query_metric_summaries_table(
