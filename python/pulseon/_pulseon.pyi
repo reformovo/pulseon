@@ -16,6 +16,7 @@ class InvalidConfigurationError(PulseOnError): ...
 class StorageError(PulseOnError): ...
 
 class ArrowTable:
+    """An Arrow PyCapsule-compatible, dependency-free query result."""
     @property
     def row_count(self) -> int: ...
     @property
@@ -81,7 +82,8 @@ class Client:
         self, name: str, project_id: str | None = None
     ) -> Project: ...
     def get_project(self, project_id: str) -> Project: ...
-    def list_projects(self) -> list[Project]: ...
+    def list_projects(self) -> list[Project]:
+        """Lists projects in stable catalog order."""
     def create_run(
         self, project_id: str, name: str, run_id: str | None = None
     ) -> Run: ...
@@ -94,7 +96,8 @@ class Client:
         status: Literal["running", "finished", "failed"] | None = None,
         limit: int | None = None,
         offset: int = 0,
-    ) -> list[Run]: ...
+    ) -> list[Run]:
+        """Lists project runs in stable created order with pagination."""
     def list_orphan_runs(self, project_id: str | None = None) -> list[Run]: ...
     def finish_run(self, run_id: str, timeout: float | None = None) -> Run: ...
     def fail_run(self, run_id: str, timeout: float | None = None) -> Run: ...
@@ -113,7 +116,10 @@ class Client:
         end_step: int | None = None,
         max_points: int | None = None,
     ) -> list[MetricPoint]:
-        """Queries points in the half-open range [start_step, end_step)."""
+        """Queries persisted effective points in [start_step, end_step).
+
+        A finite max_points value must be at least 2.
+        """
     def _query_metric_with_metadata(
         self,
         run_id: str,
@@ -124,7 +130,8 @@ class Client:
     ) -> tuple[list[MetricPoint], int, bool]: ...
     def query_metric_summaries(
         self, run_ids: list[str], metric_key: str
-    ) -> list[MetricSummary]: ...
+    ) -> list[MetricSummary]:
+        """Compares persisted metric summaries in requested run order."""
     def query_metric_table(
         self,
         run_id: str,
@@ -133,11 +140,13 @@ class Client:
         end_step: int | None = None,
         max_points: int | None = None,
     ) -> ArrowTable:
-        """Queries an Arrow table in the range [start_step, end_step)."""
+        """Queries an Arrow table for the range [start_step, end_step)."""
     def query_metric_summaries_table(
         self, run_ids: list[str], metric_key: str
-    ) -> ArrowTable: ...
-    def list_metrics(self, run_id: str) -> list[MetricSummary]: ...
+    ) -> ArrowTable:
+        """Returns metric summaries through the Arrow PyCapsule protocol."""
+    def list_metrics(self, run_id: str) -> list[MetricSummary]:
+        """Lists metrics derived from persisted effective points."""
 
 def init(
     path: str | os.PathLike[str] = ".",
@@ -154,4 +163,8 @@ def init(
     s3_path_style: bool | None = None,
     s3_use_ssl: bool | None = None,
     _must_exist: bool = False,
-) -> Client: ...
+) -> Client:
+    """Opens a project client using explicit options or project config.
+
+    Relative paths read from project config resolve against the project root.
+    """

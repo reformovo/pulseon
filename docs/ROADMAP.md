@@ -89,16 +89,16 @@ the release.
 
 ### Phase 6: Release Gate
 
-- [ ] Add SDK, CLI, Arrow, local-backend, and opt-in MinIO coverage for the full
+- [x] Add SDK, CLI, Arrow, local-backend, and opt-in MinIO coverage for the full
   project-to-point discovery path, including running-run freshness, half-open
   ranges, pagination, empty Arrow schemas, structured errors, and missing-store
   behavior.
-- [ ] Update README examples, public type documentation, and 0.1.0a5 release
+- [x] Update README examples, public type documentation, and 0.1.0a5 release
   notes. Include migration notes for half-open ranges, config-relative paths,
   and `max_points < 2`.
-- [ ] Verify the public LTTB installation and configuration guidance against
+- [x] Verify the public LTTB installation and configuration guidance against
   the supported DuckDB extension version.
-- [ ] Run `cargo fmt --all --check`,
+- [x] Run `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
   `cargo check`, `cargo test`, `uv run maturin develop --uv`,
   `uv run pyright`, `uv run pytest`, the opt-in MinIO gates, and the release

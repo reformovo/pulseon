@@ -79,21 +79,33 @@ def test_table_queries_preserve_object_query_results(tmp_path: pathlib.Path) -> 
     assert '"arrow_array_stream"' in repr(summary_table.__arrow_c_stream__())
 
 
-def test_empty_metric_table_preserves_public_columns(tmp_path: pathlib.Path) -> None:
+def test_empty_arrow_tables_preserve_public_schemas(tmp_path: pathlib.Path) -> None:
     import pulseon
 
     client = pulseon.init(tmp_path / "pulseon")
-    table = client.query_metric_table("missing-run", "train/loss")
+    point_table = client.query_metric_table("missing-run", "train/loss")
+    summary_table = client.query_metric_summaries_table([], "train/loss")
 
-    assert table.row_count == 0
-    assert table.source_row_count == 0
-    assert table.column_names == [
+    assert point_table.row_count == 0
+    assert point_table.source_row_count == 0
+    assert point_table.column_names == [
         "run_id",
         "metric_key",
         "step",
         "timestamp",
         "value_f64",
         "ingested_at",
+    ]
+    assert summary_table.row_count == 0
+    assert summary_table.source_row_count == 0
+    assert summary_table.column_names == [
+        "run_id",
+        "metric_key",
+        "effective_count",
+        "last_step",
+        "last_value_f64",
+        "min_value_f64",
+        "max_value_f64",
     ]
 
 
