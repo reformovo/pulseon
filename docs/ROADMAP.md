@@ -82,7 +82,7 @@ the release.
   Reserve exit status 1 for operation failures and 2 for CLI usage failures.
 - [x] Add an opt-in MinIO/S3 metric-query benchmark covering realistic run,
   metric-key, file-count, and step-range selections for both catalog backends.
-- [ ] Measure repeated query latency, remote response bytes, and read
+- [x] Measure repeated query latency, remote response bytes, and read
   amplification. Treat reads from unrelated `run_id` or
   `metric_key_encoded` partitions as a gate failure; record environment-specific
   latency and amplification as the a5 baseline rather than absolute limits.
