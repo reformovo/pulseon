@@ -145,4 +145,5 @@ def init(
     s3_region: str | None = None,
     s3_path_style: bool | None = None,
     s3_use_ssl: bool | None = None,
+    _must_exist: bool = False,
 ) -> Client: ...
