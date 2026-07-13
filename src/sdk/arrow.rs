@@ -15,10 +15,16 @@ use crate::model::metric::{MetricAggregate, MetricPoint};
 #[pyclass(name = "ArrowTable", module = "pulseon._pulseon")]
 pub struct PyArrowTable {
     batch: RecordBatch,
+    source_row_count: usize,
+    downsampled: bool,
 }
 
 impl PyArrowTable {
-    pub fn from_metric_points(points: &[MetricPoint]) -> Result<Self, ArrowError> {
+    pub fn from_metric_points(
+        points: &[MetricPoint],
+        source_row_count: usize,
+        downsampled: bool,
+    ) -> Result<Self, ArrowError> {
         let schema = Arc::new(Schema::new(vec![
             Field::new("run_id", DataType::Utf8, false),
             Field::new("metric_key", DataType::Utf8, false),
@@ -67,6 +73,8 @@ impl PyArrowTable {
         ];
         Ok(Self {
             batch: RecordBatch::try_new(schema, columns)?,
+            source_row_count,
+            downsampled,
         })
     }
 
@@ -105,12 +113,39 @@ impl PyArrowTable {
         ];
         Ok(Self {
             batch: RecordBatch::try_new(schema, columns)?,
+            source_row_count: summaries.len(),
+            downsampled: false,
         })
     }
 }
 
 #[pymethods]
 impl PyArrowTable {
+    #[getter]
+    fn row_count(&self) -> usize {
+        self.batch.num_rows()
+    }
+
+    #[getter]
+    const fn source_row_count(&self) -> usize {
+        self.source_row_count
+    }
+
+    #[getter]
+    const fn downsampled(&self) -> bool {
+        self.downsampled
+    }
+
+    #[getter]
+    fn column_names(&self) -> Vec<&str> {
+        self.batch
+            .schema_ref()
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect()
+    }
+
     #[pyo3(signature = (_requested_schema=None))]
     fn __arrow_c_stream__<'py>(
         &self,

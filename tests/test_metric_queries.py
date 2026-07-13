@@ -58,6 +58,21 @@ def test_table_queries_preserve_object_query_results(tmp_path: pathlib.Path) -> 
     )
 
     assert [point.value_f64 for point in points] == [0.25]
+    assert point_table.row_count == 1
+    assert point_table.source_row_count == 1
+    assert point_table.downsampled is False
+    assert point_table.column_names == [
+        "run_id",
+        "metric_key",
+        "step",
+        "timestamp",
+        "value_f64",
+        "ingested_at",
+    ]
+    assert summary_table.row_count == 1
+    assert summary_table.source_row_count == 1
+    assert summary_table.downsampled is False
+    assert '"arrow_array_stream"' in repr(point_table.__arrow_c_stream__())
     assert '"arrow_array_stream"' in repr(point_table.__arrow_c_stream__())
     assert '"arrow_array_stream"' in repr(summary_table.__arrow_c_stream__())
 
