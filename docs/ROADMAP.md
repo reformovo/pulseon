@@ -93,7 +93,7 @@ the release.
   project-to-point discovery path, including running-run freshness, half-open
   ranges, pagination, empty Arrow schemas, structured errors, and missing-store
   behavior.
-- [ ] Update README examples, public type documentation, and 0.1.0a5 release
+- [x] Update README examples, public type documentation, and 0.1.0a5 release
   notes. Include migration notes for half-open ranges, config-relative paths,
   and `max_points < 2`.
 - [ ] Verify the public LTTB installation and configuration guidance against

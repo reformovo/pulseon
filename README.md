@@ -3,16 +3,14 @@
 PulseOn is a local-first training metrics tracker backed by Rust, PyO3, DuckDB,
 and DuckLake.
 
-Current alpha: 0.1.0a4 / v4 native storage loop:
+Upcoming alpha: 0.1.0a5 / v5 headless read surface:
 
-- create a project
-- start or resume a run
-- log explicit-step numeric metrics through a bounded async queue
-- query metric series and summaries locally
-- support local DuckDB-backed DuckLake catalog storage by default
-- support local SQLite-backed DuckLake catalog storage when requested
-- support local or S3-compatible Parquet data paths
-- keep Parquet as the long-term compatibility boundary
+- discover projects, runs, metrics, and persisted metric points
+- query running runs after reports have reached persistent storage
+- return Python objects or Arrow PyCapsule-compatible tables
+- inspect existing stores through a dependency-free, read-only CLI
+- use DuckDB or SQLite catalogs with local or S3-compatible Parquet data
+- keep the Parquet schema as the long-term compatibility boundary
 
 Quickstart:
 
@@ -24,7 +22,30 @@ project = client.create_project("local training")
 run = client.create_run(project.project_id, "baseline")
 run.log("train/loss", 0, 0.25)
 client.finish_run(run.run_id)
+
+projects = client.list_projects()
+runs = client.list_runs(project.project_id, status="finished", limit=20)
+metrics = client.list_metrics(run.run_id)
+points = client.query_metric(
+    run.run_id,
+    "train/loss",
+    start_step=0,
+    end_step=100,  # Exclusive: the query range is [0, 100).
+)
+table = client.query_metric_table(run.run_id, "train/loss")
 client.shutdown()
+```
+
+`ArrowTable` does not require PyArrow, pandas, or Polars. Consumers that support
+the Arrow PyCapsule protocol can import it through `__arrow_c_stream__`.
+
+The `pulseon` command opens an existing store and never creates a missing one:
+
+```console
+pulseon --path runs projects list
+pulseon --path runs runs list <project-id> --status finished --limit 20
+pulseon --path runs metrics list <run-id>
+pulseon --path runs --format json metrics query <run-id> train/loss --all
 ```
 
 By default, PulseOn stores local state under `./.pulseon`. Pass an explicit
@@ -39,7 +60,9 @@ The existing storage keywords remain available: `data_path`,
 must be a local filesystem path. `data_path` may be local, or it may use an
 S3-compatible URI such as `s3://bucket/prefix`.
 
-Project-local storage settings can live in `./.pulseon/config.toml`:
+Project-local storage settings can live in `./.pulseon/config.toml`. Relative
+`data_path` and `catalog_path` values in this file are resolved from the project
+root passed to `pulseon.init(...)` or `pulseon --path`:
 
 ```toml
 data_path = "s3://example-bucket/pulseon/demo"
