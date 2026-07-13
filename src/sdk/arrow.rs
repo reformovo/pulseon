@@ -119,6 +119,93 @@ impl PyArrowTable {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+    use duckdb::arrow::array::TimestampMillisecondArray;
+
+    use super::*;
+    use crate::model::metric::{MetricKey, Step};
+    use crate::model::run::RunId;
+
+    #[test]
+    fn metric_point_table_uses_public_schema_without_partition_key() -> Result<(), ArrowError> {
+        let table = PyArrowTable::from_metric_points(&[], 0, false)?;
+        let fields = table.batch.schema_ref().fields();
+        let actual: Vec<(&str, DataType)> = fields
+            .iter()
+            .map(|field| (field.name().as_str(), field.data_type().clone()))
+            .collect();
+
+        assert_eq!(
+            actual,
+            vec![
+                ("run_id", DataType::Utf8),
+                ("metric_key", DataType::Utf8),
+                ("step", DataType::Int64),
+                (
+                    "timestamp",
+                    DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
+                ),
+                ("value_f64", DataType::Float64),
+                (
+                    "ingested_at",
+                    DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
+                ),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn metric_summary_table_matches_public_query_model() -> Result<(), ArrowError> {
+        let table = PyArrowTable::from_metric_summaries(&[])?;
+        let actual: Vec<(&str, DataType)> = table
+            .batch
+            .schema_ref()
+            .fields()
+            .iter()
+            .map(|field| (field.name().as_str(), field.data_type().clone()))
+            .collect();
+
+        assert_eq!(
+            actual,
+            vec![
+                ("run_id", DataType::Utf8),
+                ("metric_key", DataType::Utf8),
+                ("effective_count", DataType::UInt64),
+                ("last_step", DataType::Int64),
+                ("last_value_f64", DataType::Float64),
+                ("min_value_f64", DataType::Float64),
+                ("max_value_f64", DataType::Float64),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn metric_point_table_stores_utc_millisecond_timestamps() -> Result<(), ArrowError> {
+        let timestamp = Utc.timestamp_millis_opt(1_750_000_000_123).unwrap();
+        let point = MetricPoint {
+            run_id: RunId::from_string("run-1"),
+            metric_key: MetricKey::from_string("train/loss"),
+            step: Step::new(7),
+            timestamp,
+            value_f64: 0.25,
+            ingested_at: timestamp,
+        };
+        let table = PyArrowTable::from_metric_points(&[point], 1, false)?;
+        let timestamps = table.batch.column(3);
+        let timestamps = timestamps
+            .as_any()
+            .downcast_ref::<TimestampMillisecondArray>()
+            .expect("timestamp column must use millisecond Arrow storage");
+
+        assert_eq!(timestamps.value(0), 1_750_000_000_123);
+        Ok(())
+    }
+}
+
 #[pymethods]
 impl PyArrowTable {
     #[getter]
