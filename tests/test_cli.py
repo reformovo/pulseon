@@ -9,9 +9,10 @@ import pathlib
 import pytest
 
 from pulseon import cli
+from tests import helpers
 
 
-def test_cli_exposes_all_read_commands(
+def test_cli_discovers_running_metric_points_through_all_read_commands(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -23,15 +24,42 @@ def test_cli_exposes_all_read_commands(
     project = client.create_project("training", project_id="project-1")
     run = client.create_run(project.project_id, "baseline", run_id="run-1")
     run.log("train/loss", 0, 0.5)
-    client.finish_run(run.run_id)
+    run.log("train/loss", 1, 0.25)
+    helpers.wait_for_metric_points(
+        client, run.run_id, "train/loss", expected_count=2
+    )
     client.shutdown()
     monkeypatch.chdir(root_path)
 
     commands = (
         (["projects", "list"], "project-1"),
-        (["runs", "list", "project-1"], "run-1"),
+        (
+            [
+                "runs",
+                "list",
+                "project-1",
+                "--status",
+                "running",
+                "--limit",
+                "1",
+            ],
+            "run-1",
+        ),
         (["metrics", "list", "run-1"], "train/loss"),
-        (["metrics", "query", "run-1", "train/loss"], "0.5"),
+        (
+            [
+                "metrics",
+                "query",
+                "run-1",
+                "train/loss",
+                "--start-step",
+                "0",
+                "--end-step",
+                "1",
+                "--all",
+            ],
+            "0.5",
+        ),
         (["metrics", "compare", "train/loss", "run-1"], "run-1"),
     )
     for argv, expected in commands:
@@ -47,6 +75,15 @@ def test_cli_exposes_all_read_commands(
         assert isinstance(document["data"], list)
         assert "page" in document
         assert "meta" in document
+        if kind == "runs":
+            assert document["page"] == {
+                "offset": 0,
+                "limit": 1,
+                "returned": 1,
+                "has_more": False,
+            }
+        if kind == "metric_points":
+            assert [point["step"] for point in document["data"]] == [0]
 
 
 def test_cli_missing_store_fails_without_creating_it(

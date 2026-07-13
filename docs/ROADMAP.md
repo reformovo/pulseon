@@ -89,7 +89,7 @@ the release.
 
 ### Phase 6: Release Gate
 
-- [ ] Add SDK, CLI, Arrow, local-backend, and opt-in MinIO coverage for the full
+- [x] Add SDK, CLI, Arrow, local-backend, and opt-in MinIO coverage for the full
   project-to-point discovery path, including running-run freshness, half-open
   ranges, pagination, empty Arrow schemas, structured errors, and missing-store
   behavior.

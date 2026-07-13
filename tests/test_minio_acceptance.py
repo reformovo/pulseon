@@ -58,6 +58,14 @@ def test_minio_s3_data_path_round_trips_catalog_backend(
     active_points = helpers.wait_for_metric_points(
         client, run.run_id, "train/loss", expected_count=2
     )
+    discovered_projects = client.list_projects()
+    discovered_runs = client.list_runs(
+        project.project_id, status="running", limit=1, offset=0
+    )
+    active_metrics = client.list_metrics(run.run_id)
+    ranged_points = client.query_metric(
+        run.run_id, "train/loss", start_step=0, end_step=1
+    )
     finished = client.finish_run(run.run_id)
     terminal_points = client.query_metric(run.run_id, "train/loss")
     summaries = client.query_metric_summaries([run.run_id], "train/loss")
@@ -75,6 +83,13 @@ def test_minio_s3_data_path_round_trips_catalog_backend(
     reopened.shutdown()
 
     assert [point.value_f64 for point in active_points] == [0.25, 0.125]
+    assert [item.project_id for item in discovered_projects] == ["project-1"]
+    assert [item.run_id for item in discovered_runs] == ["run-1"]
+    assert [metric.metric_key for metric in active_metrics] == [
+        "eval/accuracy",
+        "train/loss",
+    ]
+    assert [point.step for point in ranged_points] == [0]
     assert finished.status == "finished"
     assert [point.step for point in terminal_points] == [0, 1]
     assert [summary.effective_count for summary in summaries] == [2]

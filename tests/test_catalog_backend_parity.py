@@ -48,6 +48,13 @@ def test_catalog_backend_round_trips_native_storage_workflow(
         expected_count=1,
     )
     active_metrics = client.list_metrics(run.run_id)
+    discovered_projects = client.list_projects()
+    discovered_runs = client.list_runs(
+        project.project_id, status="running", limit=1, offset=0
+    )
+    ranged_points = client.query_metric(
+        run.run_id, "train/loss", start_step=0, end_step=1
+    )
     finished = client.finish_run(run.run_id)
     client.flush_run_data(run.run_id)
     terminal_points = client.query_metric(run.run_id, "train/loss")
@@ -69,6 +76,9 @@ def test_catalog_backend_round_trips_native_storage_workflow(
     reopened_points = reopened.query_metric(finished.run_id, "train/loss")
 
     assert [point.step for point in active_points] == [0, 1]
+    assert [item.project_id for item in discovered_projects] == ["project-1"]
+    assert [item.run_id for item in discovered_runs] == ["run-1"]
+    assert [point.step for point in ranged_points] == [0]
     assert [metric.metric_key for metric in active_metrics] == [
         "eval/accuracy",
         "train/loss",
