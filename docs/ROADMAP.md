@@ -41,16 +41,16 @@ the release.
 
 ### Phase 3: Arrow-compatible Python Results
 
-- [ ] Preserve the existing Python object-list query APIs and add
+- [x] Preserve the existing Python object-list query APIs and add
   `query_metric_table(...)` and `query_metric_summaries_table(...)` returning an
   Arrow PyCapsule-compatible `ArrowTable`.
-- [ ] Expose table row counts, source row counts, downsampling state, column
+- [x] Expose table row counts, source row counts, downsampling state, column
   names, and `__arrow_c_stream__` without requiring pyarrow, pandas, or Polars
   as runtime dependencies.
-- [ ] Keep metric-point columns aligned with the public query model and Parquet
+- [x] Keep metric-point columns aligned with the public query model and Parquet
   contract without exposing storage-only `metric_key_encoded`; expose timestamps
   as UTC millisecond Arrow timestamps.
-- [ ] Update `python/pulseon/_pulseon.pyi`, package exports, and type-check tests
+- [x] Update `python/pulseon/_pulseon.pyi`, package exports, and type-check tests
   for every new public Python class and method.
 
 ### Phase 4: Existing-store Configuration and Read-only CLI
