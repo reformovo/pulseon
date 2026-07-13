@@ -11,6 +11,7 @@ use crate::engine::reporting::MetricReporterDiagnostics;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
+use crate::sdk::arrow::PyArrowTable;
 use crate::sdk::config::{InitConfigError, S3ConnectionOverrides, resolve_init_config};
 
 create_exception!(
@@ -254,6 +255,51 @@ impl PyClient {
             .query_metric_summaries(&run_ids, &metric_key)
             .map(|summaries| summaries.into_iter().map(PyMetricSummary::from).collect())
             .map_err(runtime_error)
+    }
+
+    #[pyo3(signature = (run_id, metric_key, start_step=None, end_step=None, max_points=None))]
+    pub fn query_metric_table(
+        &self,
+        run_id: &str,
+        metric_key: &str,
+        start_step: Option<i64>,
+        end_step: Option<i64>,
+        max_points: Option<usize>,
+    ) -> PyResult<PyArrowTable> {
+        let run_id = RunId::from_string(run_id);
+        let metric_key = MetricKey::from_string(metric_key);
+        let result = self
+            ._inner
+            .query_metric_with_metadata(
+                &run_id,
+                &metric_key,
+                start_step.map(Step::new),
+                end_step.map(Step::new),
+                max_points,
+            )
+            .map_err(runtime_error)?;
+        let downsampled = (result.points.len() as u64) < result.source_row_count;
+        PyArrowTable::from_metric_points(&result.points, result.source_row_count, downsampled)
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("failed to build Arrow table: {error}"))
+            })
+    }
+
+    pub fn query_metric_summaries_table(
+        &self,
+        run_ids: Vec<String>,
+        metric_key: &str,
+    ) -> PyResult<PyArrowTable> {
+        let run_ids: Vec<RunId> = run_ids.into_iter().map(RunId::from_string).collect();
+        let metric_key = MetricKey::from_string(metric_key);
+        self._inner
+            .query_metric_summaries(&run_ids, &metric_key)
+            .map_err(runtime_error)
+            .and_then(|summaries| {
+                PyArrowTable::from_metric_summaries(&summaries).map_err(|error| {
+                    PyRuntimeError::new_err(format!("failed to build Arrow table: {error}"))
+                })
+            })
     }
 
     pub fn list_metrics(&self, run_id: &str) -> PyResult<Vec<PyMetricSummary>> {

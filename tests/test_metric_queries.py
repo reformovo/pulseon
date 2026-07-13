@@ -42,6 +42,61 @@ def test_client_queries_metric_points_and_terminal_summaries(
     assert diagnostics.last_write_error is None
 
 
+def test_table_queries_preserve_object_query_results(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    run.log("train/loss", 0, 0.25)
+    helpers.wait_for_metric_points(client, run.run_id, "train/loss", expected_count=1)
+
+    points = client.query_metric(run.run_id, "train/loss")
+    point_table = client.query_metric_table(run.run_id, "train/loss")
+    summary_table = client.query_metric_summaries_table(
+        [run.run_id], "train/loss"
+    )
+
+    assert [point.value_f64 for point in points] == [0.25]
+    assert point_table.row_count == 1
+    assert point_table.source_row_count == 1
+    assert point_table.downsampled is False
+    assert point_table.column_names == [
+        "run_id",
+        "metric_key",
+        "step",
+        "timestamp",
+        "value_f64",
+        "ingested_at",
+    ]
+    assert summary_table.row_count == 1
+    assert summary_table.source_row_count == 1
+    assert summary_table.downsampled is False
+    assert '"arrow_array_stream"' in repr(point_table.__arrow_c_stream__())
+    assert '"arrow_array_stream"' in repr(
+        point_table.__arrow_c_stream__(requested_schema=None)
+    )
+    assert '"arrow_array_stream"' in repr(summary_table.__arrow_c_stream__())
+
+
+def test_empty_metric_table_preserves_public_columns(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    table = client.query_metric_table("missing-run", "train/loss")
+
+    assert table.row_count == 0
+    assert table.source_row_count == 0
+    assert table.column_names == [
+        "run_id",
+        "metric_key",
+        "step",
+        "timestamp",
+        "value_f64",
+        "ingested_at",
+    ]
+
+
 def test_active_run_discovery_and_summaries_use_persisted_points(
     tmp_path: pathlib.Path,
 ) -> None:

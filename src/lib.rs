@@ -19,6 +19,7 @@ use pyo3::prelude::*;
 #[pymodule]
 fn _pulseon(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
+    m.add_class::<sdk::arrow::PyArrowTable>()?;
     m.add_class::<sdk::client::PyClient>()?;
     m.add_class::<sdk::client::PyDiagnostics>()?;
     m.add_class::<sdk::client::PyMetricPoint>()?;

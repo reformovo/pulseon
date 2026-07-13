@@ -7,6 +7,7 @@ from typing import Literal
 
 from pulseon import _pulseon
 
+ArrowTable = _pulseon.ArrowTable
 Client = _pulseon.Client
 ClientClosedError = _pulseon.ClientClosedError
 Diagnostics = _pulseon.Diagnostics
@@ -60,6 +61,7 @@ def init(
 
 
 __all__ = [
+    "ArrowTable",
     "Client",
     "ClientClosedError",
     "Diagnostics",

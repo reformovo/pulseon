@@ -459,6 +459,19 @@ impl NativeClient {
             .query_metric(run_id, metric_key, start_step, end_step, max_points)
     }
 
+    pub fn query_metric_with_metadata(
+        &self,
+        run_id: &RunId,
+        metric_key: &MetricKey,
+        start_step: Option<Step>,
+        end_step: Option<Step>,
+        max_points: Option<usize>,
+    ) -> Result<crate::engine::query::MetricQueryResult, EngineError> {
+        let connection = self.connection()?;
+        NativeQueryStore::new(&connection)
+            .query_metric_with_metadata(run_id, metric_key, start_step, end_step, max_points)
+    }
+
     pub fn query_metric_summaries(
         &self,
         run_ids: &[RunId],
