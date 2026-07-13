@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 
 import pytest
@@ -185,6 +186,40 @@ def test_cli_json_includes_pagination_and_metric_query_metadata(
         "downsampled": False,
     }
     assert query_document["data"][0]["step"] == 0
+
+
+def test_cli_json_normalizes_non_finite_metric_values(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("training", project_id="project-1")
+    run = client.create_run(project.project_id, "non-finite", run_id="run-1")
+    for step, value in enumerate((math.nan, math.inf, -math.inf)):
+        run.log("loss", step, value)
+    client.finish_run(run.run_id)
+    client.shutdown()
+
+    global_args = ["--path", str(root_path), "--format", "json"]
+    assert cli.main(
+        [*global_args, "metrics", "query", "run-1", "loss", "--all"]
+    ) == 0
+    query = json.loads(capsys.readouterr().out)
+    assert [row["value"] for row in query["data"]] == [
+        "NaN",
+        "Infinity",
+        "-Infinity",
+    ]
+
+    assert cli.main([*global_args, "metrics", "list", "run-1"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert all(
+        not isinstance(value, float) or math.isfinite(value)
+        for value in summary["data"][0].values()
+    )
 
 
 def test_cli_preserves_symlinked_project_path(

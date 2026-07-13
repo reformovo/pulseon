@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import contextlib
 import io
 import json
+import math
 import pathlib
 import sys
 
@@ -112,7 +113,25 @@ def _render_error(code: str, message: str) -> str:
         "schema_version": _JSON_SCHEMA_VERSION,
         "error": {"code": code, "message": message},
     }
-    return json.dumps(document, sort_keys=True, separators=(",", ":"))
+    return _dump_json(document)
+
+
+def _dump_json(document: object) -> str:
+    return json.dumps(
+        document,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _json_scalar(value: object) -> object:
+    """Returns a standard-JSON representation for a scalar value."""
+    if not isinstance(value, float) or math.isfinite(value):
+        return value
+    if math.isnan(value):
+        return "NaN"
+    return "Infinity" if value > 0 else "-Infinity"
 
 
 def _render_table(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> str:
@@ -141,7 +160,13 @@ def _render(
     if output_format == "table":
         return _render_table(headers, rows)
     keys = [header.lower() for header in headers]
-    data = [dict(zip(keys, row, strict=True)) for row in rows]
+    data = [
+        {
+            key: _json_scalar(value)
+            for key, value in zip(keys, row, strict=True)
+        }
+        for row in rows
+    ]
     document = {
         "schema_version": _JSON_SCHEMA_VERSION,
         "kind": kind,
@@ -149,7 +174,7 @@ def _render(
         "page": page,
         "meta": {} if meta is None else meta,
     }
-    return json.dumps(document, sort_keys=True, separators=(",", ":"))
+    return _dump_json(document)
 
 
 def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
