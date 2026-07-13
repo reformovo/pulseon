@@ -159,6 +159,31 @@ def test_init_catalog_keywords_override_config(tmp_path: pathlib.Path) -> None:
     assert not configured_path.exists()
 
 
+def test_init_resolves_configured_relative_storage_paths_from_project_root(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    _write_project_config(
+        root_path,
+        'catalog_backend = "sqlite"\n'
+        'catalog_path = "storage/catalog.sqlite"\n'
+        'data_path = "storage/data"\n',
+    )
+    unrelated_path = tmp_path / "unrelated"
+    unrelated_path.mkdir()
+    monkeypatch.chdir(unrelated_path)
+
+    client = pulseon.init(root_path)
+    project = client.create_project("local training", project_id="project-1")
+
+    assert project.project_id == "project-1"
+    assert (root_path / "storage" / "catalog.sqlite").is_file()
+    assert (root_path / "storage" / "data").is_dir()
+    assert not (unrelated_path / "storage").exists()
+
+
 def test_init_data_path_keyword_ignores_configured_s3(
     tmp_path: pathlib.Path,
 ) -> None:

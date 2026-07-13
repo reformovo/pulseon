@@ -54,9 +54,9 @@ pub(crate) fn resolve_init_config(
     s3_overrides: S3ConnectionOverrides,
 ) -> Result<ResolvedInitConfig, InitConfigError> {
     let config = load_project_config(root_path)?;
-    let data_path = resolve_data_path(data_path, config.as_ref())?;
+    let data_path = resolve_data_path(root_path, data_path, config.as_ref())?;
     let catalog_backend = resolve_catalog_backend(catalog_backend, config.as_ref())?;
-    let catalog_path = resolve_catalog_path(catalog_path, config.as_ref())?;
+    let catalog_path = resolve_catalog_path(root_path, catalog_path, config.as_ref())?;
     validate_path_configuration(data_path.as_deref(), catalog_path.as_deref())?;
 
     let metric_queue_capacity = validate_metric_queue_capacity(metric_queue_capacity)?;
@@ -89,6 +89,7 @@ fn load_project_config(root_path: &Path) -> Result<Option<Table>, InitConfigErro
 }
 
 fn resolve_data_path(
+    root_path: &Path,
     explicit: Option<PathBuf>,
     config: Option<&Table>,
 ) -> Result<Option<PathBuf>, InitConfigError> {
@@ -98,7 +99,12 @@ fn resolve_data_path(
     config
         .map(|config| optional_string(config, "data_path", "config.toml data_path"))
         .transpose()
-        .map(|value| value.flatten().map(PathBuf::from))
+        .map(|value| {
+            value
+                .flatten()
+                .map(PathBuf::from)
+                .map(|path| resolve_config_path(root_path, path))
+        })
 }
 
 fn resolve_catalog_backend(
@@ -119,6 +125,7 @@ fn resolve_catalog_backend(
 }
 
 fn resolve_catalog_path(
+    root_path: &Path,
     explicit: Option<PathBuf>,
     config: Option<&Table>,
 ) -> Result<Option<PathBuf>, InitConfigError> {
@@ -128,7 +135,20 @@ fn resolve_catalog_path(
     config
         .map(|config| optional_string(config, "catalog_path", "config.toml catalog_path"))
         .transpose()
-        .map(|value| value.flatten().map(PathBuf::from))
+        .map(|value| {
+            value
+                .flatten()
+                .map(PathBuf::from)
+                .map(|path| resolve_config_path(root_path, path))
+        })
+}
+
+fn resolve_config_path(root_path: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() || is_uri_path(&path) {
+        path
+    } else {
+        root_path.join(path)
+    }
 }
 
 fn validate_path_configuration(
@@ -380,8 +400,12 @@ mod tests {
 
         let backend = resolve_catalog_backend(Some("duckdb"), Some(&config))
             .expect("explicit catalog backend should resolve");
-        let path = resolve_catalog_path(Some(PathBuf::from("explicit/catalog.db")), Some(&config))
-            .expect("explicit catalog path should resolve");
+        let path = resolve_catalog_path(
+            Path::new("project"),
+            Some(PathBuf::from("explicit/catalog.db")),
+            Some(&config),
+        )
+        .expect("explicit catalog path should resolve");
 
         assert_eq!(backend, CatalogBackend::DuckDb);
         assert_eq!(path, Some(PathBuf::from("explicit/catalog.db")));
@@ -398,7 +422,7 @@ mod tests {
 
         let configured_backend = resolve_catalog_backend(None, Some(&config))
             .expect("configured catalog backend should resolve");
-        let configured_path = resolve_catalog_path(None, Some(&config))
+        let configured_path = resolve_catalog_path(Path::new("project"), None, Some(&config))
             .expect("configured catalog path should resolve");
         let default_backend =
             resolve_catalog_backend(None, None).expect("default catalog backend should resolve");
@@ -406,7 +430,7 @@ mod tests {
         assert_eq!(configured_backend, CatalogBackend::Sqlite);
         assert_eq!(
             configured_path,
-            Some(PathBuf::from("configured/catalog.sqlite"))
+            Some(PathBuf::from("project/configured/catalog.sqlite"))
         );
         assert_eq!(default_backend, CatalogBackend::DuckDb);
     }
