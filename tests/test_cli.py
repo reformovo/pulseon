@@ -153,6 +153,28 @@ def test_cli_metric_query_point_limits_are_mutually_exclusive() -> None:
     assert error_info.value.code == 2
 
 
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["runs", "list", "project-1", "--limit", "-1"],
+        ["runs", "list", "project-1", "--offset", "-1"],
+        ["metrics", "query", "run-1", "loss", "--max-points", "-1"],
+    ),
+    ids=("limit", "offset", "max-points"),
+)
+def test_cli_rejects_negative_unsigned_arguments(
+    argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as error_info:
+        cli.main(argv)
+
+    assert error_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "expected a non-negative integer" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_cli_table_output_is_deterministic_and_uncolored() -> None:
     first = cli._render_table(("STEP", "VALUE"), ((0, 0.5), (10, 0.25)))
     second = cli._render_table(("STEP", "VALUE"), ((0, 0.5), (10, 0.25)))

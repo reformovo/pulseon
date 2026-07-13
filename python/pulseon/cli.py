@@ -11,6 +11,16 @@ import sys
 from pulseon import _pulseon
 
 
+def _non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("expected a non-negative integer") from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("expected a non-negative integer")
+    return parsed
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pulseon")
     parser.add_argument("--path", type=pathlib.Path, default=pathlib.Path("."))
@@ -27,8 +37,8 @@ def _build_parser() -> argparse.ArgumentParser:
     runs_list = runs.add_subparsers(dest="action", required=True).add_parser("list")
     runs_list.add_argument("project_id")
     runs_list.add_argument("--status", choices=("running", "finished", "failed"))
-    runs_list.add_argument("--limit", type=int)
-    runs_list.add_argument("--offset", type=int, default=0)
+    runs_list.add_argument("--limit", type=_non_negative_int)
+    runs_list.add_argument("--offset", type=_non_negative_int, default=0)
 
     metrics = resources.add_parser("metrics")
     metric_actions = metrics.add_subparsers(dest="action", required=True)
@@ -40,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     metrics_query.add_argument("--start-step", type=int)
     metrics_query.add_argument("--end-step", type=int)
     point_limit = metrics_query.add_mutually_exclusive_group()
-    point_limit.add_argument("--max-points", type=int, default=200)
+    point_limit.add_argument("--max-points", type=_non_negative_int, default=200)
     point_limit.add_argument("--all", action="store_true")
     metrics_compare = metric_actions.add_parser("compare")
     metrics_compare.add_argument("metric_key")
