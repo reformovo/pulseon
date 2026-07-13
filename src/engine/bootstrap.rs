@@ -178,14 +178,29 @@ pub(crate) fn open_native_connection(root_path: &Path) -> Result<duckdb::Connect
 pub(crate) fn open_native_connection_with_config(
     config: NativeStorageConfig,
 ) -> Result<duckdb::Connection, EngineError> {
-    if let Some(catalog_parent) = config.catalog_path.parent() {
+    open_native_connection_with_mode(config, false)
+}
+
+pub(crate) fn open_existing_native_connection_with_config(
+    config: NativeStorageConfig,
+) -> Result<duckdb::Connection, EngineError> {
+    open_native_connection_with_mode(config, true)
+}
+
+fn open_native_connection_with_mode(
+    config: NativeStorageConfig,
+    must_exist: bool,
+) -> Result<duckdb::Connection, EngineError> {
+    if must_exist {
+        verify_catalog_exists(&config.catalog_path)?;
+    } else if let Some(catalog_parent) = config.catalog_path.parent() {
         std::fs::create_dir_all(catalog_parent).map_err(|source| EngineError::Storage {
             operation: "creating catalog directory",
             name: path_basename(catalog_parent),
             source,
         })?;
     }
-    if !is_s3_data_path(&config.data_path) {
+    if !must_exist && !is_s3_data_path(&config.data_path) {
         std::fs::create_dir_all(&config.data_path).map_err(|source| EngineError::Storage {
             operation: "creating data directory",
             name: path_basename(&config.data_path),
@@ -205,8 +220,26 @@ pub(crate) fn open_native_connection_with_config(
         &config.data_path,
     )?;
     setup_catalog_adapter(&connection, config.catalog_backend, &config.catalog_path)?;
-    create_v1_tables(&connection)?;
+    if !must_exist {
+        create_v1_tables(&connection)?;
+    }
     Ok(connection)
+}
+
+fn verify_catalog_exists(catalog_path: &Path) -> Result<(), EngineError> {
+    match std::fs::metadata(catalog_path) {
+        Ok(_) => Ok(()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            Err(EngineError::CatalogNotFound {
+                name: path_basename(catalog_path),
+            })
+        }
+        Err(source) => Err(EngineError::Storage {
+            operation: "checking catalog",
+            name: path_basename(catalog_path),
+            source,
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -394,6 +427,23 @@ mod tests {
     #[test]
     fn sql_string_literal_escapes_single_quotes() {
         assert_eq!(sql_string_literal("canary's/data"), "'canary''s/data'");
+    }
+
+    #[test]
+    fn existing_connection_rejects_missing_catalog_without_creating_store() {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-missing-{}", uuid::Uuid::new_v4()));
+        let config = NativeStorageConfig::duckdb(&root_path, None, None);
+
+        let error = open_existing_native_connection_with_config(config)
+            .expect_err("missing catalog should fail");
+
+        assert!(
+            matches!(error, EngineError::CatalogNotFound { .. }),
+            "expected missing catalog error, got {error:?}",
+        );
+        assert_eq!(error.to_string(), "catalog not found: catalog.ducklake");
+        assert!(!root_path.exists());
     }
 
     #[test]

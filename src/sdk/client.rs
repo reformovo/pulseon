@@ -500,6 +500,7 @@ impl From<MetricAggregate> for PyMetricSummary {
         s3_region=None,
         s3_path_style=None,
         s3_use_ssl=None,
+        _must_exist=false,
     )
 )]
 #[expect(
@@ -519,6 +520,7 @@ pub fn init(
     s3_region: Option<String>,
     s3_path_style: Option<bool>,
     s3_use_ssl: Option<bool>,
+    _must_exist: bool,
 ) -> PyResult<PyClient> {
     let init_config = resolve_init_config(
         &path,
@@ -537,16 +539,26 @@ pub fn init(
         },
     )
     .map_err(invalid_configuration_error)?;
-    NativeClient::open_with_catalog_backend_storage_config(
-        path,
-        init_config.catalog_backend,
-        init_config.catalog_path,
-        init_config.data_path,
-        init_config.s3_connection,
-        init_config.metric_queue_capacity,
-    )
-    .map(PyClient::new)
-    .map_err(runtime_error)
+    let client = if _must_exist {
+        NativeClient::open_existing_with_catalog_backend_storage_config(
+            path,
+            init_config.catalog_backend,
+            init_config.catalog_path,
+            init_config.data_path,
+            init_config.s3_connection,
+            init_config.metric_queue_capacity,
+        )
+    } else {
+        NativeClient::open_with_catalog_backend_storage_config(
+            path,
+            init_config.catalog_backend,
+            init_config.catalog_path,
+            init_config.data_path,
+            init_config.s3_connection,
+            init_config.metric_queue_capacity,
+        )
+    };
+    client.map(PyClient::new).map_err(runtime_error)
 }
 
 fn invalid_configuration_error(error: InitConfigError) -> PyErr {
@@ -590,6 +602,7 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         | crate::engine::EngineError::ProjectNotFound { .. }
         | crate::engine::EngineError::RunNotFound { .. }
         | crate::engine::EngineError::LttbExtensionUnavailable { .. }
+        | crate::engine::EngineError::CatalogNotFound { .. }
         | crate::engine::EngineError::Storage { .. }
         | crate::engine::EngineError::StorageDuckDb { .. } => StorageError::new_err(message),
         crate::engine::EngineError::MetricQueryMaxPointsTooSmall { .. }
