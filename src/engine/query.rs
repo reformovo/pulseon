@@ -341,15 +341,15 @@ impl<'connection> NativeQueryStore<'connection> {
             return Ok(());
         }
 
+        if let Some(path) = std::env::var_os(LTTB_EXTENSION_PATH_ENV) {
+            return self.load_lttb_extension_from_path(Path::new(&path));
+        }
+
         let load_error = match self.connection.execute_batch("LOAD lttb;") {
             Ok(()) if self.lttb_function_available() => return Ok(()),
             Ok(()) => None,
             Err(source) => Some(source.to_string()),
         };
-
-        if let Some(path) = std::env::var_os(LTTB_EXTENSION_PATH_ENV) {
-            return self.load_lttb_extension_from_path(Path::new(&path));
-        }
 
         if lttb_auto_install_allowed(std::env::var_os(LTTB_AUTO_INSTALL_ENV).as_deref()) {
             return self.install_and_load_lttb_extension();

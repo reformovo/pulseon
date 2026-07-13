@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 
 import pytest
@@ -37,6 +38,16 @@ def test_cli_exposes_all_read_commands(
         assert cli.main(argv) == 0
         assert expected in capsys.readouterr().out
 
+    kinds = ("projects", "runs", "metrics", "metric_points", "metric_summaries")
+    for (argv, _), kind in zip(commands, kinds, strict=True):
+        assert cli.main(["--format", "json", *argv]) == 0
+        document = json.loads(capsys.readouterr().out)
+        assert document["schema_version"] == 1
+        assert document["kind"] == kind
+        assert isinstance(document["data"], list)
+        assert "page" in document
+        assert "meta" in document
+
 
 def test_cli_missing_store_fails_without_creating_it(
     tmp_path: pathlib.Path,
@@ -53,6 +64,29 @@ def test_cli_missing_store_fails_without_creating_it(
     assert captured.out == ""
     assert captured.err == "catalog not found: catalog.ducklake\n"
     assert not (root_path / ".pulseon").exists()
+
+
+def test_cli_json_operation_errors_are_structured(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root_path = tmp_path / "missing"
+    root_path.mkdir()
+
+    status = cli.main(
+        ["--path", str(root_path), "--format", "json", "projects", "list"]
+    )
+
+    assert status == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "schema_version": 1,
+        "error": {
+            "code": "storage_error",
+            "message": "catalog not found: catalog.ducklake",
+        },
+    }
 
 
 def test_cli_resolves_global_path_overrides_against_project(
@@ -91,13 +125,101 @@ def test_cli_resolves_global_path_overrides_against_project(
     )
 
     assert status == 0
-    assert json.loads(capsys.readouterr().out) == [
-        {
-            "created_at": project.created_at,
-            "name": "training",
-            "project_id": "project-1",
-        }
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": 1,
+        "kind": "projects",
+        "data": [
+            {
+                "created_at": project.created_at,
+                "name": "training",
+                "project_id": "project-1",
+            }
+        ],
+        "page": None,
+        "meta": {},
+    }
+
+
+def test_cli_json_includes_pagination_and_metric_query_metadata(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("training", project_id="project-1")
+    first_run = client.create_run(project.project_id, "first", run_id="run-1")
+    first_run.log("loss", 0, 0.5)
+    client.finish_run(first_run.run_id)
+    second_run = client.create_run(project.project_id, "second", run_id="run-2")
+    second_run.log("loss", 0, 0.25)
+    client.finish_run(second_run.run_id)
+    client.shutdown()
+
+    global_args = ["--path", str(root_path), "--format", "json"]
+    assert cli.main(
+        [*global_args, "runs", "list", "project-1", "--limit", "1"]
+    ) == 0
+    runs_document = json.loads(capsys.readouterr().out)
+    assert runs_document["schema_version"] == 1
+    assert runs_document["kind"] == "runs"
+    assert len(runs_document["data"]) == 1
+    assert runs_document["page"] == {
+        "offset": 0,
+        "limit": 1,
+        "returned": 1,
+        "has_more": True,
+    }
+    assert runs_document["meta"] == {}
+
+    assert cli.main(
+        [*global_args, "metrics", "query", "run-1", "loss"]
+    ) == 0
+    query_document = json.loads(capsys.readouterr().out)
+    assert query_document["schema_version"] == 1
+    assert query_document["kind"] == "metric_points"
+    assert query_document["page"] is None
+    assert query_document["meta"] == {
+        "source_row_count": 1,
+        "returned_row_count": 1,
+        "downsampled": False,
+    }
+    assert query_document["data"][0]["step"] == 0
+
+
+def test_cli_json_normalizes_non_finite_metric_values(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("training", project_id="project-1")
+    run = client.create_run(project.project_id, "non-finite", run_id="run-1")
+    for step, value in enumerate((math.nan, math.inf, -math.inf)):
+        run.log("loss", step, value)
+    client.finish_run(run.run_id)
+    client.shutdown()
+
+    global_args = ["--path", str(root_path), "--format", "json"]
+    assert cli.main(
+        [*global_args, "metrics", "query", "run-1", "loss", "--all"]
+    ) == 0
+    query = json.loads(capsys.readouterr().out)
+    assert [row["value"] for row in query["data"]] == [
+        "NaN",
+        "Infinity",
+        "-Infinity",
     ]
+
+    assert cli.main([*global_args, "metrics", "list", "run-1"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert all(
+        not isinstance(value, float) or math.isfinite(value)
+        for value in summary["data"][0].values()
+    )
 
 
 def test_cli_preserves_symlinked_project_path(
@@ -175,6 +297,33 @@ def test_cli_rejects_negative_unsigned_arguments(
     assert "Traceback" not in captured.err
 
 
+def test_cli_json_usage_errors_are_structured(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as error_info:
+        cli.main(
+            [
+                "--format",
+                "json",
+                "metrics",
+                "query",
+                "run-1",
+                "loss",
+                "--max-points",
+                "-1",
+            ]
+        )
+
+    assert error_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    document = json.loads(captured.err)
+    assert document["schema_version"] == 1
+    assert document["error"]["code"] == "cli_usage_error"
+    assert "expected a non-negative integer" in document["error"]["message"]
+    assert "usage:" not in captured.err
+
+
 def test_cli_table_output_is_deterministic_and_uncolored() -> None:
     first = cli._render_table(("STEP", "VALUE"), ((0, 0.5), (10, 0.25)))
     second = cli._render_table(("STEP", "VALUE"), ((0, 0.5), (10, 0.25)))
@@ -214,6 +363,8 @@ def test_cli_sanitizes_config_credentials_and_catalog_paths(
         [
             "--path",
             str(root_path),
+            "--format",
+            "json",
             "--catalog-path",
             str(private_catalog),
             "projects",
@@ -223,6 +374,52 @@ def test_cli_sanitizes_config_credentials_and_catalog_paths(
 
     assert status == 1
     error = capsys.readouterr().err
-    assert error == "catalog not found: catalog.ducklake\n"
+    document = json.loads(error)
+    assert document["error"] == {
+        "code": "storage_error",
+        "message": "catalog not found: catalog.ducklake",
+    }
     assert secret not in error
     assert str(private_catalog.parent) not in error
+
+
+def test_cli_json_sanitizes_lttb_extension_path(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("training", project_id="project-1")
+    run = client.create_run(project.project_id, "long", run_id="run-1")
+    for step in range(201):
+        run.log("loss", step, float(step))
+    client.finish_run(run.run_id)
+    client.shutdown()
+    private_extension = (
+        tmp_path / "private" / "tenant" / "missing-lttb.duckdb_extension"
+    )
+    monkeypatch.setenv("PULSEON_LTTB_EXTENSION_PATH", str(private_extension))
+
+    status = cli.main(
+        [
+            "--path",
+            str(root_path),
+            "--format",
+            "json",
+            "metrics",
+            "query",
+            "run-1",
+            "loss",
+        ]
+    )
+
+    assert status == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["code"] == "storage_error"
+    assert private_extension.name in error["message"]
+    assert str(private_extension.parent) not in captured.err
