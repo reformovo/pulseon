@@ -101,7 +101,8 @@ class Client:
         start_step: int | None = None,
         end_step: int | None = None,
         max_points: int | None = None,
-    ) -> list[MetricPoint]: ...
+    ) -> list[MetricPoint]:
+        """Queries points in the half-open range [start_step, end_step)."""
     def query_metric_summaries(
         self, run_ids: list[str], metric_key: str
     ) -> list[MetricSummary]: ...

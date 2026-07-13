@@ -469,28 +469,9 @@ impl NativeClient {
     }
 
     pub fn list_metrics(&self, run_id: &RunId) -> Result<Vec<MetricAggregate>, EngineError> {
-        self.get_run(run_id)?;
+        let run = self.get_run(run_id)?;
         let connection = self.connection()?;
-        let mut statement = connection.prepare(
-            "SELECT run_id, metric_key, effective_count, last_step, last_value_f64,
-                    min_value_f64, max_value_f64
-             FROM pulseon_metric_aggregates
-             WHERE run_id = ?
-             ORDER BY metric_key",
-        )?;
-        let rows = statement.query_map([run_id.as_str()], |row| {
-            Ok(MetricAggregate {
-                run_id: RunId::from_string(row.get::<_, String>(0)?),
-                metric_key: MetricKey::from_string(row.get::<_, String>(1)?),
-                effective_count: row.get(2)?,
-                last_step: Step::new(row.get(3)?),
-                last_value_f64: row.get(4)?,
-                min_value_f64: row.get(5)?,
-                max_value_f64: row.get(6)?,
-            })
-        })?;
-
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        NativeQueryStore::new(&connection).list_metrics(run_id, run.status)
     }
 
     fn project_exists(&self, project_id: &ProjectId) -> Result<bool, EngineError> {

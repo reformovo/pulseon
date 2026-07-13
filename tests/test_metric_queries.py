@@ -42,7 +42,7 @@ def test_client_queries_metric_points_and_terminal_summaries(
     assert diagnostics.last_write_error is None
 
 
-def test_active_run_point_queries_do_not_depend_on_aggregate_state(
+def test_active_run_discovery_and_summaries_use_persisted_points(
     tmp_path: pathlib.Path,
 ) -> None:
     import pulseon
@@ -67,9 +67,12 @@ def test_active_run_point_queries_do_not_depend_on_aggregate_state(
 
     points = client.query_metric(run.run_id, "train/loss")
     metrics = client.list_metrics(run.run_id)
+    summaries = client.query_metric_summaries([run.run_id], "train/loss")
 
     assert [point.value_f64 for point in points] == [0.25]
-    assert metrics == []
+    assert [metric.metric_key for metric in metrics] == ["eval/accuracy", "train/loss"]
+    assert [metric.last_value_f64 for metric in metrics] == [0.8, 0.25]
+    assert [summary.last_value_f64 for summary in summaries] == [0.25]
 
 
 def test_terminal_run_metric_discovery_uses_rebuilt_aggregate_state(
@@ -92,6 +95,32 @@ def test_terminal_run_metric_discovery_uses_rebuilt_aggregate_state(
     ]
     assert [metric.effective_count for metric in metrics] == [1, 1]
     assert isinstance(metrics[0], pulseon.MetricSummary)
+
+
+def test_summary_comparison_preserves_mixed_run_order(tmp_path: pathlib.Path) -> None:
+    import pulseon
+
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("local training", project_id="project-1")
+    terminal = client.create_run(project.project_id, "terminal", run_id="terminal")
+    terminal.log("train/loss", 0, 0.5)
+    client.finish_run(terminal.run_id)
+    running = client.create_run(project.project_id, "running", run_id="running")
+    running.log("train/loss", 0, 0.25)
+    helpers.wait_for_metric_points(
+        client,
+        running.run_id,
+        "train/loss",
+        expected_count=1,
+    )
+
+    summaries = client.query_metric_summaries(
+        [running.run_id, terminal.run_id],
+        "train/loss",
+    )
+
+    assert [summary.run_id for summary in summaries] == ["running", "terminal"]
+    assert [summary.last_value_f64 for summary in summaries] == [0.25, 0.5]
 
 
 def test_client_query_metric_applies_range_filters_and_short_max_points(
@@ -117,13 +146,20 @@ def test_client_query_metric_applies_range_filters_and_short_max_points(
         start_step=10,
         end_step=15,
     )
+    empty_points = client.query_metric(
+        run.run_id,
+        "train/loss",
+        start_step=10,
+        end_step=10,
+    )
     unchanged_points = client.query_metric(
         run.run_id,
         "train/loss",
         max_points=100,
     )
 
-    assert [point.step for point in ranged_points] == [10, 11, 12, 13, 14, 15]
+    assert [point.step for point in ranged_points] == [10, 11, 12, 13, 14]
+    assert empty_points == []
     assert len(unchanged_points) == 100
     assert unchanged_points[0].step == 0
     assert unchanged_points[-1].step == 99

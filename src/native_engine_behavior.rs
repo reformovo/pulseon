@@ -264,7 +264,7 @@ mod tests {
             .iter()
             .map(|point| (point.step.value(), point.value_f64))
             .collect();
-        assert_eq!(values, vec![(1, 0.125), (2, 0.0625)]);
+        assert_eq!(values, vec![(1, 0.125)]);
         Ok(())
     }
 
@@ -301,16 +301,16 @@ mod tests {
         let connection = dataset.connection();
         connection.execute_batch(
             "CREATE MACRO lttb(x, y, n) AS [
-                 list({x: x, y: y} ORDER BY x)[1],
-                 list({x: x, y: y} ORDER BY x)[len(list({x: x, y: y} ORDER BY x))]];
+                 list({x: x::DOUBLE, y: y} ORDER BY x)[1],
+                 list({x: x::DOUBLE, y: y} ORDER BY x)[len(list({x: x, y: y} ORDER BY x))]];
              INSERT INTO pulseon_projects VALUES ('project-1', 'local training', now());
              INSERT INTO pulseon_runs VALUES
                  ('run-1', 'project-1', 'metrics', 'running', now(), now(), NULL);
              INSERT INTO dl.metric_points VALUES
-                 ('run-1', 'train/loss', 'train%2Floss', 0, now(), 0.5, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 1, now(), 0.25, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 2, now(), 0.125, now()),
-                 ('run-1', 'train/loss', 'train%2Floss', 3, now(), 0.0625, now());",
+                 ('run-1', 'train/loss', 'train%2Floss', 9223372036854775804, now(), 0.5, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 9223372036854775805, now(), 0.25, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 9223372036854775806, now(), 0.125, now()),
+                 ('run-1', 'train/loss', 'train%2Floss', 9223372036854775807, now(), 0.0625, now());",
         )?;
         let query = NativeQueryStore::new(connection);
         let run_id = RunId::from_string("run-1");
@@ -324,7 +324,31 @@ mod tests {
             .iter()
             .map(|point| (point.step.value(), point.value_f64))
             .collect();
-        assert_eq!(values, vec![(0, 0.5), (3, 0.0625)]);
+        assert_eq!(values, vec![(i64::MAX - 3, 0.5), (i64::MAX, 0.0625),],);
+        Ok(())
+    }
+
+    #[test]
+    fn query_metric_rejects_max_points_below_two() -> Result<(), Box<dyn Error>> {
+        let dataset = open_project_dataset()?;
+        let query = NativeQueryStore::new(dataset.connection());
+        let error = query
+            .query_metric(
+                &RunId::from_string("run-1"),
+                &MetricKey::from_string("train/loss"),
+                None,
+                None,
+                Some(1),
+            )
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                crate::engine::EngineError::MetricQueryMaxPointsTooSmall { max_points: 1 }
+            ),
+            "expected max-points validation error, got {error:?}",
+        );
         Ok(())
     }
 
@@ -372,9 +396,6 @@ mod tests {
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(0), 0.4)?;
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(1), 0.2)?;
         store.log_metric_at_step(&run_b.run_id, &metric_key, Step::new(2), 0.1)?;
-        store.rebuild_metric_aggregates_for_run(&run_a.run_id)?;
-        store.rebuild_metric_aggregates_for_run(&run_b.run_id)?;
-
         // When
         let summaries = query
             .query_metric_summaries(&[run_b.run_id.clone(), run_a.run_id.clone()], &metric_key)?;

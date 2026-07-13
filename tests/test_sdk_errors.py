@@ -60,7 +60,9 @@ def test_client_raises_actionable_sdk_errors(
         "train/loss",
         expected_count=3,
     )
-    with pytest.raises(pulseon.PulseOnError):
+    with pytest.raises(pulseon.PulseOnError, match="max_points must be at least 2"):
+        query_client.query_metric(query_run.run_id, "train/loss", max_points=1)
+    with pytest.raises(pulseon.StorageError, match="LTTB extension is unavailable"):
         query_client.query_metric(query_run.run_id, "train/loss", max_points=2)
 
 
