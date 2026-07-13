@@ -58,6 +58,12 @@ def test_minio_s3_data_path_round_trips_catalog_backend(
     active_points = helpers.wait_for_metric_points(
         client, run.run_id, "train/loss", expected_count=2
     )
+    helpers.wait_for_metric_points(
+        client,
+        run.run_id,
+        "eval/accuracy",
+        expected_count=1,
+    )
     discovered_projects = client.list_projects()
     discovered_runs = client.list_runs(
         project.project_id, status="running", limit=1, offset=0
