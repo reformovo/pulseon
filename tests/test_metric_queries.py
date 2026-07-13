@@ -73,7 +73,9 @@ def test_table_queries_preserve_object_query_results(tmp_path: pathlib.Path) -> 
     assert summary_table.source_row_count == 1
     assert summary_table.downsampled is False
     assert '"arrow_array_stream"' in repr(point_table.__arrow_c_stream__())
-    assert '"arrow_array_stream"' in repr(point_table.__arrow_c_stream__())
+    assert '"arrow_array_stream"' in repr(
+        point_table.__arrow_c_stream__(requested_schema=None)
+    )
     assert '"arrow_array_stream"' in repr(summary_table.__arrow_c_stream__())
 
 

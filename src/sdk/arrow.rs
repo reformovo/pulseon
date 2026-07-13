@@ -233,12 +233,13 @@ impl PyArrowTable {
             .collect()
     }
 
-    #[pyo3(signature = (_requested_schema=None))]
+    #[pyo3(signature = (requested_schema=None))]
     fn __arrow_c_stream__<'py>(
         &self,
         py: Python<'py>,
-        _requested_schema: Option<&Bound<'py, PyCapsule>>,
+        requested_schema: Option<&Bound<'py, PyCapsule>>,
     ) -> PyResult<Bound<'py, PyCapsule>> {
+        let _ = requested_schema;
         let schema = self.batch.schema();
         let batches = vec![Ok::<_, ArrowError>(self.batch.clone())];
         let reader = RecordBatchIterator::new(batches.into_iter(), schema);
