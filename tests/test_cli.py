@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -52,3 +53,48 @@ def test_cli_missing_store_fails_without_creating_it(
     assert captured.out == ""
     assert captured.err == "catalog not found: catalog.ducklake\n"
     assert not (root_path / ".pulseon").exists()
+
+
+def test_cli_resolves_global_path_overrides_against_project(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "workspace" / "project"
+    client = pulseon.init(
+        root_path,
+        catalog_backend="sqlite",
+        catalog_path=root_path / "storage" / "catalog.sqlite",
+        data_path=root_path / "storage" / "data",
+    )
+    project = client.create_project("training", project_id="project-1")
+    client.shutdown()
+    monkeypatch.chdir(tmp_path)
+
+    status = cli.main(
+        [
+            "--path",
+            "workspace/project",
+            "--format",
+            "json",
+            "--catalog-backend",
+            "sqlite",
+            "--catalog-path",
+            "storage/catalog.sqlite",
+            "--data-path",
+            "storage/data",
+            "projects",
+            "list",
+        ]
+    )
+
+    assert status == 0
+    assert json.loads(capsys.readouterr().out) == [
+        {
+            "created_at": project.created_at,
+            "name": "training",
+            "project_id": "project-1",
+        }
+    ]
