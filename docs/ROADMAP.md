@@ -67,20 +67,20 @@ These items are intentionally not part of the 0.1.0 release.
 ### Phase 5: Release Candidate Validation
 
 - [ ] Publish `0.1.0rc1` with release-candidate package metadata, classifiers,
-  README, migration notes, and known limits.
-- [ ] Validate fresh stores and a5 upgrades with DuckDB and SQLite catalogs,
-  local and S3-compatible data paths, and both online and offline LTTB paths.
-- [ ] Run sustained training, concurrent reads, failure, restart, migration
-  retry, and terminal flush scenarios against packaged artifacts.
-- [ ] Freeze the RC surface and accept only stable-release blockers until
+  README, release notes, and known limits.
+- [ ] Validate fresh stores with DuckDB and SQLite catalogs, local and
+  S3-compatible data paths, and both online and offline LTTB paths.
+- [ ] Run sustained training, concurrent reads, failure, restart, and terminal
+  flush scenarios against packaged artifacts.
+- [ ] Freeze the RC surface and accept only release blockers until
   promotion.
 
-### Phase 6: Stable Promotion
+### Phase 6: 0.1.0 Promotion
 
-- [ ] Resolve every stable-release blocker found during the RC window and rerun
+- [ ] Resolve every release blocker found during the RC window and rerun
   the complete automated gate on the final commit.
-- [ ] Publish `0.1.0`, replace alpha metadata, document compatibility, and
-  verify wheel and sdist installation from published artifacts.
+- [ ] Publish `0.1.0`, replace alpha metadata, document behavior and known
+  limits, and verify wheel and sdist installation from published artifacts.
 
 ## Later Backlog
 
