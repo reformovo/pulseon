@@ -485,6 +485,30 @@ def test_cli_json_sanitizes_lttb_extension_path(
     captured = capsys.readouterr()
     assert captured.out == ""
     error = json.loads(captured.err)["error"]
-    assert error["code"] == "storage_error"
+    assert error["code"] == "lttb_extension_unavailable"
+    assert error["guidance"] == [
+        {"action": "query_all", "argument": "--all"},
+        {
+            "action": "load_local_extension",
+            "environment_variable": "PULSEON_LTTB_EXTENSION_PATH",
+        },
+    ]
     assert private_extension.name in error["message"]
     assert str(private_extension.parent) not in captured.err
+
+    assert cli.main(
+        [
+            "--path",
+            str(root_path),
+            "--format",
+            "json",
+            "metrics",
+            "query",
+            "run-1",
+            "loss",
+            "--all",
+        ]
+    ) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert len(document["data"]) == 201
+    assert document["meta"]["downsampled"] is False

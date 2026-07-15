@@ -16,6 +16,7 @@ from pulseon import _pulseon
 
 _JSON_SCHEMA_VERSION = 1
 _LTTB_AUTO_INSTALL_ENV = "PULSEON_LTTB_AUTO_INSTALL"
+_LTTB_ERROR_PREFIX = "DuckDB LTTB extension is unavailable:"
 _OPERATION_ERROR_CODES = {
     "ClientClosedError": "client_closed",
     "InvalidConfigurationError": "invalid_configuration",
@@ -124,12 +125,41 @@ def _usage_message(output: str) -> str:
     return output.rsplit(marker, maxsplit=1)[-1].strip()
 
 
-def _render_error(code: str, message: str) -> str:
+def _render_error(
+    code: str,
+    message: str,
+    guidance: Sequence[dict[str, str]] | None = None,
+) -> str:
+    error: dict[str, object] = {"code": code, "message": message}
+    if guidance is not None:
+        error["guidance"] = list(guidance)
     document = {
         "schema_version": _JSON_SCHEMA_VERSION,
-        "error": {"code": code, "message": message},
+        "error": error,
     }
     return _dump_json(document)
+
+
+def _operation_error_details(
+    error: _pulseon.PulseOnError,
+) -> tuple[str, list[dict[str, str]] | None]:
+    if isinstance(error, _pulseon.StorageError) and str(error).startswith(
+        _LTTB_ERROR_PREFIX
+    ):
+        return (
+            "lttb_extension_unavailable",
+            [
+                {"action": "query_all", "argument": "--all"},
+                {
+                    "action": "load_local_extension",
+                    "environment_variable": "PULSEON_LTTB_EXTENSION_PATH",
+                },
+            ],
+        )
+    return (
+        _OPERATION_ERROR_CODES.get(type(error).__name__, "operation_failed"),
+        None,
+    )
 
 
 def _dump_json(document: object) -> str:
@@ -354,9 +384,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(_run(client, args))
     except _pulseon.PulseOnError as error:
         message = _sanitize_operation_message(str(error), project_path, args)
+        code, guidance = _operation_error_details(error)
         if args.format == "json":
-            code = _OPERATION_ERROR_CODES.get(type(error).__name__, "operation_failed")
-            message = _render_error(code, message)
+            message = _render_error(code, message, guidance)
         print(message, file=sys.stderr)
         return 1
     return 0
