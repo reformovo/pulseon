@@ -23,7 +23,7 @@ coordination, and workspace hierarchy are not release blockers.
   point Parquet compatibility boundary.
 - [ ] Support an explicit `0.1.0a5` store upgrade; diagnose older unversioned
   stores without promising direct a1-a4 migration.
-- [x] Document additive changes, deprecation, breaking changes, and the support
+- [ ] Document additive changes, deprecation, breaking changes, and the support
   window for stable stores and machine-readable output.
 
 ### Phase 2: Store Doctor and Migration
