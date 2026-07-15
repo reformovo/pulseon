@@ -17,7 +17,7 @@ coordination, and workspace hierarchy are not release blockers.
 
 ### Phase 1: Stable Contract
 
-- [x] Accept an ADR defining 0.1.x compatibility for the typed Python API,
+- [ ] Accept an ADR defining 0.1.x compatibility for the typed Python API,
   versioned CLI JSON, catalog application schema, and Parquet schema.
 - [ ] Add an explicit store schema/version marker without changing the metric
   point Parquet compatibility boundary.
