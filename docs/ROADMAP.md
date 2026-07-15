@@ -46,7 +46,7 @@ These items are intentionally not part of the 0.1.0 release.
 
 - [x] Keep the CLI's 200-point default and automatically run the official
   `INSTALL lttb FROM community; LOAD lttb;` flow when first required.
-- [ ] Keep Python SDK downloads opt-in so library queries do not introduce
+- [x] Keep Python SDK downloads opt-in so library queries do not introduce
   implicit network access.
 - [ ] Preserve offline paths through `--all` and `PULSEON_LTTB_EXTENSION_PATH`,
   with structured guidance when installation or loading fails.
