@@ -4,114 +4,100 @@
 > `docs/release-notes/`; durable product boundaries live in
 > `docs/native-storage-boundary.md` and accepted ADRs in `docs/adr/`.
 
-## 0.1.0a5 / V5
+The completed alpha plan is in the
+[`0.1.0a5` release notes](release-notes/0.1.0a5.md). This roadmap starts with
+the work required for an explicit stable compatibility commitment.
 
-V5 completes the 0.1.0 alpha line with a shared headless read surface for
-trainers and agents. It makes persisted PulseOn data discoverable from projects
-through metric points, adds Arrow-compatible Python results and a read-only CLI,
-and keeps Web UI, built-in plotting, MCP, arbitrary SQL, and file export out of
-the release.
+## 0.1.0rc1 to 0.1.0 / V6
 
-### Phase 1: Read Contract and Discovery
+V6 turns the native metric loop and headless read surface into the first stable
+release. It prioritizes compatibility, recoverable upgrades, fresh-install
+behavior, and automated gates. Autoresearch, viewers, MCP, shared cloud
+coordination, and workspace hierarchy are not release blockers.
 
-- [x] Add `Client.list_projects()` so callers can begin data discovery without
-  a known project identifier.
-- [x] Extend run discovery with optional lifecycle-status filtering, stable
-  created-time ordering, and `limit`/`offset` pagination while preserving the
-  existing `list_runs(project_id)` default behavior.
-- [x] Define the read contract as catalog project/run metadata plus persisted
-  effective metric points. Queued reports remain outside query visibility.
-- [x] Preserve last-write-wins metric semantics and a4 catalog and Parquet
-  compatibility for both DuckDB and SQLite catalog backends.
+### Phase 1: Stable Contract
 
-### Phase 2: Fresh Queries and Downsampling
+- [ ] Accept an ADR defining 0.1.x compatibility for the typed Python API,
+  versioned CLI JSON, catalog application schema, and Parquet schema.
+- [ ] Add an explicit store schema/version marker without changing the metric
+  point Parquet compatibility boundary.
+- [ ] Support an explicit `0.1.0a5` store upgrade; diagnose older unversioned
+  stores without promising direct a1-a4 migration.
+- [ ] Document additive changes, deprecation, breaking changes, and the support
+  window for stable stores and machine-readable output.
 
-- [x] Make metric discovery and summaries reflect persisted points for running
-  runs, while retaining aggregate-backed terminal-run fast paths.
-- [x] Support mixed running and terminal runs in summary comparisons without
-  changing requested run ordering.
-- [x] Change metric-query `end_step` semantics from inclusive to exclusive so
-  ranges consistently use `[start_step, end_step)`. Update native predicates,
-  Python documentation and types, behavioral tests, and migration notes
-  together as an explicit compatibility change.
-- [x] Keep LTTB as an optional DuckDB extension rather than bundling it in
-  wheels or reimplementing it in PulseOn. Require `max_points >= 2`, preserve
-  endpoints, keep short series unchanged, and apply range and last-write-wins
-  semantics before downsampling.
+### Phase 2: Store Doctor and Migration
 
-### Phase 3: Arrow-compatible Python Results
+- [ ] Add read-only `pulseon doctor` output for configured and detected catalog
+  backends, schema compatibility, conflicting artifacts, and recovery advice.
+- [ ] Keep ordinary diagnostics sanitized. Expose full local paths only through
+  an explicit verbose diagnostic mode.
+- [ ] Add an explicit, retry-safe migration command that backs up catalog state
+  and never rewrites a store during ordinary initialization.
+- [ ] Cover DuckDB and SQLite stores, backend/config mismatches, mixed legacy
+  artifacts, interrupted migration, retry, and backup recovery.
 
-- [x] Preserve the existing Python object-list query APIs and add
-  `query_metric_table(...)` and `query_metric_summaries_table(...)` returning an
-  Arrow PyCapsule-compatible `ArrowTable`.
-- [x] Expose table row counts, source row counts, downsampling state, column
-  names, and `__arrow_c_stream__` without requiring pyarrow, pandas, or Polars
-  as runtime dependencies.
-- [x] Keep metric-point columns aligned with the public query model and Parquet
-  contract without exposing storage-only `metric_key_encoded`; expose timestamps
-  as UTC millisecond Arrow timestamps.
-- [x] Update `python/pulseon/_pulseon.pyi`, package exports, and type-check tests
-  for every new public Python class and method.
+### Phase 3: Fresh-install Downsampling
 
-### Phase 4: Existing-store Configuration and Read-only CLI
+- [ ] Keep the CLI's 200-point default and automatically run the official
+  `INSTALL lttb FROM community; LOAD lttb;` flow when first required.
+- [ ] Keep Python SDK downloads opt-in so library queries do not introduce
+  implicit network access.
+- [ ] Preserve offline paths through `--all` and `PULSEON_LTTB_EXTENSION_PATH`,
+  with structured guidance when installation or loading fails.
+- [ ] Test signed extension compatibility on every supported release platform
+  and document platforms without a compatible community build.
 
-- [x] Extend `<project>/.pulseon/config.toml` with optional `catalog_backend`
-  and local-only `catalog_path`. Explicit SDK and CLI values override config,
-  and absent values retain the DuckDB defaults.
-- [x] Let `pulseon.init(..., catalog_backend=None)` select the configured
-  backend or fall back to DuckDB while preserving no-argument behavior.
-- [x] Resolve relative `data_path` and `catalog_path` values from config against
-  the project root, and document the relative-data-path compatibility change.
-- [x] Add a native existing-store open path for the CLI so a missing catalog is
-  an error and never creates an empty store.
-- [x] Add a dependency-free `pulseon` console command with `projects list`,
-  `runs list`, `metrics list`, `metrics query`, and `metrics compare`.
-- [x] Support global `--path`, `--format table|json`, and explicit non-secret
-  backend/path overrides; resolve relative CLI paths against `--path`.
-- [x] Default CLI point queries to 200 points, expose mutually exclusive
-  `--max-points` and `--all`, and keep table output deterministic and uncolored.
-- [x] Keep S3 credentials in project config rather than command-line arguments,
-  and preserve existing path and credential sanitization in errors.
+### Phase 4: Automated Release Gates
 
-### Phase 5: Versioned Machine Output and S3 Query Gate
+- [ ] Make Rust formatting, Clippy, Rust tests, Pyright, and pytest required CI
+  jobs rather than release-note-only manual evidence.
+- [ ] Run the MinIO/S3 acceptance and read-amplification gates automatically on
+  the Linux release path for both catalog backends.
+- [ ] Install every wheel and run import plus minimal init, log, finish, and
+  query smoke tests on primary Linux, macOS, and Windows targets.
+- [ ] Verify sdist installation and keep tag publication blocked on all test,
+  acceptance, wheel-smoke, and artifact-build jobs.
 
-- [x] Define JSON success output with `schema_version`, `kind`, `data`, `page`,
-  and `meta`; include pagination state and metric-query source/downsampling
-  metadata where applicable.
-- [x] Write JSON errors to stderr with stable error codes and sanitized messages.
-  Reserve exit status 1 for operation failures and 2 for CLI usage failures.
-- [x] Add an opt-in MinIO/S3 metric-query benchmark covering realistic run,
-  metric-key, file-count, and step-range selections for both catalog backends.
-- [x] Measure repeated query latency, remote response bytes, and read
-  amplification. Treat reads from unrelated `run_id` or
-  `metric_key_encoded` partitions as a gate failure; record environment-specific
-  latency and amplification as the a5 baseline rather than absolute limits.
+### Phase 5: Release Candidate Validation
 
-### Phase 6: Release Gate
+- [ ] Publish `0.1.0rc1` with release-candidate package metadata, classifiers,
+  README, migration notes, and known limits.
+- [ ] Validate fresh stores and a5 upgrades with DuckDB and SQLite catalogs,
+  local and S3-compatible data paths, and both online and offline LTTB paths.
+- [ ] Run sustained training, concurrent reads, failure, restart, migration
+  retry, and terminal flush scenarios against packaged artifacts.
+- [ ] Freeze the RC surface and accept only stable-release blockers until
+  promotion.
 
-- [x] Add SDK, CLI, Arrow, local-backend, and opt-in MinIO coverage for the full
-  project-to-point discovery path, including running-run freshness, half-open
-  ranges, pagination, empty Arrow schemas, structured errors, and missing-store
-  behavior.
-- [x] Update README examples, public type documentation, and 0.1.0a5 release
-  notes. Include migration notes for half-open ranges, config-relative paths,
-  and `max_points < 2`.
-- [x] Verify the public LTTB installation and configuration guidance against
-  the supported DuckDB extension version.
-- [x] Run `cargo fmt --all --check`,
-  `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
-  `cargo check`, `cargo test`, `uv run maturin develop --uv`,
-  `uv run pyright`, `uv run pytest`, the opt-in MinIO gates, and the release
-  wheel build.
+### Phase 6: Stable Promotion
+
+- [ ] Resolve every stable-release blocker found during the RC window and rerun
+  the complete automated gate on the final commit.
+- [ ] Publish `0.1.0`, replace alpha metadata, document compatibility, and
+  verify wheel and sdist installation from published artifacts.
 
 ## Later Backlog
 
-- [ ] Expand SQLite parity to cover multi-client run-writer lock behavior.
-- [ ] Consider race-safe run-writer lock-file deletion only if the release path
-  can prove it is deleting the original lock file for the released writer.
+### Local Coordination
+
+- [ ] Define and validate multi-client SQLite run-writer coordination before
+  expanding the current single-writer native contract.
+
+### Credentials and Remote Training
+
 - [ ] Add environment-variable or AWS credential-chain discovery for S3
-  credentials if explicit config-file credentials become too limiting.
-- [ ] Add an explicit debug dump or verbose diagnostics facility for local
-  troubleshooting, including full path details when the caller opts in.
-- [ ] Revisit cloud, workspace hierarchy, config/tag filtering, built-in
-  plotting, and AI Native features after the local native metric loop is stable.
+  credentials when explicit config-file credentials are insufficient.
+- [ ] Evaluate the [remote control-service boundary](drafts/remote-training-architecture-notes.md)
+  before adding remote writers or shared catalog coordination.
+- [ ] Consider PostgreSQL catalog support only when remote service scale or
+  availability requires it.
+
+### Analysis and Agent Workflows
+
+- [ ] Evaluate the [native curve viewer](drafts/gpui-curve-viewer-spike.md)
+  without adding plotting dependencies to the Python/Rust SDK.
+- [ ] Evaluate the [research driver](drafts/autoresearch-control-loop-notes.md)
+  without moving source or Git mutation into PulseOn Core.
+- [ ] Design workspace hierarchy, config/tag filtering, export, Web UI, MCP,
+  and other agent-facing surfaces as independently reviewable roadmap phases.
