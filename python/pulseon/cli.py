@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 import contextlib
 import io
 import json
@@ -15,6 +15,8 @@ import sys
 from pulseon import _pulseon
 
 _JSON_SCHEMA_VERSION = 1
+_LTTB_AUTO_INSTALL_ENV = "PULSEON_LTTB_AUTO_INSTALL"
+_LTTB_ERROR_PREFIX = "DuckDB LTTB extension is unavailable:"
 _OPERATION_ERROR_CODES = {
     "ClientClosedError": "client_closed",
     "InvalidConfigurationError": "invalid_configuration",
@@ -39,6 +41,20 @@ def _non_negative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("expected a non-negative integer")
     return parsed
+
+
+@contextlib.contextmanager
+def _enable_lttb_auto_install() -> Iterator[None]:
+    """Enables LTTB downloads only for one CLI metric query."""
+    previous = os.environ.get(_LTTB_AUTO_INSTALL_ENV)
+    os.environ[_LTTB_AUTO_INSTALL_ENV] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(_LTTB_AUTO_INSTALL_ENV, None)
+        else:
+            os.environ[_LTTB_AUTO_INSTALL_ENV] = previous
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -109,12 +125,41 @@ def _usage_message(output: str) -> str:
     return output.rsplit(marker, maxsplit=1)[-1].strip()
 
 
-def _render_error(code: str, message: str) -> str:
+def _render_error(
+    code: str,
+    message: str,
+    guidance: Sequence[dict[str, str]] | None = None,
+) -> str:
+    error: dict[str, object] = {"code": code, "message": message}
+    if guidance is not None:
+        error["guidance"] = list(guidance)
     document = {
         "schema_version": _JSON_SCHEMA_VERSION,
-        "error": {"code": code, "message": message},
+        "error": error,
     }
     return _dump_json(document)
+
+
+def _operation_error_details(
+    error: _pulseon.PulseOnError,
+) -> tuple[str, list[dict[str, str]] | None]:
+    if isinstance(error, _pulseon.StorageError) and str(error).startswith(
+        _LTTB_ERROR_PREFIX
+    ):
+        return (
+            "lttb_extension_unavailable",
+            [
+                {"action": "query_all", "argument": "--all"},
+                {
+                    "action": "load_local_extension",
+                    "environment_variable": "PULSEON_LTTB_EXTENSION_PATH",
+                },
+            ],
+        )
+    return (
+        _OPERATION_ERROR_CODES.get(type(error).__name__, "operation_failed"),
+        None,
+    )
 
 
 def _dump_json(document: object) -> str:
@@ -224,29 +269,30 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
     if args.action == "query":
         max_points = None if args.all else args.max_points
         meta = None
-        if args.format == "json":
-            points, source_row_count, downsampled = (
-                client._query_metric_with_metadata(
+        with _enable_lttb_auto_install():
+            if args.format == "json":
+                points, source_row_count, downsampled = (
+                    client._query_metric_with_metadata(
+                        args.run_id,
+                        args.metric_key,
+                        start_step=args.start_step,
+                        end_step=args.end_step,
+                        max_points=max_points,
+                    )
+                )
+                meta = {
+                    "source_row_count": source_row_count,
+                    "returned_row_count": len(points),
+                    "downsampled": downsampled,
+                }
+            else:
+                points = client.query_metric(
                     args.run_id,
                     args.metric_key,
                     start_step=args.start_step,
                     end_step=args.end_step,
                     max_points=max_points,
                 )
-            )
-            meta = {
-                "source_row_count": source_row_count,
-                "returned_row_count": len(points),
-                "downsampled": downsampled,
-            }
-        else:
-            points = client.query_metric(
-                args.run_id,
-                args.metric_key,
-                start_step=args.start_step,
-                end_step=args.end_step,
-                max_points=max_points,
-            )
         return _render(
             ("STEP", "VALUE", "TIMESTAMP"),
             [(item.step, item.value_f64, item.timestamp) for item in points],
@@ -338,9 +384,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(_run(client, args))
     except _pulseon.PulseOnError as error:
         message = _sanitize_operation_message(str(error), project_path, args)
+        code, guidance = _operation_error_details(error)
         if args.format == "json":
-            code = _OPERATION_ERROR_CODES.get(type(error).__name__, "operation_failed")
-            message = _render_error(code, message)
+            message = _render_error(code, message, guidance)
         print(message, file=sys.stderr)
         return 1
     return 0

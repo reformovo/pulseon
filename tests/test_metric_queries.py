@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from tests import helpers
 
 
@@ -230,3 +232,30 @@ def test_client_query_metric_applies_range_filters_and_short_max_points(
     assert len(unchanged_points) == 100
     assert unchanged_points[0].step == 0
     assert unchanged_points[-1].step == 99
+
+
+def test_sdk_downsampling_does_not_install_lttb_without_opt_in(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pulseon
+
+    isolated_home = tmp_path / "home"
+    isolated_home.mkdir()
+    monkeypatch.setenv("HOME", str(isolated_home))
+    monkeypatch.delenv("PULSEON_LTTB_AUTO_INSTALL", raising=False)
+    monkeypatch.delenv("PULSEON_LTTB_EXTENSION_PATH", raising=False)
+    client = pulseon.init(tmp_path / "project")
+    project = client.create_project("local training", project_id="project-1")
+    run = client.create_run(project.project_id, "baseline", run_id="run-1")
+    for step in range(201):
+        run.log("train/loss", step, float(step))
+    client.finish_run(run.run_id)
+
+    with pytest.raises(pulseon.StorageError) as error_info:
+        client.query_metric(run.run_id, "train/loss", max_points=200)
+
+    message = str(error_info.value)
+    assert "will not download it automatically" in message
+    assert "PULSEON_LTTB_AUTO_INSTALL=1" in message
+    client.shutdown()

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import pathlib
+import typing
+from unittest import mock
 
 import pytest
 
@@ -312,6 +315,31 @@ def test_cli_metric_query_point_limits_are_mutually_exclusive() -> None:
     assert error_info.value.code == 2
 
 
+def test_cli_enables_lttb_auto_install_only_during_metric_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PULSEON_LTTB_AUTO_INSTALL", "disabled")
+    client = mock.Mock()
+    point = mock.Mock(step=0, value_f64=0.5, timestamp="2026-07-15T00:00:00Z")
+    client.query_metric.side_effect = lambda *args, **kwargs: (
+        [point]
+        if os.environ.get("PULSEON_LTTB_AUTO_INSTALL") == "1"
+        else pytest.fail("CLI query did not enable LTTB auto-install")
+    )
+    args = cli._build_parser().parse_args(
+        ["metrics", "query", "run-1", "loss"]
+    )
+
+    cli._run(typing.cast(cli._pulseon.Client, client), args)
+
+    assert os.environ["PULSEON_LTTB_AUTO_INSTALL"] == "disabled"
+
+    monkeypatch.delenv("PULSEON_LTTB_AUTO_INSTALL")
+    with cli._enable_lttb_auto_install():
+        assert os.environ["PULSEON_LTTB_AUTO_INSTALL"] == "1"
+    assert "PULSEON_LTTB_AUTO_INSTALL" not in os.environ
+
+
 @pytest.mark.parametrize(
     "argv",
     (
@@ -457,6 +485,30 @@ def test_cli_json_sanitizes_lttb_extension_path(
     captured = capsys.readouterr()
     assert captured.out == ""
     error = json.loads(captured.err)["error"]
-    assert error["code"] == "storage_error"
+    assert error["code"] == "lttb_extension_unavailable"
+    assert error["guidance"] == [
+        {"action": "query_all", "argument": "--all"},
+        {
+            "action": "load_local_extension",
+            "environment_variable": "PULSEON_LTTB_EXTENSION_PATH",
+        },
+    ]
     assert private_extension.name in error["message"]
     assert str(private_extension.parent) not in captured.err
+
+    assert cli.main(
+        [
+            "--path",
+            str(root_path),
+            "--format",
+            "json",
+            "metrics",
+            "query",
+            "run-1",
+            "loss",
+            "--all",
+        ]
+    ) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert len(document["data"]) == 201
+    assert document["meta"]["downsampled"] is False
