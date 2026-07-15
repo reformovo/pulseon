@@ -5,19 +5,22 @@
 > `docs/native-storage-boundary.md` and accepted ADRs in `docs/adr/`.
 
 The completed alpha plan is in the
-[`0.1.0a5` release notes](release-notes/0.1.0a5.md). This roadmap starts with
-the work required for an explicit stable compatibility commitment.
+[`0.1.0a5` release notes](release-notes/0.1.0a5.md). Pre-1.0 releases do not
+promise store, API, or machine-output compatibility; compatibility and
+migration commitments begin with the future 1.x line.
 
 ## 0.1.0rc1 to 0.1.0 / V6
 
-V6 turns the native metric loop and headless read surface into the first stable
-release. It prioritizes compatibility, recoverable upgrades, fresh-install
-behavior, and automated gates. Autoresearch, viewers, MCP, shared cloud
-coordination, and workspace hierarchy are not release blockers.
+V6 prepares the native metric loop and headless read surface for the 0.1.0
+release. It prioritizes fresh-install behavior and automated gates.
+Autoresearch, viewers, MCP, shared cloud coordination, workspace hierarchy,
+and pre-1.0 compatibility or migration are not release blockers.
 
-### Phase 1: Stable Contract
+### Deferred to 1.x: Stable Contract
 
-- [ ] Accept an ADR defining 0.1.x compatibility for the typed Python API,
+These items are intentionally not part of the 0.1.0 release.
+
+- [ ] Accept an ADR defining 1.x compatibility for the typed Python API,
   versioned CLI JSON, catalog application schema, and Parquet schema.
 - [ ] Add an explicit store schema/version marker without changing the metric
   point Parquet compatibility boundary.
@@ -26,7 +29,9 @@ coordination, and workspace hierarchy are not release blockers.
 - [ ] Document additive changes, deprecation, breaking changes, and the support
   window for stable stores and machine-readable output.
 
-### Phase 2: Store Doctor and Migration
+### Deferred to 1.x: Store Doctor and Migration
+
+These items are intentionally not part of the 0.1.0 release.
 
 - [ ] Add read-only `pulseon doctor` output for configured and detected catalog
   backends, schema compatibility, conflicting artifacts, and recovery advice.
@@ -62,20 +67,20 @@ coordination, and workspace hierarchy are not release blockers.
 ### Phase 5: Release Candidate Validation
 
 - [ ] Publish `0.1.0rc1` with release-candidate package metadata, classifiers,
-  README, migration notes, and known limits.
-- [ ] Validate fresh stores and a5 upgrades with DuckDB and SQLite catalogs,
-  local and S3-compatible data paths, and both online and offline LTTB paths.
-- [ ] Run sustained training, concurrent reads, failure, restart, migration
-  retry, and terminal flush scenarios against packaged artifacts.
-- [ ] Freeze the RC surface and accept only stable-release blockers until
+  README, release notes, and known limits.
+- [ ] Validate fresh stores with DuckDB and SQLite catalogs, local and
+  S3-compatible data paths, and both online and offline LTTB paths.
+- [ ] Run sustained training, concurrent reads, failure, restart, and terminal
+  flush scenarios against packaged artifacts.
+- [ ] Freeze the RC surface and accept only release blockers until
   promotion.
 
-### Phase 6: Stable Promotion
+### Phase 6: 0.1.0 Promotion
 
-- [ ] Resolve every stable-release blocker found during the RC window and rerun
+- [ ] Resolve every release blocker found during the RC window and rerun
   the complete automated gate on the final commit.
-- [ ] Publish `0.1.0`, replace alpha metadata, document compatibility, and
-  verify wheel and sdist installation from published artifacts.
+- [ ] Publish `0.1.0`, replace alpha metadata, document behavior and known
+  limits, and verify wheel and sdist installation from published artifacts.
 
 ## Later Backlog
 
