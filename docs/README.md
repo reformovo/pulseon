@@ -7,6 +7,8 @@ notes, and historical architecture snapshots.
 
 - `docs/ROADMAP.md` for the current release plan and later backlog.
 - `docs/native-storage-boundary.md` for the current native storage boundary.
+- `docs/stable-compatibility.md` for API, JSON, store, and Parquet support
+  policy.
 - `docs/catalog-application-tables.md` for project, run, and aggregate catalog
   table schemas.
 - `docs/glossary.md` for product terms.
