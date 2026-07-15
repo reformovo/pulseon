@@ -100,3 +100,53 @@ jobs:
         run: uv run pytest tests/test_minio_acceptance.py
       - name: Run read-amplification gate for both catalog backends
         run: uv run python scripts/bench_minio_metric_query.py
+
+  wheel-smoke:
+    name: Wheel smoke (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: linux-x86_64
+            runner: ubuntu-22.04
+            target: x86_64
+            manylinux: manylinux_2_28
+          - name: macos-x86_64
+            runner: macos-15-intel
+            target: x86_64
+            manylinux: ""
+          - name: macos-aarch64
+            runner: macos-latest
+            target: aarch64
+            manylinux: ""
+          - name: windows-x64
+            runner: windows-latest
+            target: x64
+            manylinux: ""
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+          manylinux: ${{ matrix.platform.manylinux }}
+          sccache: true
+      - name: Install built wheel
+        run: >-
+          python -c "import glob, subprocess, sys;
+          wheels = glob.glob('dist/*.whl');
+          assert len(wheels) == 1, wheels;
+          subprocess.check_call([sys.executable, '-m', 'pip', 'install',
+          '--force-reinstall', *wheels])"
+      - name: Run installed-package smoke test
+        run: python scripts/wheel_smoke.py
+      - name: Upload verified wheel
+        uses: actions/upload-artifact@v6
+        with:
+          name: verified-wheel-${{ matrix.platform.name }}
+          path: dist/*.whl
