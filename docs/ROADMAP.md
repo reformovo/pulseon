@@ -5,17 +5,20 @@
 > `docs/native-storage-boundary.md` and accepted ADRs in `docs/adr/`.
 
 The completed alpha plan is in the
-[`0.1.0a5` release notes](release-notes/0.1.0a5.md). This roadmap starts with
-the work required for an explicit stable compatibility commitment.
+[`0.1.0a5` release notes](release-notes/0.1.0a5.md). Pre-1.0 releases do not
+promise store, API, or machine-output compatibility; compatibility and
+migration commitments begin with the future 1.x line.
 
 ## 0.1.0rc1 to 0.1.0 / V6
 
-V6 turns the native metric loop and headless read surface into the first stable
-release. It prioritizes compatibility, recoverable upgrades, fresh-install
-behavior, and automated gates. Autoresearch, viewers, MCP, shared cloud
-coordination, and workspace hierarchy are not release blockers.
+V6 prepares the native metric loop and headless read surface for the 0.1.0
+release. It prioritizes fresh-install behavior and automated gates.
+Autoresearch, viewers, MCP, shared cloud coordination, workspace hierarchy,
+and pre-1.0 compatibility or migration are not release blockers.
 
-### Phase 1: Stable Contract
+### Deferred to 1.x: Stable Contract
+
+These items are intentionally not part of the 0.1.0 release.
 
 - [ ] Accept an ADR defining 0.1.x compatibility for the typed Python API,
   versioned CLI JSON, catalog application schema, and Parquet schema.
@@ -26,7 +29,9 @@ coordination, and workspace hierarchy are not release blockers.
 - [ ] Document additive changes, deprecation, breaking changes, and the support
   window for stable stores and machine-readable output.
 
-### Phase 2: Store Doctor and Migration
+### Deferred to 1.x: Store Doctor and Migration
+
+These items are intentionally not part of the 0.1.0 release.
 
 - [ ] Add read-only `pulseon doctor` output for configured and detected catalog
   backends, schema compatibility, conflicting artifacts, and recovery advice.
