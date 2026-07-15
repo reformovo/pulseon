@@ -629,9 +629,6 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         | crate::engine::EngineError::RunNotFound { .. }
         | crate::engine::EngineError::LttbExtensionUnavailable { .. }
         | crate::engine::EngineError::CatalogNotFound { .. }
-        | crate::engine::EngineError::StoreSchemaMissing
-        | crate::engine::EngineError::StoreSchemaMarkerInvalid { .. }
-        | crate::engine::EngineError::StoreSchemaVersionUnsupported { .. }
         | crate::engine::EngineError::Storage { .. }
         | crate::engine::EngineError::StorageDuckDb { .. } => StorageError::new_err(message),
         crate::engine::EngineError::MetricQueryMaxPointsTooSmall { .. }

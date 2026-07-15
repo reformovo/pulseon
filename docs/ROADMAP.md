@@ -19,7 +19,7 @@ coordination, and workspace hierarchy are not release blockers.
 
 - [x] Accept an ADR defining 0.1.x compatibility for the typed Python API,
   versioned CLI JSON, catalog application schema, and Parquet schema.
-- [x] Add an explicit store schema/version marker without changing the metric
+- [ ] Add an explicit store schema/version marker without changing the metric
   point Parquet compatibility boundary.
 - [ ] Support an explicit `0.1.0a5` store upgrade; diagnose older unversioned
   stores without promising direct a1-a4 migration.

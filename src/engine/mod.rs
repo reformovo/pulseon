@@ -56,12 +56,6 @@ pub enum EngineError {
     ClientClosed,
     #[error("catalog not found: {name}")]
     CatalogNotFound { name: String },
-    #[error("store schema marker is missing; explicit upgrade is required")]
-    StoreSchemaMissing,
-    #[error("store schema marker must contain one row, found {row_count}")]
-    StoreSchemaMarkerInvalid { row_count: i64 },
-    #[error("unsupported store schema version {found}; this build supports {supported}")]
-    StoreSchemaVersionUnsupported { found: i64, supported: i64 },
     #[error("storage operation failed while {operation}: {name}")]
     Storage {
         operation: &'static str,
