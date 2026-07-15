@@ -58,7 +58,7 @@ These items are intentionally not part of the 0.1.0 release.
 
 - [x] Make Rust formatting, Clippy, Rust tests, Pyright, and pytest required CI
   jobs rather than release-note-only manual evidence.
-- [ ] Run the MinIO/S3 acceptance and read-amplification gates automatically on
+- [x] Run the MinIO/S3 acceptance and read-amplification gates automatically on
   the Linux release path for both catalog backends.
 - [ ] Install every wheel and run import plus minimal init, log, finish, and
   query smoke tests on primary Linux, macOS, and Windows targets.

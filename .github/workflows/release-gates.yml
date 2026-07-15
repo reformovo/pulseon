@@ -47,3 +47,56 @@ jobs:
         run: uv run pyright
       - name: Run Python tests
         run: uv run pytest
+
+  minio:
+    name: MinIO/S3 acceptance
+    runs-on: ubuntu-latest
+    env:
+      PULSEON_MINIO_ENDPOINT: localhost:9000
+      PULSEON_MINIO_BUCKET: pulseon-ci
+      PULSEON_MINIO_ACCESS_KEY_ID: pulseon-ci
+      PULSEON_MINIO_SECRET_ACCESS_KEY: pulseon-ci-secret
+      PULSEON_MINIO_REGION: us-east-1
+      PULSEON_MINIO_USE_SSL: "false"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install PulseOn and test dependencies
+        run: uv sync --group testing-extra
+      - name: Start MinIO
+        run: |
+          docker run --detach --name pulseon-minio \
+            --publish 9000:9000 \
+            --env MINIO_ROOT_USER="$PULSEON_MINIO_ACCESS_KEY_ID" \
+            --env MINIO_ROOT_PASSWORD="$PULSEON_MINIO_SECRET_ACCESS_KEY" \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z \
+            server /data
+          for attempt in {1..30}; do
+            if curl --fail --silent \
+              http://localhost:9000/minio/health/ready > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs pulseon-minio
+          exit 1
+      - name: Install MinIO client and create bucket
+        run: |
+          sudo curl --fail --silent --show-error \
+            --output /usr/local/bin/mc \
+            https://dl.min.io/client/mc/release/linux-amd64/archive/mc.RELEASE.2025-08-13T08-35-41Z
+          sudo chmod +x /usr/local/bin/mc
+          mc alias set pulseon \
+            http://localhost:9000 \
+            "$PULSEON_MINIO_ACCESS_KEY_ID" \
+            "$PULSEON_MINIO_SECRET_ACCESS_KEY"
+          mc mb "pulseon/$PULSEON_MINIO_BUCKET"
+      - name: Run S3 acceptance for both catalog backends
+        run: uv run pytest tests/test_minio_acceptance.py
+      - name: Run read-amplification gate for both catalog backends
+        run: uv run python scripts/bench_minio_metric_query.py
