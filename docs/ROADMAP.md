@@ -50,8 +50,9 @@ These items are intentionally not part of the 0.1.0 release.
   implicit network access.
 - [x] Preserve offline paths through `--all` and `PULSEON_LTTB_EXTENSION_PATH`,
   with structured guidance when installation or loading fails.
-- [ ] Test signed extension compatibility on every supported release platform
-  and document platforms without a compatible community build.
+- [x] Delegate signed extension compatibility to DuckDB and the community
+  extension repository instead of duplicating their platform matrix in
+  PulseOn's generated CI; platforms without an upstream build retain `--all`.
 
 ### Phase 4: Automated Release Gates
 

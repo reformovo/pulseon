@@ -111,13 +111,16 @@ Runtime extensions:
   the official `INSTALL lttb FROM community; LOAD lttb;` flow when its default
   200-point limit first requires downsampling. Python SDK queries remain
   download-free unless `PULSEON_LTTB_AUTO_INSTALL=1` is set explicitly.
-- PulseOn embeds DuckDB 1.5.4. The release gate verifies the LTTB 0.1.0
-  community build for DuckDB 1.5.4. DuckDB extension binaries are specific to
-  a DuckDB version and platform; for offline deployment, set
+- PulseOn embeds DuckDB 1.5.4 and delegates signed community-extension
+  compatibility to DuckDB and the community extension repository rather than
+  duplicating their platform matrix in PulseOn's generated CI. DuckDB extension
+  binaries are specific to a DuckDB version and platform; for offline
+  deployment, set
   `PULSEON_LTTB_EXTENSION_PATH=/path/to/lttb.duckdb_extension` to a compatible,
-  signed binary rather than reusing one built for another DuckDB version. CLI
-  JSON failures use the `lttb_extension_unavailable` code and include
-  machine-readable guidance for the local-extension and `--all` recovery paths.
+  signed binary rather than reusing one built for another DuckDB version. If no
+  upstream build exists, use `--all`. CLI JSON failures use the
+  `lttb_extension_unavailable` code and include machine-readable guidance for
+  the local-extension and `--all` recovery paths.
 
 See DuckDB's [LTTB extension page][lttb] and [extension installation
 guide][duckdb-extension-install] for the upstream commands and compatibility
