@@ -10,6 +10,16 @@ metadata alias. Backend-specific qualification belongs in the native catalog
 adapter, not in query/write call sites. The tables live in the same catalog
 database file as DuckLake metadata for local DuckDB and SQLite backends.
 
+## `pulseon_store_metadata`
+
+The singleton store marker versions the catalog application schema independently
+from the package, CLI JSON, and Parquet schemas. Ordinary initialization
+validates this marker and does not add it to an existing unversioned store.
+
+| Column | Type | Required | Contract |
+| --- | --- | --- | --- |
+| `schema_version` | int64 | yes | Catalog application schema version; exactly one row is required. |
+
 ## `pulseon_projects`
 
 Projects are lightweight namespaces for related runs.

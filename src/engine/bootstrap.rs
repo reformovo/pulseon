@@ -5,6 +5,7 @@ use crate::engine::EngineError;
 const DUCKLAKE_ALIAS: &str = "dl";
 const DUCKDB_CATALOG_ALIAS: &str = "pulseon_catalog";
 const S3_SECRET_NAME: &str = "pulseon_s3";
+const STORE_SCHEMA_VERSION: i64 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CatalogBackend {
@@ -191,9 +192,13 @@ fn open_native_connection_with_mode(
     config: NativeStorageConfig,
     must_exist: bool,
 ) -> Result<duckdb::Connection, EngineError> {
-    if must_exist {
-        verify_catalog_exists(&config.catalog_path)?;
-    } else if let Some(catalog_parent) = config.catalog_path.parent() {
+    let catalog_existed = catalog_exists(&config.catalog_path)?;
+    if must_exist && !catalog_existed {
+        return Err(EngineError::CatalogNotFound {
+            name: path_basename(&config.catalog_path),
+        });
+    }
+    if !must_exist && let Some(catalog_parent) = config.catalog_path.parent() {
         std::fs::create_dir_all(catalog_parent).map_err(|source| EngineError::Storage {
             operation: "creating catalog directory",
             name: path_basename(catalog_parent),
@@ -220,20 +225,18 @@ fn open_native_connection_with_mode(
         &config.data_path,
     )?;
     setup_catalog_adapter(&connection, config.catalog_backend, &config.catalog_path)?;
-    if !must_exist {
+    if catalog_existed {
+        validate_store_schema(&connection)?;
+    } else {
         create_v1_tables(&connection)?;
     }
     Ok(connection)
 }
 
-fn verify_catalog_exists(catalog_path: &Path) -> Result<(), EngineError> {
+fn catalog_exists(catalog_path: &Path) -> Result<bool, EngineError> {
     match std::fs::metadata(catalog_path) {
-        Ok(_) => Ok(()),
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            Err(EngineError::CatalogNotFound {
-                name: path_basename(catalog_path),
-            })
-        }
+        Ok(_) => Ok(true),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(source) => Err(EngineError::Storage {
             operation: "checking catalog",
             name: path_basename(catalog_path),
@@ -396,8 +399,44 @@ pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), En
              last_value_f64 DOUBLE NOT NULL,
              min_value_f64 DOUBLE NOT NULL,
              max_value_f64 DOUBLE NOT NULL
-         );",
+         );
+         CREATE TABLE pulseon_store_metadata (
+             schema_version BIGINT NOT NULL
+         );
+         INSERT INTO pulseon_store_metadata (schema_version) VALUES (1);",
     )?;
+    Ok(())
+}
+
+fn validate_store_schema(connection: &duckdb::Connection) -> Result<(), EngineError> {
+    let marker_exists: bool = connection.query_row(
+        "SELECT count(*) = 1
+         FROM information_schema.tables
+         WHERE table_catalog = current_database()
+           AND table_schema = current_schema()
+           AND table_name = 'pulseon_store_metadata'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !marker_exists {
+        return Err(EngineError::StoreSchemaMissing);
+    }
+
+    let (row_count, version): (i64, Option<i64>) = connection.query_row(
+        "SELECT count(*), min(schema_version) FROM pulseon_store_metadata",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if row_count != 1 {
+        return Err(EngineError::StoreSchemaMarkerInvalid { row_count });
+    }
+    let version = version.ok_or(EngineError::StoreSchemaMarkerInvalid { row_count })?;
+    if version != STORE_SCHEMA_VERSION {
+        return Err(EngineError::StoreSchemaVersionUnsupported {
+            found: version,
+            supported: STORE_SCHEMA_VERSION,
+        });
+    }
     Ok(())
 }
 
@@ -444,6 +483,72 @@ mod tests {
         );
         assert_eq!(error.to_string(), "catalog not found: catalog.ducklake");
         assert!(!root_path.exists());
+    }
+
+    #[test]
+    fn fresh_store_records_schema_version_in_catalog_only() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-marker-{}", uuid::Uuid::new_v4()));
+        let connection = open_native_connection(&root_path)?;
+
+        let version: i64 = connection.query_row(
+            "SELECT schema_version FROM pulseon_store_metadata",
+            [],
+            |row| row.get(0),
+        )?;
+        let metric_marker_columns: i64 = connection.query_row(
+            "SELECT count(*) FROM information_schema.columns
+             WHERE table_catalog = 'dl'
+               AND table_name = 'metric_points'
+               AND column_name = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        assert_eq!(version, STORE_SCHEMA_VERSION);
+        assert_eq!(metric_marker_columns, 0);
+        drop(connection);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn existing_unversioned_store_requires_explicit_upgrade()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-unversioned-{}", uuid::Uuid::new_v4()));
+        let connection = open_native_connection(&root_path)?;
+        connection.execute_batch("DROP TABLE pulseon_store_metadata;")?;
+        drop(connection);
+
+        let error = open_native_connection(&root_path).expect_err("markerless store should fail");
+
+        assert!(matches!(error, EngineError::StoreSchemaMissing));
+        drop(error);
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn existing_store_rejects_future_schema_version() -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-future-{}", uuid::Uuid::new_v4()));
+        let connection = open_native_connection(&root_path)?;
+        connection.execute("UPDATE pulseon_store_metadata SET schema_version = 2", [])?;
+        drop(connection);
+
+        let error = open_native_connection(&root_path).expect_err("future store should fail");
+
+        assert!(matches!(
+            error,
+            EngineError::StoreSchemaVersionUnsupported {
+                found: 2,
+                supported: STORE_SCHEMA_VERSION,
+            }
+        ));
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
     }
 
     #[test]
