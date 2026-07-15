@@ -62,7 +62,7 @@ These items are intentionally not part of the 0.1.0 release.
   the Linux release path for both catalog backends.
 - [x] Install every wheel and run import plus minimal init, log, finish, and
   query smoke tests on primary Linux, macOS, and Windows targets.
-- [ ] Verify sdist installation and keep tag publication blocked on all test,
+- [x] Verify sdist installation and keep tag publication blocked on all test,
   acceptance, wheel-smoke, and artifact-build jobs.
 
 ### Phase 5: Release Candidate Validation

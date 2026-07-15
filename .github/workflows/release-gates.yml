@@ -1,14 +1,12 @@
-name: Release gates
+name: Reusable release gates
 
 on:
-  push:
-    branches:
-      - main
-      - master
-    tags:
-      - "*"
-  pull_request:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      full:
+        description: Run acceptance and packaged-wheel gates
+        required: true
+        type: boolean
 
 permissions:
   contents: read
@@ -50,6 +48,7 @@ jobs:
 
   minio:
     name: MinIO/S3 acceptance
+    if: inputs.full
     runs-on: ubuntu-latest
     env:
       PULSEON_MINIO_ENDPOINT: localhost:9000
@@ -103,6 +102,7 @@ jobs:
 
   wheel-smoke:
     name: Wheel smoke (${{ matrix.platform.name }})
+    if: inputs.full
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
