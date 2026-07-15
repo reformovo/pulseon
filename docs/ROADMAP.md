@@ -44,7 +44,7 @@ These items are intentionally not part of the 0.1.0 release.
 
 ### Phase 3: Fresh-install Downsampling
 
-- [ ] Keep the CLI's 200-point default and automatically run the official
+- [x] Keep the CLI's 200-point default and automatically run the official
   `INSTALL lttb FROM community; LOAD lttb;` flow when first required.
 - [ ] Keep Python SDK downloads opt-in so library queries do not introduce
   implicit network access.
