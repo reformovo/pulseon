@@ -20,7 +20,7 @@ and pre-1.0 compatibility or migration are not release blockers.
 
 These items are intentionally not part of the 0.1.0 release.
 
-- [ ] Accept an ADR defining 0.1.x compatibility for the typed Python API,
+- [ ] Accept an ADR defining 1.x compatibility for the typed Python API,
   versioned CLI JSON, catalog application schema, and Parquet schema.
 - [ ] Add an explicit store schema/version marker without changing the metric
   point Parquet compatibility boundary.
