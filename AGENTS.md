@@ -24,10 +24,6 @@
 
 ## Boundaries
 
-- During the 0.1.0 RC freeze, accept only planned Phase 5/6 release operations
-  or documented blockers involving corruption, crashes, deadlocks, unusable
-  documented workflows, package installation, or required release gates. Do
-  not add features, public APIs, broad refactors, or deferred backlog work.
 - Ask first before adding runtime dependencies, changing the public Python API shape, altering package metadata, or changing CI/release behavior.
 - Prefer small roadmap-aligned phases from `docs/ROADMAP.md`; one feature/fix should be independently reviewable.
 - Treat DuckLake as a required native dependency, but keep the Parquet schema as the product compatibility boundary.
