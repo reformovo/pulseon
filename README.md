@@ -3,7 +3,8 @@
 PulseOn is a local-first training metrics tracker backed by Rust, PyO3, DuckDB,
 and DuckLake.
 
-> **Experimental.** PulseOn is in the 0.x line. Pre-1.0 releases do not promise
+> [!IMPORTANT]
+> Experimental. PulseOn is in the 0.x line. Pre-1.0 releases do not promise
 > store, API, or machine-output compatibility; breaking changes between 0.x
 > releases will not preserve compatibility, and compatibility and migration
 > commitments begin with the future 1.x line.
