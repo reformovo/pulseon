@@ -3,7 +3,13 @@
 PulseOn is a local-first training metrics tracker backed by Rust, PyO3, DuckDB,
 and DuckLake.
 
-Release candidate: 0.1.0rc1 / frozen 0.1.0 headless read surface:
+> [!IMPORTANT]
+> Experimental. PulseOn is in the 0.x line. Pre-1.0 releases do not promise
+> store, API, or machine-output compatibility; breaking changes between 0.x
+> releases will not preserve compatibility, and compatibility and migration
+> commitments begin with the future 1.x line.
+
+PulseOn 0.1.0 / frozen headless read surface:
 
 - discover projects, runs, metrics, and persisted metric points
 - query running runs from the writer client after reports reach storage
@@ -12,12 +18,12 @@ Release candidate: 0.1.0rc1 / frozen 0.1.0 headless read surface:
 - use DuckDB or SQLite catalogs with local or S3-compatible Parquet data
 - keep the Parquet schema as the long-term compatibility boundary
 
-Install the release candidate with `pip install pulseon==0.1.0rc1`.
+Install with `pip install pulseon`.
 
-Known RC limit: with the default DuckDB catalog, an independent client may not
+Known limit: with the default DuckDB catalog, an independent client may not
 attach or refresh while a writer is active. Use the writer client for live
 queries or open independent readers after writer shutdown. See the
-[0.1.0rc1 release notes](docs/release-notes/0.1.0rc1.md) for validation details
+[0.1.0 release notes](docs/release-notes/0.1.0.md) for validation details
 and other deferred capabilities.
 
 Quickstart:
