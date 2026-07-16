@@ -71,7 +71,7 @@ These items are intentionally not part of the 0.1.0 release.
   README, release notes, and known limits.
 - [x] Validate fresh stores with DuckDB and SQLite catalogs, local and
   S3-compatible data paths, and both online and offline LTTB paths.
-- [ ] Run sustained training, concurrent reads, failure, restart, and terminal
+- [x] Run sustained training, concurrent reads, failure, restart, and terminal
   flush scenarios against packaged artifacts.
 - [ ] Freeze the RC surface and accept only release blockers until
   promotion.
