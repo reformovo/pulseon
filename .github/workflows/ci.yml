@@ -51,6 +51,7 @@ jobs:
   minio:
     name: MinIO/S3 acceptance
     if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    needs: [linux]
     runs-on: ubuntu-latest
     env:
       PULSEON_MINIO_ENDPOINT: localhost:9000
@@ -66,8 +67,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - name: Install PulseOn and test dependencies
-        run: uv sync --group testing-extra
+      - name: Download built wheel
+        uses: actions/download-artifact@v7
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+      - name: Install built wheel and test dependencies
+        run: uv pip install --system pytest dist/*.whl
       - name: Start MinIO
         run: |
           docker run --detach --name pulseon-minio \
@@ -97,9 +103,13 @@ jobs:
             "$PULSEON_MINIO_SECRET_ACCESS_KEY"
           mc mb "pulseon/$PULSEON_MINIO_BUCKET"
       - name: Run S3 acceptance for both catalog backends
-        run: uv run pytest tests/test_minio_acceptance.py
+        run: python -m pytest tests/test_minio_acceptance.py
+      - name: Run local acceptance for both catalog backends
+        run: python -m pytest tests/test_catalog_backend_parity.py
       - name: Run read-amplification gate for both catalog backends
-        run: uv run python scripts/bench_minio_metric_query.py
+        run: python scripts/bench_minio_metric_query.py
+      - name: Validate online and offline LTTB paths from the wheel
+        run: python scripts/rc_lttb_validation.py
 
   linux:
     if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
