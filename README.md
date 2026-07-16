@@ -9,7 +9,7 @@ and DuckLake.
 > releases will not preserve compatibility, and compatibility and migration
 > commitments begin with the future 1.x line.
 
-PulseOn 0.1.0 / frozen headless read surface:
+PulseOn 0.1.1 / frozen headless read surface:
 
 - discover projects, runs, metrics, and persisted metric points
 - query running runs from the writer client after reports reach storage
@@ -23,7 +23,7 @@ Install with `pip install pulseon`.
 Known limit: with the default DuckDB catalog, an independent client may not
 attach or refresh while a writer is active. Use the writer client for live
 queries or open independent readers after writer shutdown. See the
-[0.1.0 release notes](docs/release-notes/0.1.0.md) for validation details
+[0.1.1 release notes](docs/release-notes/0.1.1.md) for validation details
 and other deferred capabilities.
 
 Quickstart:
