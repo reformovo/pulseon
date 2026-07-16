@@ -56,13 +56,13 @@ These items are intentionally not part of the 0.1.0 release.
 
 ### Phase 4: Automated Release Gates
 
-- [ ] Make Rust formatting, Clippy, Rust tests, Pyright, and pytest required CI
+- [x] Make Rust formatting, Clippy, Rust tests, Pyright, and pytest required CI
   jobs rather than release-note-only manual evidence.
-- [ ] Run the MinIO/S3 acceptance and read-amplification gates automatically on
+- [x] Run the MinIO/S3 acceptance and read-amplification gates automatically on
   the Linux release path for both catalog backends.
-- [ ] Install every wheel and run import plus minimal init, log, finish, and
+- [x] Install every wheel and run import plus minimal init, log, finish, and
   query smoke tests on primary Linux, macOS, and Windows targets.
-- [ ] Verify sdist installation and keep tag publication blocked on all test,
+- [x] Verify sdist installation and keep tag publication blocked on all test,
   acceptance, wheel-smoke, and artifact-build jobs.
 
 ### Phase 5: Release Candidate Validation
