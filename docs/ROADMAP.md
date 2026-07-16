@@ -67,7 +67,7 @@ These items are intentionally not part of the 0.1.0 release.
 
 ### Phase 5: Release Candidate Validation
 
-- [ ] Publish `0.1.0rc1` with release-candidate package metadata, classifiers,
+- [x] Publish `0.1.0rc1` with release-candidate package metadata, classifiers,
   README, release notes, and known limits.
 - [x] Validate fresh stores with DuckDB and SQLite catalogs, local and
   S3-compatible data paths, and both online and offline LTTB paths.
@@ -78,9 +78,9 @@ These items are intentionally not part of the 0.1.0 release.
 
 ### Phase 6: 0.1.0 Promotion
 
-- [ ] Resolve every release blocker found during the RC window and rerun
+- [x] Resolve every release blocker found during the RC window and rerun
   the complete automated gate on the final commit.
-- [ ] Publish `0.1.0`, replace alpha metadata, document behavior and known
+- [x] Publish `0.1.0`, replace alpha metadata, document behavior and known
   limits, and verify wheel and sdist installation from published artifacts.
 
 ## Later Backlog
