@@ -93,10 +93,11 @@ jobs:
           exit 1
       - name: Install MinIO client and create bucket
         run: |
-          sudo curl --fail --silent --show-error \
+          sudo curl --fail --location --silent --show-error \
             --output /usr/local/bin/mc \
             https://dl.min.io/client/mc/release/linux-amd64/archive/mc.RELEASE.2025-08-13T08-35-41Z
           sudo chmod +x /usr/local/bin/mc
+          mc --version
           mc alias set pulseon \
             http://localhost:9000 \
             "$PULSEON_MINIO_ACCESS_KEY_ID" \
