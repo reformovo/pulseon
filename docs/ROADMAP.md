@@ -73,7 +73,7 @@ These items are intentionally not part of the 0.1.0 release.
   S3-compatible data paths, and both online and offline LTTB paths.
 - [x] Run sustained training, concurrent reads, failure, restart, and terminal
   flush scenarios against packaged artifacts.
-- [ ] Freeze the RC surface and accept only release blockers until
+- [x] Freeze the RC surface and accept only release blockers until
   promotion.
 
 ### Phase 6: 0.1.0 Promotion
