@@ -70,8 +70,6 @@ pub enum EngineError {
     StorageFailure(pulseon_storage::StorageError),
     #[error("storage operation failed: {message}")]
     StorageLayer { message: String },
-    #[error("DuckDB LTTB extension is unavailable: {message}")]
-    LttbExtensionUnavailable { message: String },
     #[error("invalid stored run status: {status}")]
     InvalidRunStatus { status: String },
     #[error("invalid stored timestamp for {field}: {millis}")]

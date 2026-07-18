@@ -626,7 +626,6 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         | crate::engine::EngineError::ProjectAlreadyExists { .. }
         | crate::engine::EngineError::ProjectNotFound { .. }
         | crate::engine::EngineError::RunNotFound { .. }
-        | crate::engine::EngineError::LttbExtensionUnavailable { .. }
         | crate::engine::EngineError::CatalogNotFound { .. }
         | crate::engine::EngineError::Storage { .. }
         | crate::engine::EngineError::StorageFailure(_)
