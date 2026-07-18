@@ -151,13 +151,14 @@ pub struct AxisRange {
 }
 
 impl AxisRange {
-    /// Creates a finite range where `start < end`.
+    /// Creates a finite range where `start < end` and the span is finite.
     ///
     /// # Errors
     ///
-    /// Returns [`ChartError::InvalidRange`] for an empty or non-finite range.
+    /// Returns [`ChartError::InvalidRange`] for an empty range, non-finite
+    /// endpoint, or overflowing span.
     pub fn new(start: f64, end: f64) -> Result<Self, ChartError> {
-        if !start.is_finite() || !end.is_finite() || start >= end {
+        if !start.is_finite() || !end.is_finite() || start >= end || !(end - start).is_finite() {
             return Err(ChartError::InvalidRange);
         }
         Ok(Self { start, end })
@@ -238,9 +239,14 @@ impl LinearScale {
     ///
     /// # Errors
     ///
-    /// Returns [`ChartError::InvalidOutputRange`] for an invalid output interval.
+    /// Returns [`ChartError::InvalidOutputRange`] for a non-finite, empty, or
+    /// overflowing output interval.
     pub fn new(domain: AxisRange, output_start: f64, output_end: f64) -> Result<Self, ChartError> {
-        if !output_start.is_finite() || !output_end.is_finite() || output_start == output_end {
+        if !output_start.is_finite()
+            || !output_end.is_finite()
+            || output_start == output_end
+            || !(output_end - output_start).is_finite()
+        {
             return Err(ChartError::InvalidOutputRange);
         }
         Ok(Self {
@@ -353,6 +359,39 @@ mod tests {
 
         assert_eq!(scale.map(2.5), 75.0);
         assert_eq!(scale.invert(75.0), 2.5);
+    }
+
+    #[test]
+    fn axis_range_rejects_overflowing_span() {
+        assert_eq!(
+            AxisRange::new(-f64::MAX, f64::MAX),
+            Err(ChartError::InvalidRange)
+        );
+    }
+
+    #[test]
+    fn linear_scale_rejects_overflowing_output_span() {
+        assert_eq!(
+            LinearScale::new(range(0.0, 1.0), -f64::MAX, f64::MAX),
+            Err(ChartError::InvalidOutputRange)
+        );
+    }
+
+    #[test]
+    fn linear_scale_maps_accepted_extreme_endpoints_to_finite_values() {
+        let start = -f64::MAX / 2.0;
+        let end = f64::MAX / 2.0;
+        let scale = LinearScale::new(range(start, end), start, end)
+            .expect("finite spans should produce a valid scale");
+
+        for value in [
+            scale.map(start),
+            scale.map(end),
+            scale.invert(start),
+            scale.invert(end),
+        ] {
+            assert!(value.is_finite(), "expected a finite endpoint, got {value}");
+        }
     }
 
     #[test]
