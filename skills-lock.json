@@ -13,6 +13,12 @@
       "skillPath": "skills/engineering/grill-with-docs/SKILL.md",
       "computedHash": "e7ef25bbee50cda2eb7b3a8ef541db0a0396dad7d369f7d14fb610671dd1864b"
     },
+    "grilling": {
+      "source": "reformovo/skills",
+      "sourceType": "github",
+      "skillPath": "skills/grilling/SKILL.md",
+      "computedHash": "d7d0c3d296a6633c1f8fc44fdd036bb8ef6c63d560409116f5e81e8a8cf0554e"
+    },
     "python-best-practices": {
       "source": "reformovo/skills",
       "sourceType": "github",
