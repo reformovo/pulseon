@@ -33,6 +33,12 @@ release.
 - **Read surface**: The read-only product boundary through which trainers and
   agents discover and consume stored PulseOn data. It is not an agent-specific
   API or direct access to storage internals.
+- **Native project store**: The authoritative local collection of project
+  metadata, run lifecycle state, and persisted metric points, including points
+  not yet exported to Parquet.
+- **Parquet dataset**: An open, fact-only representation of flushed metric
+  points that follows the PulseOn Parquet compatibility contract. It is not a
+  catalog or an authoritative native project store.
 - **Run summary**: Derived per-run values for run lists and comparisons.
 - **Metric aggregate**: Materialized-view-like index/state from metric writes.
 - **Reporting diagnostics**: Minimal observable state for pending reports,

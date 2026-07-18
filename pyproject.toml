@@ -51,11 +51,18 @@ linting = [
 
 [tool.uv]
 # Rebuild package when any rust files change
-cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
+cache-keys = [
+    {file = "pyproject.toml"},
+    {file = "Cargo.toml"},
+    {file = "crates/*/Cargo.toml"},
+    {file = "**/*.rs"},
+]
 # Uncomment to build rust code in development mode
 config-settings = { build-args = '--profile=dev' }
 
 [tool.maturin]
+manifest-path = "crates/pulseon-python/Cargo.toml"
+include = [{ path = ".cargo/config.toml", format = "sdist" }]
 python-source = "python"
 module-name = "pulseon._pulseon"
 bindings = "pyo3"

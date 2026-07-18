@@ -4,84 +4,83 @@
 > `docs/release-notes/`; durable product boundaries live in
 > `docs/native-storage-boundary.md` and accepted ADRs in `docs/adr/`.
 
-The completed alpha plan is in the
-[`0.1.0a5` release notes](release-notes/0.1.0a5.md). Pre-1.0 releases do not
-promise store, API, or machine-output compatibility; compatibility and
-migration commitments begin with the future 1.x line.
+Pre-1.0 releases do not promise store, API, or machine-output compatibility;
+compatibility and migration commitments begin with the future 1.0 release.
 
-## 0.1.0rc1 to 0.1.0 / V6
+## 0.2.x / Desktop Curve Viewer
 
-V6 prepares the native metric loop and headless read surface for the 0.1.0
-release. It prioritizes fresh-install behavior and automated gates.
-Autoresearch, viewers, MCP, shared cloud coordination, workspace hierarchy,
-and pre-1.0 compatibility or migration are not release blockers.
+0.2.x unlocks interactive analysis that 0.1.x's headless read surface cannot
+provide, and ships the comparison alignment semantics that the viewer consumes.
+See [ADR 0011](adr/0011-desktop-first-curve-viewer.md) for the desktop-first
+decision and [ADR 0012](adr/0012-defer-remote-training.md) for the remote
+training deferral.
 
-### Deferred to 1.x: Stable Contract
+### Phase 1: Workspace Migration and Renderer-Agnostic Chart Core
 
-These items are intentionally not part of the 0.1.0 release.
+- [x] One-time workspace migration to a virtual Cargo workspace (root `Cargo.toml`
+  holds only `[workspace]`, no `[package]`): move `src/` to
+  `crates/pulseon-core/src/`, set `members = ["crates/*"]`, update
+  `pyproject.toml`/maturin `manifest-path` and any CI `cargo` invocations. No
+  behavior change; `cargo check`, `cargo test`, `uv run maturin develop`,
+  `uv run pyright`, and `uv run pytest` must still pass after the move.
+- [x] `crates/pulseon-chart-core`: series model, viewport, scales, ticks,
+  path projection, path cache, hit testing, selection and zoom state. Must not
+  depend on GPUI, egui, Tauri, React, or a browser runtime, and must be unit
+  testable without a window.
+- [x] `crates/pulseon-data`: Parquet/DuckDB query and PulseOn schema validation,
+  viewport-aware query planning, and screen-budgeted point reduction. Reuses the
+  existing Parquet schema contract; no schema changes.
 
-- [ ] Accept an ADR defining 1.x compatibility for the typed Python API,
-  versioned CLI JSON, catalog application schema, and Parquet schema.
-- [ ] Add an explicit store schema/version marker without changing the metric
-  point Parquet compatibility boundary.
-- [ ] Support an explicit `0.1.0a5` store upgrade; diagnose older unversioned
-  stores without promising direct a1-a4 migration.
-- [ ] Document additive changes, deprecation, breaking changes, and the support
-  window for stable stores and machine-readable output.
+### Phase 1.5: Crate Responsibility Realignment
 
-### Deferred to 1.x: Store Doctor and Migration
+- [x] Extract shared domain and query contracts into `pulseon-model`.
+- [x] Split the PyO3 artifact into `pulseon-python`, leaving `pulseon-core` as a
+  reusable application library.
+- [x] Rename `pulseon-data` to `pulseon-storage` and consolidate native project
+  and standalone Parquet reads behind one metric query contract.
+- [x] Move DuckDB/DuckLake bootstrap, reads, writes, flush, configuration, and
+  storage errors out of Core. Preserve the Python API and Parquet contract.
+- [x] Enforce the dependency direction in `docs/crate-boundaries.md` before
+  adding the GPUI viewer.
 
-These items are intentionally not part of the 0.1.0 release.
+### Phase 2: Comparison Alignment Semantics
 
-- [ ] Add read-only `pulseon doctor` output for configured and detected catalog
-  backends, schema compatibility, conflicting artifacts, and recovery advice.
-- [ ] Keep ordinary diagnostics sanitized. Expose full local paths only through
-  an explicit verbose diagnostic mode.
-- [ ] Add an explicit, retry-safe migration command that backs up catalog state
-  and never rewrites a store during ordinary initialization.
-- [ ] Cover DuckDB and SQLite stores, backend/config mismatches, mixed legacy
-  artifacts, interrupted migration, retry, and backup recovery.
+- [ ] Define the comparison contract (step, elapsed wall time, cumulative
+  tokens, normalized budget progress [0,1]) as a shareable, renderer-agnostic
+  surface. Document in a `docs/comparison-semantics.md`-style spec marked as a
+  0.2.x contract that may change before 1.0; no ADR until 1.0 freezes it.
+- [ ] `metrics compare` / `autoresearch compare` with objective direction,
+  incumbent derivation, absolute and relative delta, secondary metrics, evidence
+  completeness, and versioned JSON envelope. Comparison output is evidence
+  (deltas, compute-only advice), never persisted research decisions or catalog
+  state.
+- [ ] `autoresearch leaderboard` / `autoresearch best` building on pairwise
+  comparison: direction-aware ranking across many runs.
 
-### Phase 3: Fresh-install Downsampling
+### Phase 3: GPUI Desktop Viewer
 
-- [x] Keep the CLI's 200-point default and automatically run the official
-  `INSTALL lttb FROM community; LOAD lttb;` flow when first required.
-- [x] Keep Python SDK downloads opt-in so library queries do not introduce
-  implicit network access.
-- [x] Preserve offline paths through `--all` and `PULSEON_LTTB_EXTENSION_PATH`,
-  with structured guidance when installation or loading fails.
-- [x] Delegate signed extension compatibility to DuckDB and the community
-  extension repository instead of duplicating their platform matrix in
-  PulseOn's generated CI; platforms without an upstream build retain `--all`.
+- [ ] `crates/pulseon-viewer`: GPUI desktop shell, layout, file/directory
+  picking, panels and commands, rendering adapter. Consumes the Phase 2
+  comparison contract for multi-axis comparison support.
+- [ ] Spike validation gates from `docs/drafts/gpui-curve-viewer-spike.md`:
+  render 10 visible series smoothly after viewport downsampling; pan, zoom, and
+  hover remain responsive with million-point source series; chart-core is unit
+  testable without a GPUI window; replacing GPUI would require a renderer adapter
+  rewrite, not a data model rewrite.
+- [ ] Release artifacts: Python wheel (`maturin build`, unchanged) plus a native
+  desktop binary (`cargo build -p pulseon-viewer --release`, new).
 
-### Phase 4: Automated Release Gates
+### Out of 0.2.x Scope
 
-- [x] Make Rust formatting, Clippy, Rust tests, Pyright, and pytest required CI
-  jobs rather than release-note-only manual evidence.
-- [x] Run the MinIO/S3 acceptance and read-amplification gates automatically on
-  the Linux release path for both catalog backends.
-- [x] Install every wheel and run import plus minimal init, log, finish, and
-  query smoke tests on primary Linux, macOS, and Windows targets.
-- [x] Verify sdist installation and keep tag publication blocked on all test,
-  acceptance, wheel-smoke, and artifact-build jobs.
-
-### Phase 5: Release Candidate Validation
-
-- [x] Publish `0.1.0rc1` with release-candidate package metadata, classifiers,
-  README, release notes, and known limits.
-- [x] Validate fresh stores with DuckDB and SQLite catalogs, local and
-  S3-compatible data paths, and both online and offline LTTB paths.
-- [x] Run sustained training, concurrent reads, failure, restart, and terminal
-  flush scenarios against packaged artifacts.
-- [x] Freeze the RC surface and accept only release blockers until
-  promotion.
-
-### Phase 6: 0.1.0 Promotion
-
-- [x] Resolve every release blocker found during the RC window and rerun
-  the complete automated gate on the final commit.
-- [x] Publish `0.1.0`, replace alpha metadata, document behavior and known
-  limits, and verify wheel and sdist installation from published artifacts.
+- Stable Contract / compatibility ADR / schema version marker / deprecation
+  policy (deferred to 1.0).
+- Retry-safe migration command (mutates state; deferred to 1.0).
+- Persisted research decisions / durable research context / lineage / decisions
+  in catalog state (ADR-gated, later).
+- Research driver with Git/source mutation (ADR-gated, later).
+- Remote training service delivery (deferred per ADR 0012).
+- Repetition / significance / uncertainty policies (after deterministic
+  policies are validated).
 
 ## Later Backlog
 
@@ -94,16 +93,34 @@ These items are intentionally not part of the 0.1.0 release.
 
 - [ ] Add environment-variable or AWS credential-chain discovery for S3
   credentials when explicit config-file credentials are insufficient.
-- [ ] Evaluate the [remote control-service boundary](drafts/remote-training-architecture-notes.md)
+- [ ] Revisit the [remote control-service boundary](drafts/remote-training-architecture-notes.md)
+  when local training is complete and a real rented-GPU workflow exists, per
+  [ADR 0012](adr/0012-defer-remote-training.md). Produce a remote training ADR
   before adding remote writers or shared catalog coordination.
 - [ ] Consider PostgreSQL catalog support only when remote service scale or
   availability requires it.
 
 ### Analysis and Agent Workflows
 
-- [ ] Evaluate the [native curve viewer](drafts/gpui-curve-viewer-spike.md)
-  without adding plotting dependencies to the Python/Rust SDK.
 - [ ] Evaluate the [research driver](drafts/autoresearch-control-loop-notes.md)
   without moving source or Git mutation into PulseOn Core.
 - [ ] Design workspace hierarchy, config/tag filtering, export, Web UI, MCP,
   and other agent-facing surfaces as independently reviewable roadmap phases.
+
+## 1.0 / Stable Contract
+
+1.0 freezes the surfaces proven by 0.2.x. It is the first release with a
+compatibility commitment; pre-1.0 releases make none.
+
+- [ ] Accept an ADR defining 1.0 compatibility for the typed Python API,
+  versioned CLI JSON, catalog application schema, and Parquet schema.
+- [ ] Add an explicit store schema/version marker without changing the metric
+  point Parquet compatibility boundary.
+- [ ] Support an explicit `0.1.0a5` store upgrade; diagnose older unversioned
+  stores without promising direct a1-a4 migration.
+- [ ] Document additive changes, deprecation, breaking changes, and the support
+  window for stable stores and machine-readable output.
+- [ ] Add an explicit, retry-safe migration command that backs up catalog state
+  and never rewrites a store during ordinary initialization. Cover DuckDB and
+  SQLite stores, backend/config mismatches, mixed legacy artifacts, interrupted
+  migration, retry, and backup recovery.
