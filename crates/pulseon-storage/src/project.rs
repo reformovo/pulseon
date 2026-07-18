@@ -1,11 +1,9 @@
 use std::ops::Deref;
 
 use chrono::{DateTime, Utc};
-use pulseon_model::metric::{MetricAggregate, MetricKey, MetricQuery, MetricQueryResult};
 use pulseon_model::run::{Run, RunId, RunStatus};
 use pulseon_model::types::{Project, ProjectId};
 
-use crate::metric_query::ProjectMetricReader;
 use crate::rows::status_as_str;
 use crate::time::{timestamp_as_rfc3339, timestamp_from_millis};
 use crate::write::NativeWriteStore;
@@ -193,34 +191,6 @@ impl ProjectConnection {
             "CALL ducklake_flush_inlined_data('dl', table_name => 'metric_points');",
         )?;
         Ok(())
-    }
-
-    pub fn query_metric(&self, query: &MetricQuery) -> Result<MetricQueryResult, StorageError> {
-        ProjectMetricReader::new(&self.connection).query_metric(query)
-    }
-
-    pub fn metric_aggregate(
-        &self,
-        run_id: &RunId,
-        metric_key: &MetricKey,
-    ) -> Result<MetricAggregate, StorageError> {
-        ProjectMetricReader::new(&self.connection).metric_aggregate(run_id, metric_key)
-    }
-
-    pub fn query_metric_summaries(
-        &self,
-        run_ids: &[RunId],
-        metric_key: &MetricKey,
-    ) -> Result<Vec<MetricAggregate>, StorageError> {
-        ProjectMetricReader::new(&self.connection).query_metric_summaries(run_ids, metric_key)
-    }
-
-    pub fn list_metrics(
-        &self,
-        run_id: &RunId,
-        status: RunStatus,
-    ) -> Result<Vec<MetricAggregate>, StorageError> {
-        ProjectMetricReader::new(&self.connection).list_metrics(run_id, status)
     }
 
     pub fn append_metric_batch(&self, rows: &[MetricWrite]) -> Result<(), StorageError> {
