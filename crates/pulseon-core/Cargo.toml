@@ -1,0 +1,46 @@
+[package]
+name = "pulseon"
+version = "0.1.1"
+edition = "2024"
+description = "Local-first training metrics tracker backed by Rust, PyO3, DuckDB, and DuckLake."
+license = "MIT"
+repository = "https://github.com/reformovo/pulseon"
+readme = "../../README.md"
+
+[lib]
+name = "pulseon"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Python binding
+pyo3 = { version = "0.29", features = ["abi3-py311"] }
+pyo3-arrow = "0.19"
+
+# DuckDB (embedded) — version encoding 1.MAJOR_MINOR_PATCH.x → DuckDB v1.5.4
+# "bundled": compile DuckDB C++ from source (maturin wheel distribution)
+duckdb = { version = "~1.10504.0", features = ["bundled"] }
+
+# Async runtime
+tokio = { version = "1.52", features = ["full"] }
+async-trait = "0.1"
+
+# Error handling
+thiserror = "2"
+# anyhow = "1.0"  # add in Phase 4 for mixed-error ? in engine orchestration
+
+# Serialization (config, summary JSON)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.1.2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# IDs and timestamps
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+default = ["native"]
+native = []

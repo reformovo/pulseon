@@ -17,7 +17,7 @@ training deferral.
 
 ### Phase 1: Workspace Migration and Renderer-Agnostic Chart Core
 
-- [ ] One-time workspace migration to a virtual Cargo workspace (root `Cargo.toml`
+- [x] One-time workspace migration to a virtual Cargo workspace (root `Cargo.toml`
   holds only `[workspace]`, no `[package]`): move `src/` to
   `crates/pulseon-core/src/`, set `members = ["crates/*"]`, update
   `pyproject.toml`/maturin `manifest-path` and any CI `cargo` invocations. No
