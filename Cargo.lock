@@ -1390,7 +1390,6 @@ dependencies = [
  "chrono",
  "pulseon-core",
  "pyo3",
- "thiserror",
 ]
 
 [[package]]
