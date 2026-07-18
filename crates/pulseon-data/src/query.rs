@@ -212,8 +212,7 @@ impl<'connection> DuckDbMetricStore<'connection> {
         connection: &'connection Connection,
         source: ParquetSource,
     ) -> Result<Self, DataError> {
-        let columns = inspect_schema(connection, &source)?;
-        let schema = validate_metric_point_schema(columns)?;
+        let schema = inspect_schema(connection, &source)?;
         Ok(Self {
             connection,
             source,
@@ -292,13 +291,43 @@ fn percent_encode_metric_key(value: &str) -> String {
 fn inspect_schema(
     connection: &Connection,
     source: &ParquetSource,
-) -> Result<Vec<ColumnSchema>, DataError> {
+) -> Result<SchemaReport, DataError> {
+    for file_name in parquet_file_names(connection, source)? {
+        let columns = describe_parquet(connection, &file_name, false)?;
+        validate_metric_point_schema(columns)?;
+    }
+
+    let columns = describe_parquet(connection, source.location(), true)?;
+    validate_metric_point_schema(columns)
+}
+
+fn parquet_file_names(
+    connection: &Connection,
+    source: &ParquetSource,
+) -> Result<Vec<String>, DataError> {
     let mut statement = connection.prepare(
+        "SELECT DISTINCT file_name
+         FROM parquet_schema(?)
+         ORDER BY file_name",
+    )?;
+    let rows = statement.query_map([source.location()], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DataError::from)
+}
+
+fn describe_parquet(
+    connection: &Connection,
+    location: &str,
+    union_by_name: bool,
+) -> Result<Vec<ColumnSchema>, DataError> {
+    let sql = if union_by_name {
         "DESCRIBE SELECT * FROM read_parquet(
              ?, hive_partitioning = true, union_by_name = true
-         )",
-    )?;
-    let rows = statement.query_map([source.location()], |row| {
+         )"
+    } else {
+        "DESCRIBE SELECT * FROM read_parquet(?, hive_partitioning = true)"
+    };
+    let mut statement = connection.prepare(sql)?;
+    let rows = statement.query_map([location], |row| {
         let nullable: String = row.get(2)?;
         Ok(ColumnSchema::new(
             row.get::<_, String>(0)?,
@@ -320,6 +349,12 @@ mod tests {
 
     static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
 
+    #[derive(Clone, Copy)]
+    enum IncompatibleSchema {
+        MissingEncodedKey,
+        StepInteger,
+    }
+
     struct TestParquet {
         directory: PathBuf,
         location: String,
@@ -327,9 +362,7 @@ mod tests {
 
     impl TestParquet {
         fn create(connection: &Connection) -> Result<Self, Box<dyn Error>> {
-            let id = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
-            let directory =
-                std::env::temp_dir().join(format!("pulseon-data-{}-{id}", std::process::id()));
+            let directory = test_directory();
             fs::create_dir_all(&directory)?;
             let path = directory.join("metric_points.parquet");
             connection.execute_batch(&format!(
@@ -364,6 +397,53 @@ mod tests {
                 location: path.to_string_lossy().into_owned(),
             })
         }
+
+        fn create_incompatible_union(
+            connection: &Connection,
+            incompatible: IncompatibleSchema,
+        ) -> Result<Self, Box<dyn Error>> {
+            let directory = test_directory();
+            fs::create_dir_all(&directory)?;
+            let valid_path = directory.join("valid.parquet");
+            let incompatible_path = directory.join("incompatible.parquet");
+            let projection = match incompatible {
+                IncompatibleSchema::MissingEncodedKey => {
+                    "run_id, metric_key, step, timestamp, value_f64, ingested_at"
+                }
+                IncompatibleSchema::StepInteger => {
+                    "run_id, metric_key, metric_key_encoded, step::INTEGER AS step, \
+                     timestamp, value_f64, ingested_at"
+                }
+            };
+            connection.execute_batch(&format!(
+                "CREATE TABLE source_points (
+                     run_id VARCHAR NOT NULL,
+                     metric_key VARCHAR NOT NULL,
+                     metric_key_encoded VARCHAR NOT NULL,
+                     step BIGINT NOT NULL,
+                     timestamp TIMESTAMPTZ NOT NULL,
+                     value_f64 DOUBLE NOT NULL,
+                     ingested_at TIMESTAMPTZ NOT NULL
+                 );
+                 INSERT INTO source_points VALUES
+                     ('run-1', 'loss', 'loss', 1, '2026-01-01 00:00:01+00', 1.0,
+                      '2026-01-01 00:00:01+00');
+                 COPY source_points TO '{}' (FORMAT PARQUET);
+                 COPY (SELECT {projection} FROM source_points)
+                     TO '{}' (FORMAT PARQUET);",
+                valid_path.display(),
+                incompatible_path.display(),
+            ))?;
+            Ok(Self {
+                directory: directory.clone(),
+                location: directory.join("*.parquet").to_string_lossy().into_owned(),
+            })
+        }
+    }
+
+    fn test_directory() -> PathBuf {
+        let id = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("pulseon-data-{}-{id}", std::process::id()))
     }
 
     impl Drop for TestParquet {
@@ -387,6 +467,42 @@ mod tests {
                 bucket_count: 100,
             }
         );
+    }
+
+    #[test]
+    fn store_rejects_a_physical_file_missing_a_contract_column() -> Result<(), Box<dyn Error>> {
+        let connection = Connection::open_in_memory()?;
+        let parquet = TestParquet::create_incompatible_union(
+            &connection,
+            IncompatibleSchema::MissingEncodedKey,
+        )?;
+        let source = ParquetSource::new(parquet.location.clone())?;
+
+        let result = DuckDbMetricStore::open(&connection, source);
+
+        assert!(matches!(
+            result,
+            Err(DataError::MissingColumn {
+                name: "metric_key_encoded"
+            })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn store_rejects_a_physical_file_with_a_promotable_type() -> Result<(), Box<dyn Error>> {
+        let connection = Connection::open_in_memory()?;
+        let parquet =
+            TestParquet::create_incompatible_union(&connection, IncompatibleSchema::StepInteger)?;
+        let source = ParquetSource::new(parquet.location.clone())?;
+
+        let result = DuckDbMetricStore::open(&connection, source);
+
+        assert!(matches!(
+            result,
+            Err(DataError::IncompatibleColumnType { name: "step", .. })
+        ));
+        Ok(())
     }
 
     #[test]
