@@ -12,7 +12,7 @@ use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 use crate::sdk::arrow::PyArrowTable;
-use crate::sdk::config::{InitConfigError, S3ConnectionOverrides, resolve_init_config};
+use pulseon_core::config::{InitConfigError, S3ConnectionOverrides, resolve_init_config};
 
 create_exception!(
     pulseon._pulseon,
@@ -622,15 +622,15 @@ fn runtime_error(error: crate::engine::EngineError) -> PyErr {
         crate::engine::EngineError::InvalidRunTransition { .. } => {
             InvalidRunStateError::new_err(message)
         }
-        crate::engine::EngineError::DuckDb(_)
-        | crate::engine::EngineError::Io(_)
+        crate::engine::EngineError::Io(_)
         | crate::engine::EngineError::ProjectAlreadyExists { .. }
         | crate::engine::EngineError::ProjectNotFound { .. }
         | crate::engine::EngineError::RunNotFound { .. }
         | crate::engine::EngineError::LttbExtensionUnavailable { .. }
         | crate::engine::EngineError::CatalogNotFound { .. }
         | crate::engine::EngineError::Storage { .. }
-        | crate::engine::EngineError::StorageDuckDb { .. } => StorageError::new_err(message),
+        | crate::engine::EngineError::StorageFailure(_)
+        | crate::engine::EngineError::StorageLayer { .. } => StorageError::new_err(message),
         crate::engine::EngineError::MetricQueryMaxPointsTooSmall { .. }
         | crate::engine::EngineError::MetricQueryMaxPointsTooLarge { .. } => {
             PulseOnError::new_err(message)

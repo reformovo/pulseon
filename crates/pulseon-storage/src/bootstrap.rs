@@ -1,19 +1,19 @@
 use std::path::{Path, PathBuf};
 
-use crate::engine::EngineError;
+use crate::StorageError;
 
 const DUCKLAKE_ALIAS: &str = "dl";
 const DUCKDB_CATALOG_ALIAS: &str = "pulseon_catalog";
 const S3_SECRET_NAME: &str = "pulseon_s3";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CatalogBackend {
+pub enum CatalogBackend {
     DuckDb,
     Sqlite,
 }
 
 impl CatalogBackend {
-    pub(crate) fn from_name(name: &str) -> Option<Self> {
+    pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "duckdb" => Some(Self::DuckDb),
             "sqlite" => Some(Self::Sqlite),
@@ -29,7 +29,7 @@ impl CatalogBackend {
     }
 }
 
-pub(crate) struct NativeStorageConfig {
+pub struct NativeStorageConfig {
     catalog_backend: CatalogBackend,
     catalog_path: PathBuf,
     data_path: PathBuf,
@@ -37,18 +37,18 @@ pub(crate) struct NativeStorageConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct S3ConnectionConfig {
-    pub(crate) endpoint: String,
-    pub(crate) access_key_id: String,
-    pub(crate) secret_access_key: String,
-    pub(crate) session_token: Option<String>,
-    pub(crate) region: Option<String>,
-    pub(crate) path_style: Option<bool>,
-    pub(crate) use_ssl: Option<bool>,
+pub struct S3ConnectionConfig {
+    pub endpoint: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub session_token: Option<String>,
+    pub region: Option<String>,
+    pub path_style: Option<bool>,
+    pub use_ssl: Option<bool>,
 }
 
 impl S3ConnectionConfig {
-    pub(crate) fn new(
+    pub fn new(
         endpoint: String,
         access_key_id: String,
         secret_access_key: String,
@@ -123,10 +123,10 @@ impl CatalogAdapter {
         &self,
         connection: &duckdb::Connection,
         _catalog_path: &Path,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(), StorageError> {
         connection
             .execute_batch(&format!("USE {};", self.catalog_application_database))
-            .map_err(|source| EngineError::StorageDuckDb {
+            .map_err(|source| StorageError::StorageDuckDb {
                 operation: "selecting PulseOn catalog tables",
                 name: self.catalog_application_database.to_owned(),
                 source,
@@ -136,8 +136,7 @@ impl CatalogAdapter {
 }
 
 impl NativeStorageConfig {
-    #[cfg(test)]
-    pub(crate) fn duckdb(
+    pub fn duckdb(
         root_path: &Path,
         catalog_path: Option<PathBuf>,
         data_path: Option<PathBuf>,
@@ -151,7 +150,7 @@ impl NativeStorageConfig {
         )
     }
 
-    pub(crate) fn with_backend_and_s3_config(
+    pub fn with_backend_and_s3_config(
         catalog_backend: CatalogBackend,
         root_path: &Path,
         catalog_path: Option<PathBuf>,
@@ -170,38 +169,37 @@ impl NativeStorageConfig {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn open_native_connection(root_path: &Path) -> Result<duckdb::Connection, EngineError> {
+pub fn open_native_connection(root_path: &Path) -> Result<duckdb::Connection, StorageError> {
     open_native_connection_with_config(NativeStorageConfig::duckdb(root_path, None, None))
 }
 
-pub(crate) fn open_native_connection_with_config(
+pub fn open_native_connection_with_config(
     config: NativeStorageConfig,
-) -> Result<duckdb::Connection, EngineError> {
+) -> Result<duckdb::Connection, StorageError> {
     open_native_connection_with_mode(config, false)
 }
 
-pub(crate) fn open_existing_native_connection_with_config(
+pub fn open_existing_native_connection_with_config(
     config: NativeStorageConfig,
-) -> Result<duckdb::Connection, EngineError> {
+) -> Result<duckdb::Connection, StorageError> {
     open_native_connection_with_mode(config, true)
 }
 
 fn open_native_connection_with_mode(
     config: NativeStorageConfig,
     must_exist: bool,
-) -> Result<duckdb::Connection, EngineError> {
+) -> Result<duckdb::Connection, StorageError> {
     if must_exist {
         verify_catalog_exists(&config.catalog_path)?;
     } else if let Some(catalog_parent) = config.catalog_path.parent() {
-        std::fs::create_dir_all(catalog_parent).map_err(|source| EngineError::Storage {
+        std::fs::create_dir_all(catalog_parent).map_err(|source| StorageError::Storage {
             operation: "creating catalog directory",
             name: path_basename(catalog_parent),
             source,
         })?;
     }
     if !must_exist && !is_s3_data_path(&config.data_path) {
-        std::fs::create_dir_all(&config.data_path).map_err(|source| EngineError::Storage {
+        std::fs::create_dir_all(&config.data_path).map_err(|source| StorageError::Storage {
             operation: "creating data directory",
             name: path_basename(&config.data_path),
             source,
@@ -226,15 +224,15 @@ fn open_native_connection_with_mode(
     Ok(connection)
 }
 
-fn verify_catalog_exists(catalog_path: &Path) -> Result<(), EngineError> {
+fn verify_catalog_exists(catalog_path: &Path) -> Result<(), StorageError> {
     match std::fs::metadata(catalog_path) {
         Ok(_) => Ok(()),
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            Err(EngineError::CatalogNotFound {
+            Err(StorageError::CatalogNotFound {
                 name: path_basename(catalog_path),
             })
         }
-        Err(source) => Err(EngineError::Storage {
+        Err(source) => Err(StorageError::Storage {
             operation: "checking catalog",
             name: path_basename(catalog_path),
             source,
@@ -242,21 +240,20 @@ fn verify_catalog_exists(catalog_path: &Path) -> Result<(), EngineError> {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn attach_ducklake(
+pub fn attach_ducklake(
     connection: &duckdb::Connection,
     catalog_path: &Path,
     data_path: &Path,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     attach_ducklake_with_backend(connection, CatalogBackend::DuckDb, catalog_path, data_path)
 }
 
-pub(crate) fn attach_ducklake_with_backend(
+pub fn attach_ducklake_with_backend(
     connection: &duckdb::Connection,
     catalog_backend: CatalogBackend,
     catalog_path: &Path,
     data_path: &Path,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     let storage_name = format!(
         "{}, {}",
         path_basename(catalog_path),
@@ -270,7 +267,7 @@ pub(crate) fn attach_ducklake_with_backend(
          {}",
             adapter.attach_ducklake_statement(catalog_path, data_path)
         ))
-        .map_err(|source| EngineError::StorageDuckDb {
+        .map_err(|source| StorageError::StorageDuckDb {
             operation: "attaching DuckLake catalog",
             name: storage_name,
             source,
@@ -278,25 +275,24 @@ pub(crate) fn attach_ducklake_with_backend(
     Ok(())
 }
 
-pub(crate) fn setup_catalog_adapter(
+pub fn setup_catalog_adapter(
     connection: &duckdb::Connection,
     catalog_backend: CatalogBackend,
     catalog_path: &Path,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     catalog_backend
         .adapter()
         .setup_catalog_application_tables(connection, catalog_path)
 }
 
-#[cfg(test)]
-pub(crate) fn setup_duckdb_catalog_adapter(
+pub fn setup_duckdb_catalog_adapter(
     connection: &duckdb::Connection,
     catalog_path: &Path,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     setup_catalog_adapter(connection, CatalogBackend::DuckDb, catalog_path)
 }
 
-fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
+fn open_duckdb_connection() -> Result<duckdb::Connection, StorageError> {
     let mut config = duckdb::Config::default();
     if std::env::var_os("PULSEON_LTTB_EXTENSION_PATH").is_some() {
         config = config.allow_unsigned_extensions()?;
@@ -307,10 +303,10 @@ fn open_duckdb_connection() -> Result<duckdb::Connection, EngineError> {
 fn configure_s3_connection(
     connection: &duckdb::Connection,
     config: &S3ConnectionConfig,
-) -> Result<(), EngineError> {
+) -> Result<(), StorageError> {
     connection
         .execute_batch("INSTALL httpfs; LOAD httpfs;")
-        .map_err(|source| EngineError::StorageDuckDb {
+        .map_err(|source| StorageError::StorageDuckDb {
             operation: "loading DuckDB HTTPFS extension",
             name: "s3 data path".to_owned(),
             source,
@@ -318,7 +314,7 @@ fn configure_s3_connection(
 
     connection
         .execute_batch(&create_s3_secret_statement(config))
-        .map_err(|source| EngineError::StorageDuckDb {
+        .map_err(|source| StorageError::StorageDuckDb {
             operation: "configuring DuckDB S3 secret",
             name: "s3 data path".to_owned(),
             source,
@@ -357,7 +353,7 @@ fn create_s3_secret_statement(config: &S3ConnectionConfig) -> String {
     )
 }
 
-pub(crate) fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {
+pub fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS pulseon_projects (
              project_id VARCHAR NOT NULL,
@@ -416,7 +412,7 @@ fn path_basename(path: &Path) -> String {
         .to_owned()
 }
 
-pub(crate) fn is_s3_data_path(path: &Path) -> bool {
+pub fn is_s3_data_path(path: &Path) -> bool {
     path.to_string_lossy().starts_with("s3://")
 }
 
@@ -439,7 +435,7 @@ mod tests {
             .expect_err("missing catalog should fail");
 
         assert!(
-            matches!(error, EngineError::CatalogNotFound { .. }),
+            matches!(error, StorageError::CatalogNotFound { .. }),
             "expected missing catalog error, got {error:?}",
         );
         assert_eq!(error.to_string(), "catalog not found: catalog.ducklake");
@@ -460,7 +456,7 @@ mod tests {
         let message = error.to_string();
 
         assert!(
-            matches!(error, EngineError::StorageDuckDb { .. }),
+            matches!(error, StorageError::StorageDuckDb { .. }),
             "expected sanitized storage error, got {error:?}",
         );
         assert!(

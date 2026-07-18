@@ -24,12 +24,24 @@ training deferral.
   behavior change; `cargo check`, `cargo test`, `uv run maturin develop`,
   `uv run pyright`, and `uv run pytest` must still pass after the move.
 - [x] `crates/pulseon-chart-core`: series model, viewport, scales, ticks,
-  downsampling, path cache, hit testing, selection and zoom state. Must not
+  path projection, path cache, hit testing, selection and zoom state. Must not
   depend on GPUI, egui, Tauri, React, or a browser runtime, and must be unit
   testable without a window.
 - [x] `crates/pulseon-data`: Parquet/DuckDB query and PulseOn schema validation,
-  viewport-aware query planning. Reuses the existing Parquet schema contract; no
-  schema changes.
+  viewport-aware query planning, and screen-budgeted point reduction. Reuses the
+  existing Parquet schema contract; no schema changes.
+
+### Phase 1.5: Crate Responsibility Realignment
+
+- [x] Extract shared domain and query contracts into `pulseon-model`.
+- [x] Split the PyO3 artifact into `pulseon-python`, leaving `pulseon-core` as a
+  reusable application library.
+- [x] Rename `pulseon-data` to `pulseon-storage` and consolidate native project
+  and standalone Parquet reads behind one metric query contract.
+- [x] Move DuckDB/DuckLake bootstrap, reads, writes, flush, configuration, and
+  storage errors out of Core. Preserve the Python API and Parquet contract.
+- [x] Enforce the dependency direction in `docs/crate-boundaries.md` before
+  adding the GPUI viewer.
 
 ### Phase 2: Comparison Alignment Semantics
 

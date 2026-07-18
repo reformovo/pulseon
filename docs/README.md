@@ -7,6 +7,8 @@ notes, and historical architecture snapshots.
 
 - `docs/ROADMAP.md` for the current release plan and later backlog.
 - `docs/native-storage-boundary.md` for the current native storage boundary.
+- `docs/crate-boundaries.md` for workspace crate responsibilities and dependency
+  direction.
 - `docs/catalog-application-tables.md` for project, run, and aggregate catalog
   table schemas.
 - `docs/glossary.md` for product terms.

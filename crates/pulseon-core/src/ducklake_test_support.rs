@@ -34,11 +34,14 @@ pub fn attach_ducklake(
     dataset: &TestDataset,
 ) -> Result<(), EngineError> {
     attach_ducklake_dataset(connection, &dataset.catalog_path, &dataset.data_path)?;
-    setup_duckdb_catalog_adapter(connection, &dataset.catalog_path)
+    Ok(setup_duckdb_catalog_adapter(
+        connection,
+        &dataset.catalog_path,
+    )?)
 }
 
 pub fn create_minimal_v1_tables(connection: &duckdb::Connection) -> Result<(), EngineError> {
-    create_v1_tables(connection)
+    Ok(create_v1_tables(connection)?)
 }
 
 pub fn seed_minimal_v1_data(connection: &duckdb::Connection) -> duckdb::Result<()> {

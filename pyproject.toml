@@ -61,7 +61,7 @@ cache-keys = [
 config-settings = { build-args = '--profile=dev' }
 
 [tool.maturin]
-manifest-path = "crates/pulseon-core/Cargo.toml"
+manifest-path = "crates/pulseon-python/Cargo.toml"
 include = [{ path = ".cargo/config.toml", format = "sdist" }]
 python-source = "python"
 module-name = "pulseon._pulseon"

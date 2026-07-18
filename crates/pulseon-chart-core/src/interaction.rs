@@ -21,7 +21,6 @@ struct PathCacheKey {
     revision: u64,
     viewport_bits: [u64; 4],
     canvas_bits: [u64; 2],
-    max_points: Option<usize>,
 }
 
 /// Reuses projected paths until their series, viewport, or canvas changes.
@@ -45,7 +44,6 @@ impl PathCache {
         revision: u64,
         viewport: Viewport,
         canvas: CanvasSize,
-        max_points: Option<usize>,
     ) -> Result<Arc<[ScreenPoint]>, ChartError> {
         let key = PathCacheKey {
             revision,
@@ -56,7 +54,6 @@ impl PathCache {
                 viewport.y.end().to_bits(),
             ],
             canvas_bits: [canvas.width().to_bits(), canvas.height().to_bits()],
-            max_points,
         };
         if let Some((cached_key, path)) = self.entries.get(series.id())
             && cached_key == &key
@@ -64,7 +61,7 @@ impl PathCache {
             return Ok(Arc::clone(path));
         }
 
-        let path: Arc<[ScreenPoint]> = build_path(series, viewport, canvas, max_points)?.into();
+        let path: Arc<[ScreenPoint]> = build_path(series, viewport, canvas)?.into();
         self.entries
             .insert(series.id().clone(), (key, Arc::clone(&path)));
         Ok(path)
@@ -274,15 +271,15 @@ mod tests {
         let mut cache = PathCache::default();
 
         let first = cache
-            .path_for(&series, 1, viewport, canvas, None)
+            .path_for(&series, 1, viewport, canvas)
             .expect("path should build");
         let second = cache
-            .path_for(&series, 1, viewport, canvas, None)
+            .path_for(&series, 1, viewport, canvas)
             .expect("path should build");
 
         assert!(Arc::ptr_eq(&first, &second));
         let replacement = cache
-            .path_for(&series, 2, viewport, canvas, None)
+            .path_for(&series, 2, viewport, canvas)
             .expect("path should build");
         assert!(!Arc::ptr_eq(&first, &replacement));
         assert_eq!(cache.len(), 1);

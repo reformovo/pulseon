@@ -132,7 +132,7 @@ mod tests {
         // Then
         assert!(matches!(
             duplicate,
-            Err(crate::engine::EngineError::RunAlreadyExists { .. })
+            Err(pulseon_storage::StorageError::RunAlreadyExists { .. })
         ));
         assert_eq!(resumed, created);
         let run_count: i64 =
@@ -214,7 +214,7 @@ mod tests {
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
         let store = NativeWriteStore::new(connection);
-        let query = NativeQueryStore::new(connection);
+        let query = NativeQueryStore::from_duckdb(connection);
         let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -240,7 +240,7 @@ mod tests {
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
         let store = NativeWriteStore::new(connection);
-        let query = NativeQueryStore::new(connection);
+        let query = NativeQueryStore::from_duckdb(connection);
         let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -275,7 +275,7 @@ mod tests {
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
         let store = NativeWriteStore::new(connection);
-        let query = NativeQueryStore::new(connection);
+        let query = NativeQueryStore::from_duckdb(connection);
         let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -312,7 +312,7 @@ mod tests {
                  ('run-1', 'train/loss', 'train%2Floss', 9223372036854775806, now(), 0.125, now()),
                  ('run-1', 'train/loss', 'train%2Floss', 9223372036854775807, now(), 0.0625, now());",
         )?;
-        let query = NativeQueryStore::new(connection);
+        let query = NativeQueryStore::from_duckdb(connection);
         let run_id = RunId::from_string("run-1");
         let metric_key = MetricKey::from_string("train/loss");
 
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn query_metric_rejects_max_points_below_two() -> Result<(), Box<dyn Error>> {
         let dataset = open_project_dataset()?;
-        let query = NativeQueryStore::new(dataset.connection());
+        let query = NativeQueryStore::from_duckdb(dataset.connection());
         let error = query
             .query_metric(
                 &RunId::from_string("run-1"),
@@ -361,7 +361,7 @@ mod tests {
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
         let store = NativeWriteStore::new(connection);
-        let query = NativeQueryStore::new(connection);
+        let query = NativeQueryStore::from_duckdb(connection);
         let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");
@@ -389,7 +389,7 @@ mod tests {
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
         let store = NativeWriteStore::new(connection);
-        let query = NativeQueryStore::new(connection);
+        let query = NativeQueryStore::from_duckdb(connection);
         let project_id = ProjectId::from_string(PROJECT_ID);
         let run_a = store.create_run(&project_id, "a", Some(RunId::from_string("run-a")))?;
         let run_b = store.create_run(&project_id, "b", Some(RunId::from_string("run-b")))?;
@@ -434,7 +434,7 @@ mod tests {
         let dataset = open_project_dataset()?;
         let connection = dataset.connection();
         let store = NativeWriteStore::new(connection);
-        let query = NativeQueryStore::new(connection);
+        let query = NativeQueryStore::from_duckdb(connection);
         let project_id = ProjectId::from_string(PROJECT_ID);
         let run = store.create_run(&project_id, "metrics", Some(RunId::from_string("run-1")))?;
         let metric_key = MetricKey::from_string("train/loss");

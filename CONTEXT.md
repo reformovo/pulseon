@@ -44,6 +44,16 @@ The read-only product boundary through which trainers and agents discover and
 consume stored PulseOn data.
 _Avoid_: Agent API, storage API
 
+**Native project store**:
+The authoritative local collection of project metadata, run lifecycle state,
+and persisted metric points, including points not yet exported to Parquet.
+_Avoid_: Parquet directory, viewer database
+
+**Parquet dataset**:
+An open, fact-only representation of flushed metric points that follows the
+PulseOn Parquet compatibility contract.
+_Avoid_: Native project store, catalog
+
 **Closed run**:
 A run that no longer accepts metric reports because it is being finalized or has
 already reached a terminal state.

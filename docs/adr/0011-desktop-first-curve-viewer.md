@@ -3,6 +3,10 @@
 ## Status
 Accepted.
 
+The crate responsibility and dependency details in this ADR are superseded by
+[ADR 0013](0013-separate-model-storage-core-and-python.md). The desktop-first
+decision and renderer boundary remain accepted.
+
 ## Context
 PulseOn 0.1.x ships only a headless read surface (Python SDK + read-only CLI with
 versioned JSON). Trainers and agents can query metric series, but there is no
@@ -28,7 +32,7 @@ alongside the new viewer crates so all crates are equal workspace members:
 
 - `crates/pulseon-core` — the existing `_pulseon` cdylib (Python extension),
   moved from the root. maturin points at it via `manifest-path`.
-- `crates/pulseon-chart-core` — series model, viewport, scales, downsampling,
+- `crates/pulseon-chart-core` — series model, viewport, scales, path projection,
   path cache, hit testing; no GPUI/egui/Tauri/browser dependency.
 - `crates/pulseon-data` — Parquet/DuckDB query and PulseOn schema validation.
 - `crates/pulseon-viewer` — GPUI desktop shell, layout, rendering adapter.
@@ -67,6 +71,9 @@ The viewer does not change the Python/Rust SDK surface or the Parquet schema.
   matrix).
 - `pulseon-chart-core` must remain unit-testable without a GPUI window so the
   data and chart model can evolve without a renderer.
+- `pulseon-data` owns viewport filtering and screen-budgeted point reduction;
+  `pulseon-chart-core` projects every point delivered across the typed series
+  boundary, avoiding a second, non-equivalent downsampling pass.
 - Replacing GPUI later would require a renderer adapter rewrite, not a data
   model rewrite — this is the boundary the split protects.
 - Comparison alignment semantics (step, wall time, cumulative tokens, normalized

@@ -2,9 +2,10 @@
 
 - Python package backed by Rust/PyO3, built with `maturin`.
 - Virtual Cargo workspace: edition 2024 crates under `crates/`; the PyO3
-  `cdylib` source is under `crates/pulseon-core/src/`.
+  `cdylib` source is under `crates/pulseon-python/src/`.
 - Python package source: `python/pulseon/`; tests under `tests/`.
-- Architecture reference: `docs/native-storage-boundary.md`; roadmap: `docs/ROADMAP.md`.
+- Architecture references: `docs/native-storage-boundary.md` and
+  `docs/crate-boundaries.md`; roadmap: `docs/ROADMAP.md`.
 
 ## Must Always
 

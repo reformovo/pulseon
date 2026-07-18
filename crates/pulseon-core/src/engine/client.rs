@@ -1,9 +1,10 @@
 use std::collections::HashMap;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
+
+use pulseon_storage::{ProjectConnection, RunWriterGuard};
 
 use crate::engine::EngineError;
 use crate::engine::bootstrap::{
@@ -12,9 +13,7 @@ use crate::engine::bootstrap::{
 };
 use crate::engine::query::NativeQueryStore;
 use crate::engine::reporting::{MetricReporter, MetricReporterDiagnostics};
-use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
-use crate::engine::write::NativeWriteStore;
-use crate::engine::write_rows::status_as_str;
+use crate::engine::time::current_timestamp;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{Run, RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
@@ -22,7 +21,7 @@ use crate::model::types::{Project, ProjectId};
 pub struct NativeClient {
     root_path: PathBuf,
     reporter: MetricReporter,
-    connection: Arc<Mutex<duckdb::Connection>>,
+    connection: Arc<Mutex<ProjectConnection>>,
     active_runs: Arc<Mutex<HashMap<RunId, Arc<ActiveRun>>>>,
     flush_lock: Arc<Mutex<()>>,
     is_shutdown: AtomicBool,
@@ -56,7 +55,7 @@ impl NativeClient {
         )
     }
 
-    pub(crate) fn open_with_catalog_backend_storage_config(
+    pub fn open_with_catalog_backend_storage_config(
         path: impl AsRef<Path>,
         catalog_backend: CatalogBackend,
         catalog_path: Option<PathBuf>,
@@ -75,7 +74,7 @@ impl NativeClient {
         )
     }
 
-    pub(crate) fn open_existing_with_catalog_backend_storage_config(
+    pub fn open_existing_with_catalog_backend_storage_config(
         path: impl AsRef<Path>,
         catalog_backend: CatalogBackend,
         catalog_path: Option<PathBuf>,
@@ -116,7 +115,7 @@ impl NativeClient {
         } else {
             open_native_connection_with_config(storage_config)?
         };
-        let connection = Arc::new(Mutex::new(connection));
+        let connection = Arc::new(Mutex::new(ProjectConnection::new(connection)));
         let reporter =
             MetricReporter::open_with_capacity(Arc::clone(&connection), metric_queue_capacity);
 
@@ -145,82 +144,25 @@ impl NativeClient {
         }
 
         let created_at = current_timestamp("created_at")?;
-        let connection = self.connection()?;
-        connection.execute(
-            "INSERT INTO pulseon_projects (project_id, name, created_at)
-             VALUES (?, ?, ?)",
-            (project_id.as_str(), name, timestamp_as_rfc3339(created_at)),
-        )?;
-
-        Ok(Project {
+        let project = Project {
             project_id,
             name: name.to_owned(),
             created_at,
-        })
+        };
+        self.connection()?.create_project(&project)?;
+        Ok(project)
     }
 
     pub fn get_project(&self, project_id: &ProjectId) -> Result<Project, EngineError> {
-        let connection = self.connection()?;
-        let result = connection.query_row(
-            "SELECT project_id, name, epoch_ms(created_at::TIMESTAMPTZ)
-             FROM pulseon_projects
-             WHERE project_id = ?",
-            [project_id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
-        );
-        let (project_id, name, created_at_millis) = match result {
-            Ok(stored) => stored,
-            Err(duckdb::Error::QueryReturnedNoRows) => {
-                return Err(EngineError::ProjectNotFound {
-                    project_id: project_id.as_str().to_owned(),
-                });
-            }
-            Err(source) => return Err(source.into()),
-        };
-
-        Ok(Project {
-            project_id: ProjectId::from_string(project_id),
-            name,
-            created_at: crate::engine::time::timestamp_from_millis(
-                "created_at",
-                created_at_millis,
-            )?,
-        })
+        self.connection()?
+            .get_project(project_id)?
+            .ok_or_else(|| EngineError::ProjectNotFound {
+                project_id: project_id.as_str().to_owned(),
+            })
     }
 
     pub fn list_projects(&self) -> Result<Vec<Project>, EngineError> {
-        let connection = self.connection()?;
-        let mut statement = connection.prepare(
-            "SELECT project_id, name, epoch_ms(created_at::TIMESTAMPTZ)
-             FROM pulseon_projects
-             ORDER BY created_at, project_id",
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })?;
-
-        rows.map(|row| {
-            let (project_id, name, created_at_millis) = row?;
-            Ok(Project {
-                project_id: ProjectId::from_string(project_id),
-                name,
-                created_at: crate::engine::time::timestamp_from_millis(
-                    "created_at",
-                    created_at_millis,
-                )?,
-            })
-        })
-        .collect()
+        Ok(self.connection()?.list_projects()?)
     }
 
     pub fn create_run(
@@ -248,18 +190,17 @@ impl NativeClient {
         }
         let active_run = self.acquire_run_writer(&run_id)?;
         let connection = self.connection()?;
-        let created =
-            NativeWriteStore::new(&connection).create_run(project_id, name, Some(run_id.clone()));
+        let created = connection.create_run(project_id, name, run_id.clone());
         drop(connection);
         if created.is_err() {
             self.release_run_writer(&run_id);
         }
-        created.inspect_err(|_| active_run.release_lock())
+        Ok(created.inspect_err(|_| active_run.release_lock())?)
     }
 
     pub fn get_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
         let connection = self.connection()?;
-        NativeWriteStore::new(&connection).resume_run(run_id)
+        Ok(connection.get_run(run_id)?)
     }
 
     pub fn resume_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
@@ -293,35 +234,9 @@ impl NativeClient {
             });
         }
 
-        let run_ids = {
-            let connection = self.connection()?;
-            let mut sql = String::from(
-                "SELECT run_id
-                 FROM pulseon_runs
-                 WHERE project_id = ?
-                   AND status = COALESCE(?, status)
-                 ORDER BY created_at, run_id",
-            );
-            if let Some(limit) = limit {
-                sql.push_str(&format!(" LIMIT {limit}"));
-            } else if offset > 0 {
-                sql.push_str(" LIMIT ALL");
-            }
-            if offset > 0 {
-                sql.push_str(&format!(" OFFSET {offset}"));
-            }
-            let mut statement = connection.prepare(&sql)?;
-            let rows = statement
-                .query_map((project_id.as_str(), status.map(status_as_str)), |row| {
-                    Ok(RunId::from_string(row.get::<_, String>(0)?))
-                })?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-
-        run_ids
-            .iter()
-            .map(|run_id| self.get_run(run_id))
-            .collect::<Result<Vec<_>, _>>()
+        Ok(self
+            .connection()?
+            .list_runs(project_id, status, limit, offset)?)
     }
 
     pub fn list_orphan_runs(
@@ -336,40 +251,7 @@ impl NativeClient {
             });
         }
 
-        let run_ids = {
-            let connection = self.connection()?;
-            match project_id {
-                Some(project_id) => {
-                    let mut statement = connection.prepare(
-                        "SELECT run_id
-                         FROM pulseon_runs
-                         WHERE project_id = ?
-                           AND status = 'running'
-                         ORDER BY created_at, run_id",
-                    )?;
-                    let rows = statement.query_map([project_id.as_str()], |row| {
-                        Ok(RunId::from_string(row.get::<_, String>(0)?))
-                    })?;
-                    rows.collect::<Result<Vec<_>, _>>()?
-                }
-                None => {
-                    let mut statement = connection.prepare(
-                        "SELECT run_id
-                         FROM pulseon_runs
-                         WHERE status = 'running'
-                         ORDER BY created_at, run_id",
-                    )?;
-                    let rows = statement
-                        .query_map([], |row| Ok(RunId::from_string(row.get::<_, String>(0)?)))?;
-                    rows.collect::<Result<Vec<_>, _>>()?
-                }
-            }
-        };
-
-        run_ids
-            .iter()
-            .map(|run_id| self.get_run(run_id))
-            .collect::<Result<Vec<_>, _>>()
+        Ok(self.connection()?.list_orphan_runs(project_id)?)
     }
 
     pub fn finish_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
@@ -427,9 +309,7 @@ impl NativeClient {
 
         let connection = self.connection()?;
         let flush_interrupt = install_flush_interrupt(&connection, deadline);
-        let result = connection.execute_batch(
-            "CALL ducklake_flush_inlined_data('dl', table_name => 'metric_points');",
-        );
+        let result = connection.flush_metric_points();
         if let Some(flush_interrupt) = &flush_interrupt {
             flush_interrupt.mark_completed();
         }
@@ -532,17 +412,7 @@ impl NativeClient {
     }
 
     fn project_exists(&self, project_id: &ProjectId) -> Result<bool, EngineError> {
-        let connection = self.connection()?;
-        let exists = connection.query_row(
-            "SELECT EXISTS (
-                 SELECT 1
-                 FROM pulseon_projects
-                 WHERE project_id = ?
-             )",
-            [project_id.as_str()],
-            |row| row.get(0),
-        )?;
-        Ok(exists)
+        Ok(self.connection()?.project_exists(project_id)?)
     }
 
     fn finalize_run(
@@ -568,31 +438,18 @@ impl NativeClient {
         }
         {
             let connection = self.connection()?;
-            if let Err(error) =
-                NativeWriteStore::new(&connection).rebuild_metric_aggregates_for_run(run_id)
-            {
+            if let Err(error) = connection.rebuild_metric_aggregates_for_run(run_id) {
                 drop(connection);
                 active_run.open_admission()?;
-                return Err(error);
+                return Err(error.into());
             }
         }
         let finished_at = current_timestamp("finished_at")?;
         let connection = self.connection()?;
-        let updated = connection.execute(
-            "UPDATE pulseon_runs
-             SET status = ?,
-                 finished_at = ?
-             WHERE run_id = ?
-               AND status = 'running'",
-            (
-                run_status_value(target_status),
-                timestamp_as_rfc3339(finished_at),
-                run_id.as_str(),
-            ),
-        )?;
+        let updated = connection.mark_run_terminal(run_id, target_status, finished_at)?;
         drop(connection);
 
-        if updated > 0 {
+        if updated {
             active_run.mark_terminal()?;
             active_run.release_lock();
             self.release_run_writer(run_id);
@@ -609,7 +466,7 @@ impl NativeClient {
         })
     }
 
-    fn connection(&self) -> Result<MutexGuard<'_, duckdb::Connection>, EngineError> {
+    fn connection(&self) -> Result<MutexGuard<'_, ProjectConnection>, EngineError> {
         self.connection
             .lock()
             .map_err(|_| EngineError::ConnectionLockPoisoned)
@@ -655,42 +512,10 @@ impl NativeClient {
             return Ok(Arc::clone(active_run));
         }
 
-        let lock_dir = self.root_path.join(".pulseon").join("locks").join("runs");
-        std::fs::create_dir_all(&lock_dir).map_err(|source| EngineError::Storage {
-            operation: "creating run lock directory",
-            name: path_basename(&lock_dir),
-            source,
-        })?;
-        let lock_path = lock_dir.join(format!(
-            "{}.lock",
-            percent_encode_path_segment(run_id.as_str())
-        ));
-        let lock_file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_path)
-            .map_err(|source| EngineError::Storage {
-                operation: "opening run lock file",
-                name: path_basename(&lock_path),
-                source,
-            })?;
-        match lock_file.try_lock() {
-            Ok(()) => {
-                let active_run = Arc::new(ActiveRun::open(lock_file));
-                active_runs.insert(run_id.clone(), Arc::clone(&active_run));
-                Ok(active_run)
-            }
-            Err(std::fs::TryLockError::WouldBlock) => Err(EngineError::RunAlreadyActive {
-                run_id: run_id.as_str().to_owned(),
-            }),
-            Err(source) => Err(EngineError::Storage {
-                operation: "locking run lock file",
-                name: path_basename(&lock_path),
-                source: source.into(),
-            }),
-        }
+        let writer_guard = RunWriterGuard::acquire(&self.root_path, run_id)?;
+        let active_run = Arc::new(ActiveRun::open(writer_guard));
+        active_runs.insert(run_id.clone(), Arc::clone(&active_run));
+        Ok(active_run)
     }
 
     fn release_run_writer(&self, run_id: &RunId) {
@@ -726,7 +551,7 @@ impl FlushInterrupt {
 }
 
 fn install_flush_interrupt(
-    connection: &duckdb::Connection,
+    connection: &ProjectConnection,
     deadline: Option<Instant>,
 ) -> Option<FlushInterrupt> {
     let deadline = deadline?;
@@ -788,21 +613,29 @@ impl NativeRun {
 }
 
 struct ActiveRun {
-    lock_file: Mutex<Option<File>>,
+    writer_guard: Mutex<Option<RunWriterGuard>>,
     admission: Mutex<RunAdmission>,
 }
 
 impl ActiveRun {
-    fn open(lock_file: File) -> Self {
+    fn open(writer_guard: RunWriterGuard) -> Self {
         Self {
-            lock_file: Mutex::new(Some(lock_file)),
+            writer_guard: Mutex::new(Some(writer_guard)),
+            admission: Mutex::new(RunAdmission::Open),
+        }
+    }
+
+    #[cfg(test)]
+    fn open_for_test() -> Self {
+        Self {
+            writer_guard: Mutex::new(None),
             admission: Mutex::new(RunAdmission::Open),
         }
     }
 
     fn closed() -> Arc<Self> {
         Arc::new(Self {
-            lock_file: Mutex::new(None),
+            writer_guard: Mutex::new(None),
             admission: Mutex::new(RunAdmission::Terminal),
         })
     }
@@ -852,10 +685,8 @@ impl ActiveRun {
     }
 
     fn release_lock(&self) {
-        if let Ok(mut lock_file) = self.lock_file.lock()
-            && let Some(lock_file) = lock_file.take()
-        {
-            let _ = lock_file.unlock();
+        if let Ok(mut writer_guard) = self.writer_guard.lock() {
+            writer_guard.take();
         }
     }
 }
@@ -867,28 +698,10 @@ enum RunAdmission {
     Terminal,
 }
 
-fn percent_encode_path_segment(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'~' | b'-' => {
-                encoded.push(char::from(byte));
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
-}
-
-fn path_basename(path: &Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("storage path")
-        .to_owned()
-}
-
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+
     use super::*;
     use crate::engine::bootstrap::{
         attach_ducklake, open_native_connection, setup_duckdb_catalog_adapter,
@@ -1098,7 +911,9 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
-        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        let connection = Arc::new(Mutex::new(ProjectConnection::new(open_native_connection(
+            &root_path,
+        )?)));
         let client = NativeClient {
             root_path: root_path.clone(),
             reporter: MetricReporter::blocked_for_test(1),
@@ -1439,7 +1254,9 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
-        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        let connection = Arc::new(Mutex::new(ProjectConnection::new(open_native_connection(
+            &root_path,
+        )?)));
         let client = NativeClient {
             root_path: root_path.clone(),
             reporter: MetricReporter::blocked_for_test(2),
@@ -1482,13 +1299,7 @@ mod tests {
     #[test]
     fn admission_close_waits_for_in_flight_log_gate_before_rejecting_late_logs()
     -> Result<(), Box<dyn std::error::Error>> {
-        let lock_path = std::env::temp_dir().join(format!("pulseon-lock-{}", uuid::Uuid::new_v4()));
-        let lock_file = File::options()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)?;
-        let active_run = Arc::new(ActiveRun::open(lock_file));
+        let active_run = Arc::new(ActiveRun::open_for_test());
         let run_id = RunId::from_string("run-admission-race");
         let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
         let (release_sender, release_receiver) = std::sync::mpsc::channel();
@@ -1540,7 +1351,6 @@ mod tests {
             matches!(late_log, Err(EngineError::RunClosed { .. })),
             "expected log after close barrier to raise RunClosed, got {late_log:?}",
         );
-        std::fs::remove_file(lock_path)?;
         Ok(())
     }
 
@@ -1779,7 +1589,7 @@ mod tests {
     #[test]
     fn percent_encode_path_segment_uses_rfc3986_unreserved_bytes() {
         assert_eq!(
-            percent_encode_path_segment("run/space ü._~-"),
+            pulseon_storage::percent_encode_metric_key("run/space ü._~-"),
             "run%2Fspace%20%C3%BC._~-",
         );
     }

@@ -23,8 +23,10 @@ pub struct Project {
 #[cfg(test)]
 mod tests {
     use super::{Project, ProjectId};
-    use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, MetricQuery, Step};
-    use crate::model::run::{Run, RunId, RunStatus};
+    use crate::metric::{
+        MetricAggregate, MetricKey, MetricPoint, MetricQuery, ReductionPolicy, Step,
+    };
+    use crate::run::{Run, RunId, RunStatus};
 
     #[test]
     fn v1_native_model_keeps_typed_identity_lifecycle_and_metric_shape() {
@@ -69,13 +71,14 @@ mod tests {
             min_value_f64: point.value_f64,
             max_value_f64: point.value_f64,
         };
-        let query = MetricQuery {
+        let query = MetricQuery::new(
             run_id,
             metric_key,
-            start_step: Some(Step::new(10)),
-            end_step: Some(Step::new(50)),
-            max_points: Some(500),
-        };
+            Some(Step::new(10)),
+            Some(Step::new(50)),
+            ReductionPolicy::lttb(500).expect("test reduction should be valid"),
+        )
+        .expect("test query should be valid");
 
         // Then
         assert_eq!(project.project_id, project_id);
@@ -88,6 +91,6 @@ mod tests {
         assert_eq!(aggregate.effective_count, 1);
         assert_eq!(aggregate.last_step, Step::new(42));
         assert_eq!(query.start_step, Some(Step::new(10)));
-        assert_eq!(query.max_points, Some(500));
+        assert_eq!(query.reduction.max_points(), Some(500));
     }
 }

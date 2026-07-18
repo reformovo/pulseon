@@ -1,6 +1,11 @@
-// Native v1 domain types.
-// Architecture ref: docs/v1-native-architecture.md
+pub mod metric {
+    pub use pulseon_model::metric::*;
+}
 
-pub mod metric;
-pub mod run;
-pub mod types;
+pub mod run {
+    pub use pulseon_model::run::*;
+}
+
+pub mod types {
+    pub use pulseon_model::types::*;
+}

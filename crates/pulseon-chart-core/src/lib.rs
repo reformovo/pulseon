@@ -2,13 +2,11 @@
 
 #![forbid(unsafe_code)]
 
-mod downsample;
 mod interaction;
 
 use std::error::Error;
 use std::fmt;
 
-pub use downsample::lttb;
 pub use interaction::{Hit, PathCache, ScreenPoint, SelectionState, ZoomState, hit_test};
 
 /// Errors produced while constructing or transforming chart data.
@@ -20,7 +18,6 @@ pub enum ChartError {
     InvalidRange,
     InvalidOutputRange,
     InvalidCanvasSize,
-    InvalidDownsampleThreshold,
     InvalidTransform,
 }
 
@@ -41,9 +38,6 @@ impl fmt::Display for ChartError {
             }
             Self::InvalidCanvasSize => {
                 formatter.write_str("canvas dimensions must be finite and positive")
-            }
-            Self::InvalidDownsampleThreshold => {
-                formatter.write_str("downsample threshold must be at least three")
             }
             Self::InvalidTransform => formatter.write_str("chart transform inputs are invalid"),
         }
@@ -299,29 +293,21 @@ pub fn linear_ticks(range: AxisRange, target_count: usize) -> Vec<f64> {
     ticks
 }
 
-/// Builds a downsampled path in top-left-origin screen coordinates.
+/// Projects the visible series path into top-left-origin screen coordinates.
 ///
 /// # Errors
 ///
-/// Returns an error when `max_points` is below three or scales are invalid.
+/// Returns an error when either scale is invalid.
 pub fn build_path(
     series: &Series,
     viewport: Viewport,
     canvas: CanvasSize,
-    max_points: Option<usize>,
 ) -> Result<Vec<ScreenPoint>, ChartError> {
     let visible = series.visible_points(viewport.x);
-    let points = match max_points {
-        Some(threshold) if visible.len() > threshold => lttb(visible, threshold)?,
-        Some(threshold) if threshold < 3 => {
-            return Err(ChartError::InvalidDownsampleThreshold);
-        }
-        _ => visible.to_vec(),
-    };
     let x_scale = LinearScale::new(viewport.x, 0.0, canvas.width())?;
     let y_scale = LinearScale::new(viewport.y, canvas.height(), 0.0)?;
-    Ok(points
-        .into_iter()
+    Ok(visible
+        .iter()
         .map(|point| ScreenPoint::new(x_scale.map(point.x), y_scale.map(point.y)))
         .collect())
 }
@@ -394,8 +380,25 @@ mod tests {
         let canvas = CanvasSize::new(200.0, 100.0).expect("test canvas should be valid");
 
         assert_eq!(
-            build_path(&series, viewport, canvas, None).expect("path should build"),
+            build_path(&series, viewport, canvas).expect("path should build"),
             vec![ScreenPoint::new(0.0, 100.0), ScreenPoint::new(200.0, 0.0)]
         );
+    }
+
+    #[test]
+    fn build_path_projects_every_visible_point() {
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            (0..100)
+                .map(|value| DataPoint::new(f64::from(value), f64::from(value)))
+                .collect(),
+        )
+        .expect("test series should be valid");
+        let viewport = Viewport::new(range(0.0, 99.0), range(0.0, 99.0));
+        let canvas = CanvasSize::new(200.0, 100.0).expect("test canvas should be valid");
+
+        let path = build_path(&series, viewport, canvas).expect("path should build");
+
+        assert_eq!(path.len(), series.points().len());
     }
 }

@@ -5,9 +5,9 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use pulseon_storage::{MetricWrite, ProjectConnection};
+
 use crate::engine::EngineError;
-use crate::engine::time::{timestamp_as_rfc3339, timestamp_from_millis};
-use crate::engine::write::percent_encode_metric_key;
 use crate::model::metric::{MetricKey, Step};
 use crate::model::run::RunId;
 
@@ -32,11 +32,11 @@ pub struct MetricReporter {
 }
 
 impl MetricReporter {
-    pub fn open(connection: Arc<Mutex<duckdb::Connection>>) -> Self {
+    pub fn open(connection: Arc<Mutex<ProjectConnection>>) -> Self {
         Self::open_with_capacity(connection, DEFAULT_METRIC_BUFFER_CAPACITY)
     }
 
-    pub fn open_with_capacity(connection: Arc<Mutex<duckdb::Connection>>, capacity: usize) -> Self {
+    pub fn open_with_capacity(connection: Arc<Mutex<ProjectConnection>>, capacity: usize) -> Self {
         let (sender, receiver) = mpsc::sync_channel(capacity);
         let diagnostics = Arc::new(MetricReporterDiagnosticsInner::default());
         let worker_diagnostics = Arc::clone(&diagnostics);
@@ -423,23 +423,13 @@ struct MetricReport {
     enqueue_sequence: u64,
 }
 
-struct MetricPointBatchRow {
-    run_id: String,
-    metric_key: String,
-    metric_key_encoded: String,
-    step: i64,
-    timestamp: String,
-    value_f64: f64,
-    ingested_at: String,
-}
-
 fn take_mutex_value<T>(mutex: &Mutex<Option<T>>) -> Option<T> {
     let mut guard: MutexGuard<'_, Option<T>> = mutex.lock().ok()?;
     guard.take()
 }
 
 fn metric_worker(
-    connection: Arc<Mutex<duckdb::Connection>>,
+    connection: Arc<Mutex<ProjectConnection>>,
     receiver: mpsc::Receiver<MetricReport>,
     diagnostics: Arc<MetricReporterDiagnosticsInner>,
 ) -> Result<(), EngineError> {
@@ -497,7 +487,7 @@ fn collect_metric_batch(receiver: &mpsc::Receiver<MetricReport>, batch: &mut Vec
 }
 
 fn write_metric_batch_with_retries(
-    connection: &Arc<Mutex<duckdb::Connection>>,
+    connection: &Arc<Mutex<ProjectConnection>>,
     batch: &[MetricReport],
     next_ingested_at_millis: i64,
     diagnostics: &MetricReporterDiagnosticsInner,
@@ -536,7 +526,7 @@ fn retry_metric_batch_write(
 }
 
 fn write_metric_batch(
-    connection: &Arc<Mutex<duckdb::Connection>>,
+    connection: &Arc<Mutex<ProjectConnection>>,
     batch: &[MetricReport],
     next_ingested_at_millis: i64,
 ) -> Result<i64, EngineError> {
@@ -546,64 +536,30 @@ fn write_metric_batch(
     let mut rows = Vec::with_capacity(batch.len());
     let mut ingested_at_millis = next_ingested_at_millis.max(chrono::Utc::now().timestamp_millis());
     for report in batch {
-        let timestamp = timestamp_from_millis("timestamp", ingested_at_millis)?;
-        let ingested_at = timestamp_from_millis("ingested_at", ingested_at_millis)?;
-        rows.push(MetricPointBatchRow {
+        rows.push(MetricWrite {
             run_id: report.run_id.as_str().to_owned(),
             metric_key: report.metric_key.as_str().to_owned(),
-            metric_key_encoded: percent_encode_metric_key(report.metric_key.as_str()),
             step: report.step.value(),
-            timestamp: timestamp_as_rfc3339(timestamp),
+            timestamp_millis: ingested_at_millis,
             value_f64: report.value_f64,
-            ingested_at: timestamp_as_rfc3339(ingested_at),
+            ingested_at_millis,
         });
         ingested_at_millis += 1;
     }
-    append_metric_point_rows(&connection, &rows)?;
+    connection.append_metric_batch(&rows)?;
     Ok(ingested_at_millis)
 }
 
 fn sanitize_metric_write_error(error: &EngineError) -> String {
     match error {
-        EngineError::DuckDb(_) => "append metric batch failed".to_owned(),
+        EngineError::StorageFailure(pulseon_storage::StorageError::DuckDb(_)) => {
+            "append metric batch failed".to_owned()
+        }
         EngineError::Storage { operation, .. } => {
             format!("metric writer storage operation failed while {operation}")
         }
         _ => error.to_string(),
     }
-}
-
-fn append_metric_point_rows(
-    connection: &duckdb::Connection,
-    rows: &[MetricPointBatchRow],
-) -> Result<(), EngineError> {
-    let mut appender = connection.appender_with_columns_to_catalog_and_db(
-        "metric_points",
-        "dl",
-        "main",
-        &[
-            "run_id",
-            "metric_key",
-            "metric_key_encoded",
-            "step",
-            "timestamp",
-            "value_f64",
-            "ingested_at",
-        ],
-    )?;
-    for row in rows {
-        appender.append_row(duckdb::params![
-            row.run_id.as_str(),
-            row.metric_key.as_str(),
-            row.metric_key_encoded.as_str(),
-            row.step,
-            row.timestamp.as_str(),
-            row.value_f64,
-            row.ingested_at.as_str(),
-        ])?;
-    }
-    appender.flush()?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -987,12 +943,21 @@ mod tests {
         let diagnostics = MetricReporterDiagnosticsInner::default();
 
         let result = retry_metric_batch_write(
-            || Err(EngineError::DuckDb(duckdb::Error::InvalidQuery)),
+            || {
+                Err(EngineError::StorageFailure(
+                    pulseon_storage::StorageError::DuckDb(duckdb::Error::InvalidQuery),
+                ))
+            },
             &diagnostics,
             |_| {},
         );
 
-        assert!(matches!(result, Err(EngineError::DuckDb(_))));
+        assert!(matches!(
+            result,
+            Err(EngineError::StorageFailure(
+                pulseon_storage::StorageError::DuckDb(_)
+            ))
+        ));
         assert_eq!(
             diagnostics.snapshot().last_write_error.as_deref(),
             Some("append metric batch failed"),
@@ -1023,7 +988,9 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-reporter-{}", uuid::Uuid::new_v4()));
-        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        let connection = Arc::new(Mutex::new(ProjectConnection::new(open_native_connection(
+            &root_path,
+        )?)));
         {
             let connection = connection.lock().expect("test connection lock");
             connection.execute(
@@ -1070,7 +1037,9 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-reporter-{}", uuid::Uuid::new_v4()));
-        let connection = Arc::new(Mutex::new(open_native_connection(&root_path)?));
+        let connection = Arc::new(Mutex::new(ProjectConnection::new(open_native_connection(
+            &root_path,
+        )?)));
         {
             let connection = connection.lock().expect("test connection lock");
             connection.execute(

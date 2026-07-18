@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::DataError;
+use crate::StorageError;
 
 const REQUIRED_COLUMNS: [(&str, LogicalType); 7] = [
     ("run_id", LogicalType::String),
@@ -73,21 +73,25 @@ pub struct SchemaReport {
 ///
 /// # Errors
 ///
-/// Returns [`DataError`] when the schema violates the contract.
-pub fn validate_metric_point_schema(columns: Vec<ColumnSchema>) -> Result<SchemaReport, DataError> {
+/// Returns [`StorageError`] when the schema violates the contract.
+pub fn validate_metric_point_schema(
+    columns: Vec<ColumnSchema>,
+) -> Result<SchemaReport, StorageError> {
     let mut by_name = HashMap::with_capacity(columns.len());
     for column in &columns {
         if by_name.insert(column.name.as_str(), column).is_some() {
-            return Err(DataError::DuplicateColumn {
+            return Err(StorageError::DuplicateColumn {
                 name: column.name.clone(),
             });
         }
     }
 
     for (name, expected) in REQUIRED_COLUMNS {
-        let column = by_name.get(name).ok_or(DataError::MissingColumn { name })?;
+        let column = by_name
+            .get(name)
+            .ok_or(StorageError::MissingColumn { name })?;
         if !expected.accepts(&column.data_type) {
-            return Err(DataError::IncompatibleColumnType {
+            return Err(StorageError::IncompatibleColumnType {
                 name,
                 expected: expected.name(),
                 actual: column.data_type.clone(),
@@ -104,7 +108,7 @@ pub fn validate_metric_point_schema(columns: Vec<ColumnSchema>) -> Result<Schema
             continue;
         }
         if !column.nullable {
-            return Err(DataError::IncompatibleAdditiveColumn {
+            return Err(StorageError::IncompatibleAdditiveColumn {
                 name: column.name.clone(),
             });
         }
@@ -152,11 +156,11 @@ mod tests {
 
         assert!(matches!(
             validate_metric_point_schema(missing),
-            Err(DataError::MissingColumn { name: "step" })
+            Err(StorageError::MissingColumn { name: "step" })
         ));
         assert!(matches!(
             validate_metric_point_schema(retyped),
-            Err(DataError::IncompatibleColumnType { name: "step", .. })
+            Err(StorageError::IncompatibleColumnType { name: "step", .. })
         ));
     }
 
@@ -167,7 +171,7 @@ mod tests {
 
         assert!(matches!(
             validate_metric_point_schema(columns),
-            Err(DataError::IncompatibleAdditiveColumn { .. })
+            Err(StorageError::IncompatibleAdditiveColumn { .. })
         ));
     }
 }

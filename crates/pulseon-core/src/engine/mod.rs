@@ -1,21 +1,24 @@
 // Native v1 engine over DuckLake.
 // Architecture ref: docs/v1-native-architecture.md
 
-pub(crate) mod bootstrap;
+pub mod bootstrap {
+    pub use pulseon_storage::bootstrap::*;
+}
 pub mod client;
 pub mod query;
 pub mod reporting;
-mod time;
-pub mod write;
-mod write_rows;
+mod time {
+    pub use pulseon_storage::time::*;
+}
+pub mod write {
+    pub use pulseon_storage::write::*;
+}
 
 // Unified error type for engine operations.
 // Merged from engine/error.rs per oracle review (simplify: extract to
 // error.rs when this grows beyond a handful of variants).
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    #[error("duckdb error: {0}")]
-    DuckDb(#[from] duckdb::Error),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("native connection lock was poisoned")]
@@ -63,17 +66,50 @@ pub enum EngineError {
         #[source]
         source: std::io::Error,
     },
-    #[error("storage operation failed while {operation}: {name}")]
-    StorageDuckDb {
-        operation: &'static str,
-        name: String,
-        #[source]
-        source: duckdb::Error,
-    },
+    #[error(transparent)]
+    StorageFailure(pulseon_storage::StorageError),
+    #[error("storage operation failed: {message}")]
+    StorageLayer { message: String },
     #[error("DuckDB LTTB extension is unavailable: {message}")]
     LttbExtensionUnavailable { message: String },
     #[error("invalid stored run status: {status}")]
     InvalidRunStatus { status: String },
     #[error("invalid stored timestamp for {field}: {millis}")]
     InvalidTimestamp { field: &'static str, millis: i64 },
+}
+
+impl From<pulseon_storage::StorageError> for EngineError {
+    fn from(error: pulseon_storage::StorageError) -> Self {
+        use pulseon_storage::StorageError;
+
+        match error {
+            error @ StorageError::DuckDb(_) => Self::StorageFailure(error),
+            StorageError::Io(source) => Self::Io(source),
+            StorageError::RunAlreadyExists { run_id } => Self::RunAlreadyExists { run_id },
+            StorageError::RunNotFound { run_id } => Self::RunNotFound { run_id },
+            StorageError::RunAlreadyActive { run_id } => Self::RunAlreadyActive { run_id },
+            StorageError::CatalogNotFound { name } => Self::CatalogNotFound { name },
+            StorageError::Storage {
+                operation,
+                name,
+                source,
+            } => Self::Storage {
+                operation,
+                name,
+                source,
+            },
+            error @ StorageError::StorageDuckDb { .. } => Self::StorageFailure(error),
+            StorageError::QueryMaxPointsTooLarge { max_points } => {
+                Self::MetricQueryMaxPointsTooLarge { max_points }
+            }
+            error @ StorageError::LttbExtensionUnavailable { .. } => Self::StorageFailure(error),
+            StorageError::InvalidRunStatus { status } => Self::InvalidRunStatus { status },
+            StorageError::InvalidTimestamp { field, millis } => {
+                Self::InvalidTimestamp { field, millis }
+            }
+            other => Self::StorageLayer {
+                message: other.to_string(),
+            },
+        }
+    }
 }

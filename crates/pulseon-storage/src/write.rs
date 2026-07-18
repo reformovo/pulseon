@@ -1,11 +1,11 @@
 use chrono::{DateTime, Utc};
 
-use crate::engine::EngineError;
-use crate::engine::time::{current_timestamp, timestamp_as_rfc3339};
-use crate::engine::write_rows::{StoredRun, status_as_str};
-use crate::model::metric::{MetricKey, MetricPoint, Step};
-use crate::model::run::{Run, RunId, RunStatus};
-use crate::model::types::ProjectId;
+use crate::rows::{StoredRun, status_as_str};
+use crate::time::{current_timestamp, timestamp_as_rfc3339};
+use crate::{StorageError, percent_encode_metric_key};
+use pulseon_model::metric::{MetricKey, MetricPoint, Step};
+use pulseon_model::run::{Run, RunId, RunStatus};
+use pulseon_model::types::ProjectId;
 
 pub struct NativeWriteStore<'connection> {
     connection: &'connection duckdb::Connection,
@@ -21,10 +21,10 @@ impl<'connection> NativeWriteStore<'connection> {
         project_id: &ProjectId,
         name: &str,
         run_id: Option<RunId>,
-    ) -> Result<Run, EngineError> {
+    ) -> Result<Run, StorageError> {
         let run_id = run_id.unwrap_or_else(|| RunId::from_string(uuid::Uuid::new_v4().to_string()));
         if self.run_exists(&run_id)? {
-            return Err(EngineError::RunAlreadyExists {
+            return Err(StorageError::RunAlreadyExists {
                 run_id: run_id.as_str().to_owned(),
             });
         }
@@ -55,7 +55,7 @@ impl<'connection> NativeWriteStore<'connection> {
         })
     }
 
-    pub fn resume_run(&self, run_id: &RunId) -> Result<Run, EngineError> {
+    pub fn resume_run(&self, run_id: &RunId) -> Result<Run, StorageError> {
         let result = self.connection.query_row(
             "SELECT run_id, project_id, name, status,
                     epoch_ms(created_at::TIMESTAMPTZ),
@@ -79,7 +79,7 @@ impl<'connection> NativeWriteStore<'connection> {
         let stored = match result {
             Ok(stored) => stored,
             Err(duckdb::Error::QueryReturnedNoRows) => {
-                return Err(EngineError::RunNotFound {
+                return Err(StorageError::RunNotFound {
                     run_id: run_id.as_str().to_owned(),
                 });
             }
@@ -95,7 +95,7 @@ impl<'connection> NativeWriteStore<'connection> {
         metric_key: &MetricKey,
         step: Step,
         value_f64: f64,
-    ) -> Result<MetricPoint, EngineError> {
+    ) -> Result<MetricPoint, StorageError> {
         let timestamp = current_timestamp("timestamp")?;
         let ingested_at = current_timestamp("ingested_at")?;
         self.log_metric_at_step_with_timestamps(
@@ -108,7 +108,7 @@ impl<'connection> NativeWriteStore<'connection> {
         )
     }
 
-    pub(crate) fn log_metric_at_step_with_timestamps(
+    pub fn log_metric_at_step_with_timestamps(
         &self,
         run_id: &RunId,
         metric_key: &MetricKey,
@@ -116,7 +116,7 @@ impl<'connection> NativeWriteStore<'connection> {
         value_f64: f64,
         timestamp: DateTime<Utc>,
         ingested_at: DateTime<Utc>,
-    ) -> Result<MetricPoint, EngineError> {
+    ) -> Result<MetricPoint, StorageError> {
         self.connection.execute(
             "INSERT INTO dl.metric_points
                  (run_id, metric_key, metric_key_encoded, step, timestamp, value_f64, ingested_at)
@@ -141,7 +141,7 @@ impl<'connection> NativeWriteStore<'connection> {
         })
     }
 
-    pub fn rebuild_metric_aggregates_for_run(&self, run_id: &RunId) -> Result<(), EngineError> {
+    pub fn rebuild_metric_aggregates_for_run(&self, run_id: &RunId) -> Result<(), StorageError> {
         self.connection.execute(
             "DELETE FROM pulseon_metric_aggregates
              WHERE run_id = ?",
@@ -169,7 +169,7 @@ impl<'connection> NativeWriteStore<'connection> {
         Ok(())
     }
 
-    fn run_exists(&self, run_id: &RunId) -> Result<bool, EngineError> {
+    fn run_exists(&self, run_id: &RunId) -> Result<bool, StorageError> {
         let count: i64 = self.connection.query_row(
             "SELECT count(*) FROM pulseon_runs WHERE run_id = ?",
             [run_id.as_str()],
@@ -177,19 +177,6 @@ impl<'connection> NativeWriteStore<'connection> {
         )?;
         Ok(count > 0)
     }
-}
-
-pub(crate) fn percent_encode_metric_key(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'~' | b'-' => {
-                encoded.push(char::from(byte));
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 #[cfg(test)]

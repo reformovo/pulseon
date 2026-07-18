@@ -1,8 +1,8 @@
-use crate::engine::EngineError;
-use crate::engine::time::timestamp_from_millis;
-use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
-use crate::model::run::{Run, RunId, RunStatus};
-use crate::model::types::ProjectId;
+use crate::StorageError;
+use crate::time::timestamp_from_millis;
+use pulseon_model::metric::{MetricAggregate, MetricKey, Step};
+use pulseon_model::run::{Run, RunId, RunStatus};
+use pulseon_model::types::ProjectId;
 
 pub struct StoredRun {
     pub run_id: String,
@@ -15,7 +15,7 @@ pub struct StoredRun {
 }
 
 impl StoredRun {
-    pub fn into_run(self) -> Result<Run, EngineError> {
+    pub fn into_run(self) -> Result<Run, StorageError> {
         Ok(Run {
             run_id: RunId::from_string(self.run_id),
             project_id: ProjectId::from_string(self.project_id),
@@ -29,15 +29,6 @@ impl StoredRun {
                 .transpose()?,
         })
     }
-}
-
-pub struct StoredMetricPoint {
-    pub run_id: String,
-    pub metric_key: String,
-    pub step: i64,
-    pub timestamp_millis: i64,
-    pub value_f64: f64,
-    pub ingested_at_millis: i64,
 }
 
 pub struct StoredMetricAggregate {
@@ -64,19 +55,6 @@ impl StoredMetricAggregate {
     }
 }
 
-impl StoredMetricPoint {
-    pub fn into_metric_point(self) -> Result<MetricPoint, EngineError> {
-        Ok(MetricPoint {
-            run_id: RunId::from_string(self.run_id),
-            metric_key: MetricKey::from_string(self.metric_key),
-            step: Step::new(self.step),
-            timestamp: timestamp_from_millis("timestamp", self.timestamp_millis)?,
-            value_f64: self.value_f64,
-            ingested_at: timestamp_from_millis("ingested_at", self.ingested_at_millis)?,
-        })
-    }
-}
-
 pub const fn status_as_str(status: RunStatus) -> &'static str {
     match status {
         RunStatus::Running => "running",
@@ -85,12 +63,12 @@ pub const fn status_as_str(status: RunStatus) -> &'static str {
     }
 }
 
-fn run_status_from_str(status: &str) -> Result<RunStatus, EngineError> {
+fn run_status_from_str(status: &str) -> Result<RunStatus, StorageError> {
     match status {
         "running" => Ok(RunStatus::Running),
         "finished" => Ok(RunStatus::Finished),
         "failed" => Ok(RunStatus::Failed),
-        _ => Err(EngineError::InvalidRunStatus {
+        _ => Err(StorageError::InvalidRunStatus {
             status: status.to_owned(),
         }),
     }
@@ -121,7 +99,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                EngineError::InvalidRunStatus { ref status } if status == "paused"
+                StorageError::InvalidRunStatus { ref status } if status == "paused"
             ),
             "expected invalid run status error, got {err:?}",
         );

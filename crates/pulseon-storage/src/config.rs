@@ -4,31 +4,31 @@ use std::path::{Path, PathBuf};
 
 use toml::Table;
 
-use crate::engine::bootstrap::{CatalogBackend, S3ConnectionConfig, is_s3_data_path};
+use crate::bootstrap::{CatalogBackend, S3ConnectionConfig, is_s3_data_path};
 
 const MAX_METRIC_QUEUE_CAPACITY: i64 = 1_048_576;
 
-pub(crate) struct ResolvedInitConfig {
-    pub(crate) catalog_backend: CatalogBackend,
-    pub(crate) catalog_path: Option<PathBuf>,
-    pub(crate) data_path: Option<PathBuf>,
-    pub(crate) metric_queue_capacity: usize,
-    pub(crate) s3_connection: Option<S3ConnectionConfig>,
+pub struct ResolvedInitConfig {
+    pub catalog_backend: CatalogBackend,
+    pub catalog_path: Option<PathBuf>,
+    pub data_path: Option<PathBuf>,
+    pub metric_queue_capacity: usize,
+    pub s3_connection: Option<S3ConnectionConfig>,
 }
 
 #[derive(Default)]
-pub(crate) struct S3ConnectionOverrides {
-    pub(crate) endpoint: Option<String>,
-    pub(crate) access_key_id: Option<String>,
-    pub(crate) secret_access_key: Option<String>,
-    pub(crate) session_token: Option<String>,
-    pub(crate) region: Option<String>,
-    pub(crate) path_style: Option<bool>,
-    pub(crate) use_ssl: Option<bool>,
+pub struct S3ConnectionOverrides {
+    pub endpoint: Option<String>,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
+    pub session_token: Option<String>,
+    pub region: Option<String>,
+    pub path_style: Option<bool>,
+    pub use_ssl: Option<bool>,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum InitConfigError {
+pub enum InitConfigError {
     #[error("failed to read config.toml: {source}")]
     ReadConfig {
         #[source]
@@ -45,7 +45,7 @@ pub(crate) enum InitConfigError {
     Invalid(String),
 }
 
-pub(crate) fn resolve_init_config(
+pub fn resolve_init_config(
     root_path: &Path,
     data_path: Option<PathBuf>,
     catalog_backend: Option<&str>,

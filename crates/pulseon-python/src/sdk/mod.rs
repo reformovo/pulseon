@@ -3,7 +3,6 @@
 
 pub mod arrow;
 pub mod client;
-mod config;
 
 // Unified error type for PyO3 bindings.
 // Merged from sdk/error.rs per oracle review (simplify: extract when it grows).

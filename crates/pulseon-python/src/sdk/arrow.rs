@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use duckdb::arrow::array::{
+use arrow::array::{
     ArrayRef, Float64Array, Int64Array, StringArray, TimestampMillisecondArray, UInt64Array,
 };
-use duckdb::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-use duckdb::arrow::error::ArrowError;
-use duckdb::arrow::ffi_stream::FFI_ArrowArrayStream;
-use duckdb::arrow::record_batch::{RecordBatch, RecordBatchIterator};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::error::ArrowError;
+use arrow::ffi_stream::FFI_ArrowArrayStream;
+use arrow::record_batch::{RecordBatch, RecordBatchIterator};
 use pyo3::prelude::*;
 use pyo3::types::PyCapsule;
 
@@ -121,8 +121,8 @@ impl PyArrowTable {
 
 #[cfg(test)]
 mod tests {
+    use arrow::array::TimestampMillisecondArray;
     use chrono::{TimeZone, Utc};
-    use duckdb::arrow::array::TimestampMillisecondArray;
 
     use super::*;
     use crate::model::metric::{MetricKey, Step};
