@@ -35,9 +35,6 @@ pub enum DataError {
     IncompatibleAdditiveColumn {
         name: String,
     },
-    InvalidMetricKeyEncoding {
-        metric_key: String,
-    },
     DuckDb(duckdb::Error),
 }
 
@@ -75,10 +72,6 @@ impl fmt::Display for DataError {
             Self::IncompatibleAdditiveColumn { name } => write!(
                 formatter,
                 "additive metric_points column `{name}` must be nullable"
-            ),
-            Self::InvalidMetricKeyEncoding { metric_key } => write!(
-                formatter,
-                "metric_key_encoded does not match metric key `{metric_key}`"
             ),
             Self::DuckDb(source) => write!(formatter, "DuckDB data query failed: {source}"),
         }

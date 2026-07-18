@@ -6,7 +6,7 @@ const MAX_QUERY_POINTS: usize = 1_000_000;
 const EXTREMA_PER_BUCKET: usize = 4;
 
 const METRIC_QUERY_SQL: &str = "WITH ranked AS (
-         SELECT run_id, metric_key, metric_key_encoded, step, timestamp, value_f64, ingested_at,
+         SELECT run_id, metric_key, step, timestamp, value_f64, ingested_at,
                 row_number() OVER (
                     PARTITION BY run_id, metric_key, step
                     ORDER BY ingested_at DESC, filename DESC, file_row_number DESC
@@ -15,12 +15,12 @@ const METRIC_QUERY_SQL: &str = "WITH ranked AS (
              ?, hive_partitioning = true, union_by_name = true,
              filename = true, file_row_number = true
          )
-         WHERE run_id = ? AND metric_key = ?
+         WHERE run_id = ? AND metric_key = ? AND metric_key_encoded = ?
            AND (? IS NULL OR step >= ?)
            AND (? IS NULL OR step < ?)
      ),
      effective AS (
-         SELECT run_id, metric_key, metric_key_encoded, step, timestamp, value_f64, ingested_at
+         SELECT run_id, metric_key, step, timestamp, value_f64, ingested_at
          FROM ranked WHERE write_rank = 1
      ),
      numbered AS (
@@ -42,7 +42,7 @@ const METRIC_QUERY_SQL: &str = "WITH ranked AS (
                 row_number() OVER (PARTITION BY bucket ORDER BY value_f64 DESC, step) AS max_rank
          FROM bucketed
      )
-     SELECT run_id, metric_key, metric_key_encoded, step, epoch_ms(timestamp), value_f64,
+     SELECT run_id, metric_key, step, epoch_ms(timestamp), value_f64,
             epoch_ms(ingested_at), source_row_count
      FROM candidates
      WHERE first_rank = 1 OR last_rank = 1 OR min_rank = 1 OR max_rank = 1
@@ -239,6 +239,7 @@ impl<'connection> DuckDbMetricStore<'connection> {
                 self.source.location(),
                 query.run_id.as_str(),
                 query.metric_key.as_str(),
+                expected_encoded_key.as_str(),
                 plan.viewport.start,
                 plan.viewport.start,
                 plan.viewport.end,
@@ -250,13 +251,12 @@ impl<'connection> DuckDbMetricStore<'connection> {
                     MetricPointRow {
                         run_id: row.get(0)?,
                         metric_key: row.get(1)?,
-                        step: row.get(3)?,
-                        timestamp_ms: row.get(4)?,
-                        value_f64: row.get(5)?,
-                        ingested_at_ms: row.get(6)?,
+                        step: row.get(2)?,
+                        timestamp_ms: row.get(3)?,
+                        value_f64: row.get(4)?,
+                        ingested_at_ms: row.get(5)?,
                     },
-                    row.get::<_, String>(2)?,
-                    row.get::<_, u64>(7)?,
+                    row.get::<_, u64>(6)?,
                 ))
             },
         )?;
@@ -264,12 +264,7 @@ impl<'connection> DuckDbMetricStore<'connection> {
         let mut points = Vec::new();
         let mut source_row_count = 0;
         for row in rows {
-            let (point, encoded_key, row_count) = row?;
-            if encoded_key != expected_encoded_key {
-                return Err(DataError::InvalidMetricKeyEncoding {
-                    metric_key: point.metric_key,
-                });
-            }
+            let (point, row_count) = row?;
             points.push(point);
             source_row_count = row_count;
         }
@@ -432,16 +427,15 @@ mod tests {
         assert_eq!(dense_result.points.first().map(|point| point.step), Some(1));
         assert_eq!(dense_result.points.last().map(|point| point.step), Some(25));
 
-        let invalid_encoding_query = MetricQuery::new(
+        let mismatched_partition_query = MetricQuery::new(
             "run-1",
             "bad/key",
             StepViewport::default(),
             QueryBudget::new(1, 1)?,
         )?;
-        assert!(matches!(
-            store.query_metric(&invalid_encoding_query),
-            Err(DataError::InvalidMetricKeyEncoding { .. })
-        ));
+        let mismatched_result = store.query_metric(&mismatched_partition_query)?;
+        assert!(mismatched_result.points.is_empty());
+        assert_eq!(mismatched_result.source_row_count, 0);
         Ok(())
     }
 
@@ -451,5 +445,11 @@ mod tests {
             percent_encode_metric_key("train/loss 零"),
             "train%2Floss%20%E9%9B%B6"
         );
+    }
+
+    #[test]
+    fn metric_query_filters_the_public_partition_columns() {
+        assert!(METRIC_QUERY_SQL.contains("run_id = ?"));
+        assert!(METRIC_QUERY_SQL.contains("metric_key_encoded = ?"));
     }
 }
