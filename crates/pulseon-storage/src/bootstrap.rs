@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::StorageError;
+use crate::sql::string_literal as sql_string_literal;
 
 const DUCKLAKE_ALIAS: &str = "dl";
 const DUCKDB_CATALOG_ALIAS: &str = "pulseon_catalog";
@@ -397,10 +398,6 @@ pub fn create_v1_tables(connection: &duckdb::Connection) -> Result<(), StorageEr
     Ok(())
 }
 
-fn sql_string_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
 fn sql_boolean_literal(value: bool) -> &'static str {
     if value { "true" } else { "false" }
 }
@@ -419,11 +416,6 @@ pub fn is_s3_data_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sql_string_literal_escapes_single_quotes() {
-        assert_eq!(sql_string_literal("canary's/data"), "'canary''s/data'");
-    }
 
     #[test]
     fn existing_connection_rejects_missing_catalog_without_creating_store() {

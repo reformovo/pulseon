@@ -10,6 +10,7 @@ mod project;
 mod query;
 pub mod rows;
 mod schema;
+mod sql;
 pub mod time;
 pub mod write;
 

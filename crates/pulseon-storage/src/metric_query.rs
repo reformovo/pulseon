@@ -8,6 +8,7 @@ use pulseon_model::metric::{
 use pulseon_model::run::{RunId, RunStatus};
 
 use crate::rows::StoredMetricAggregate;
+use crate::sql::string_literal as sql_string_literal;
 use crate::{MetricReader, StorageError};
 
 const EXTREMA_PER_BUCKET: usize = 4;
@@ -499,10 +500,6 @@ fn lttb_function_available(connection: &Connection) -> bool {
             |row| row.get::<_, i64>(0),
         )
         .is_ok()
-}
-
-fn sql_string_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn lttb_auto_install_allowed(value: Option<&std::ffi::OsStr>) -> bool {
