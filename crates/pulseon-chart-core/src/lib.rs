@@ -129,8 +129,12 @@ impl Series {
 
     /// Returns points intersecting an x range plus one neighbor on each side.
     pub fn visible_points(&self, x_range: AxisRange) -> &[DataPoint] {
-        let first = self.points.partition_point(|point| point.x < x_range.start);
-        let after = self.points.partition_point(|point| point.x <= x_range.end);
+        let first = self
+            .points
+            .partition_point(|point| point.x < x_range.start());
+        let after = self
+            .points
+            .partition_point(|point| point.x <= x_range.end());
         if first == self.points.len() || after == 0 {
             return &[];
         }
@@ -139,10 +143,17 @@ impl Series {
 }
 
 /// A finite, increasing range on one data axis.
+///
+/// The fields are private so callers must use [`AxisRange::new`].
+///
+/// ```compile_fail
+/// use pulseon_chart_core::AxisRange;
+/// let _invalid = AxisRange { start: 1.0, end: 1.0 };
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisRange {
-    pub start: f64,
-    pub end: f64,
+    start: f64,
+    end: f64,
 }
 
 impl AxisRange {
@@ -158,7 +169,15 @@ impl AxisRange {
         Ok(Self { start, end })
     }
 
-    pub fn span(self) -> f64 {
+    pub const fn start(self) -> f64 {
+        self.start
+    }
+
+    pub const fn end(self) -> f64 {
+        self.end
+    }
+
+    pub const fn span(self) -> f64 {
         self.end - self.start
     }
 }
@@ -177,10 +196,17 @@ impl Viewport {
 }
 
 /// Positive pixel dimensions for a chart surface.
+///
+/// The fields are private so callers must use [`CanvasSize::new`].
+///
+/// ```compile_fail
+/// use pulseon_chart_core::CanvasSize;
+/// let _invalid = CanvasSize { width: 0.0, height: 100.0 };
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CanvasSize {
-    pub width: f64,
-    pub height: f64,
+    width: f64,
+    height: f64,
 }
 
 impl CanvasSize {
@@ -194,6 +220,14 @@ impl CanvasSize {
             return Err(ChartError::InvalidCanvasSize);
         }
         Ok(Self { width, height })
+    }
+
+    pub const fn width(self) -> f64 {
+        self.width
+    }
+
+    pub const fn height(self) -> f64 {
+        self.height
     }
 }
 
@@ -223,13 +257,13 @@ impl LinearScale {
     }
 
     pub fn map(self, value: f64) -> f64 {
-        let ratio = (value - self.domain.start) / self.domain.span();
+        let ratio = (value - self.domain.start()) / self.domain.span();
         self.output_start + ratio * (self.output_end - self.output_start)
     }
 
     pub fn invert(self, value: f64) -> f64 {
         let ratio = (value - self.output_start) / (self.output_end - self.output_start);
-        self.domain.start + ratio * self.domain.span()
+        self.domain.start() + ratio * self.domain.span()
     }
 }
 
@@ -253,12 +287,12 @@ pub fn linear_ticks(range: AxisRange, target_count: usize) -> Vec<f64> {
     };
     let step = factor * magnitude;
     if !step.is_finite() || step <= 0.0 {
-        return vec![range.start, range.end];
+        return vec![range.start(), range.end()];
     }
 
-    let mut value = (range.start / step).ceil() * step;
+    let mut value = (range.start() / step).ceil() * step;
     let mut ticks = Vec::new();
-    while value <= range.end + step * 1e-10 && ticks.len() <= target_count + 2 {
+    while value <= range.end() + step * 1e-10 && ticks.len() <= target_count + 2 {
         ticks.push(if value == -0.0 { 0.0 } else { value });
         value += step;
     }
@@ -284,8 +318,8 @@ pub fn build_path(
         }
         _ => visible.to_vec(),
     };
-    let x_scale = LinearScale::new(viewport.x, 0.0, canvas.width)?;
-    let y_scale = LinearScale::new(viewport.y, canvas.height, 0.0)?;
+    let x_scale = LinearScale::new(viewport.x, 0.0, canvas.width())?;
+    let y_scale = LinearScale::new(viewport.y, canvas.height(), 0.0)?;
     Ok(points
         .into_iter()
         .map(|point| ScreenPoint::new(x_scale.map(point.x), y_scale.map(point.y)))
@@ -338,6 +372,15 @@ mod tests {
     #[test]
     fn linear_ticks_uses_nice_steps() {
         assert_eq!(linear_ticks(range(0.3, 9.1), 5), vec![2.0, 4.0, 6.0, 8.0]);
+    }
+
+    #[test]
+    fn invariant_types_reject_invalid_dimensions() {
+        assert_eq!(AxisRange::new(1.0, 1.0), Err(ChartError::InvalidRange));
+        assert_eq!(
+            CanvasSize::new(0.0, 100.0),
+            Err(ChartError::InvalidCanvasSize)
+        );
     }
 
     #[test]

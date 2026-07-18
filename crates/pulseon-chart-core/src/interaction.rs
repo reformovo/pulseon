@@ -50,12 +50,12 @@ impl PathCache {
         let key = PathCacheKey {
             revision,
             viewport_bits: [
-                viewport.x.start.to_bits(),
-                viewport.x.end.to_bits(),
-                viewport.y.start.to_bits(),
-                viewport.y.end.to_bits(),
+                viewport.x.start().to_bits(),
+                viewport.x.end().to_bits(),
+                viewport.y.start().to_bits(),
+                viewport.y.end().to_bits(),
             ],
-            canvas_bits: [canvas.width.to_bits(), canvas.height.to_bits()],
+            canvas_bits: [canvas.width().to_bits(), canvas.height().to_bits()],
             max_points,
         };
         if let Some((cached_key, path)) = self.entries.get(series.id())
@@ -208,8 +208,14 @@ impl ZoomState {
             return Err(ChartError::InvalidTransform);
         }
         self.current = Viewport::new(
-            AxisRange::new(self.current.x.start + x_delta, self.current.x.end + x_delta)?,
-            AxisRange::new(self.current.y.start + y_delta, self.current.y.end + y_delta)?,
+            AxisRange::new(
+                self.current.x.start() + x_delta,
+                self.current.x.end() + x_delta,
+            )?,
+            AxisRange::new(
+                self.current.y.start() + y_delta,
+                self.current.y.end() + y_delta,
+            )?,
         );
         Ok(())
     }
@@ -239,8 +245,8 @@ impl ZoomState {
 
 fn zoom_range(range: AxisRange, anchor: f64, factor: f64) -> Result<AxisRange, ChartError> {
     AxisRange::new(
-        anchor - (anchor - range.start) / factor,
-        anchor + (range.end - anchor) / factor,
+        anchor - (anchor - range.start()) / factor,
+        anchor + (range.end() - anchor) / factor,
     )
 }
 
