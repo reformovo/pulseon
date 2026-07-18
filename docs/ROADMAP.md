@@ -27,7 +27,7 @@ training deferral.
   downsampling, path cache, hit testing, selection and zoom state. Must not
   depend on GPUI, egui, Tauri, React, or a browser runtime, and must be unit
   testable without a window.
-- [ ] `crates/pulseon-data`: Parquet/DuckDB query and PulseOn schema validation,
+- [x] `crates/pulseon-data`: Parquet/DuckDB query and PulseOn schema validation,
   viewport-aware query planning. Reuses the existing Parquet schema contract; no
   schema changes.
 

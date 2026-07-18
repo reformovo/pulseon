@@ -1511,6 +1511,13 @@ name = "pulseon-chart-core"
 version = "0.1.0"
 
 [[package]]
+name = "pulseon-data"
+version = "0.1.0"
+dependencies = [
+ "duckdb",
+]
+
+[[package]]
 name = "pyo3"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
