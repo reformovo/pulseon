@@ -23,7 +23,7 @@ training deferral.
   `pyproject.toml`/maturin `manifest-path` and any CI `cargo` invocations. No
   behavior change; `cargo check`, `cargo test`, `uv run maturin develop`,
   `uv run pyright`, and `uv run pytest` must still pass after the move.
-- [ ] `crates/pulseon-chart-core`: series model, viewport, scales, ticks,
+- [x] `crates/pulseon-chart-core`: series model, viewport, scales, ticks,
   downsampling, path cache, hit testing, selection and zoom state. Must not
   depend on GPUI, egui, Tauri, React, or a browser runtime, and must be unit
   testable without a window.

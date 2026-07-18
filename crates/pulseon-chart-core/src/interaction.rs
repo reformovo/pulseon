@@ -1,0 +1,326 @@
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
+
+use crate::{AxisRange, CanvasSize, ChartError, DataPoint, Series, SeriesId, Viewport, build_path};
+
+/// One point in top-left-origin screen coordinates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl ScreenPoint {
+    pub const fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct PathCacheKey {
+    revision: u64,
+    viewport_bits: [u64; 4],
+    canvas_bits: [u64; 2],
+    max_points: Option<usize>,
+}
+
+/// Reuses projected paths until their series, viewport, or canvas changes.
+#[derive(Debug, Default)]
+pub struct PathCache {
+    entries: HashMap<SeriesId, (PathCacheKey, Arc<[ScreenPoint]>)>,
+}
+
+impl PathCache {
+    /// Returns the cached path or projects it from the current series.
+    ///
+    /// Only the latest key for each series is retained, bounding stale paths
+    /// created during continuous pan and zoom.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when path construction fails.
+    pub fn path_for(
+        &mut self,
+        series: &Series,
+        revision: u64,
+        viewport: Viewport,
+        canvas: CanvasSize,
+        max_points: Option<usize>,
+    ) -> Result<Arc<[ScreenPoint]>, ChartError> {
+        let key = PathCacheKey {
+            revision,
+            viewport_bits: [
+                viewport.x.start.to_bits(),
+                viewport.x.end.to_bits(),
+                viewport.y.start.to_bits(),
+                viewport.y.end.to_bits(),
+            ],
+            canvas_bits: [canvas.width.to_bits(), canvas.height.to_bits()],
+            max_points,
+        };
+        if let Some((cached_key, path)) = self.entries.get(series.id())
+            && cached_key == &key
+        {
+            return Ok(Arc::clone(path));
+        }
+
+        let path: Arc<[ScreenPoint]> = build_path(series, viewport, canvas, max_points)?.into();
+        self.entries
+            .insert(series.id().clone(), (key, Arc::clone(&path)));
+        Ok(path)
+    }
+
+    pub fn invalidate_series(&mut self, series_id: &SeriesId) {
+        self.entries.remove(series_id);
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// Nearest location on one polyline segment.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hit {
+    pub segment_index: usize,
+    pub position: ScreenPoint,
+    pub distance: f64,
+}
+
+/// Finds the closest polyline segment within a screen-space radius.
+pub fn hit_test(path: &[ScreenPoint], cursor: ScreenPoint, radius: f64) -> Option<Hit> {
+    if path.is_empty() || !radius.is_finite() || radius < 0.0 {
+        return None;
+    }
+    if path.len() == 1 {
+        let distance = distance(path[0], cursor);
+        return (distance <= radius).then_some(Hit {
+            segment_index: 0,
+            position: path[0],
+            distance,
+        });
+    }
+
+    path.windows(2)
+        .enumerate()
+        .map(|(segment_index, segment)| {
+            let position = closest_point(segment[0], segment[1], cursor);
+            Hit {
+                segment_index,
+                position,
+                distance: distance(position, cursor),
+            }
+        })
+        .filter(|hit| hit.distance <= radius)
+        .min_by(|left, right| left.distance.total_cmp(&right.distance))
+}
+
+fn closest_point(start: ScreenPoint, end: ScreenPoint, point: ScreenPoint) -> ScreenPoint {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let length_squared = dx * dx + dy * dy;
+    if length_squared == 0.0 {
+        return start;
+    }
+    let projection =
+        (((point.x - start.x) * dx + (point.y - start.y) * dy) / length_squared).clamp(0.0, 1.0);
+    ScreenPoint::new(start.x + projection * dx, start.y + projection * dy)
+}
+
+fn distance(left: ScreenPoint, right: ScreenPoint) -> f64 {
+    (left.x - right.x).hypot(left.y - right.y)
+}
+
+/// Renderer-independent hover and multi-series selection state.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SelectionState {
+    selected: BTreeSet<SeriesId>,
+    hovered: Option<SeriesId>,
+}
+
+impl SelectionState {
+    pub fn selected(&self) -> &BTreeSet<SeriesId> {
+        &self.selected
+    }
+
+    pub fn hovered(&self) -> Option<&SeriesId> {
+        self.hovered.as_ref()
+    }
+
+    pub fn select_only(&mut self, series_id: SeriesId) {
+        self.selected.clear();
+        self.selected.insert(series_id);
+    }
+
+    pub fn toggle(&mut self, series_id: SeriesId) -> bool {
+        if self.selected.remove(&series_id) {
+            false
+        } else {
+            self.selected.insert(series_id);
+            true
+        }
+    }
+
+    pub fn set_hovered(&mut self, series_id: Option<SeriesId>) {
+        self.hovered = series_id;
+    }
+
+    pub fn clear(&mut self) {
+        self.selected.clear();
+        self.hovered = None;
+    }
+}
+
+/// Current viewport with pan, anchor zoom, and reset behavior.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZoomState {
+    home: Viewport,
+    current: Viewport,
+}
+
+impl ZoomState {
+    pub const fn new(home: Viewport) -> Self {
+        Self {
+            home,
+            current: home,
+        }
+    }
+
+    pub const fn viewport(self) -> Viewport {
+        self.current
+    }
+
+    /// Pans the current viewport in data coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChartError::InvalidTransform`] for non-finite deltas.
+    pub fn pan_by(&mut self, x_delta: f64, y_delta: f64) -> Result<(), ChartError> {
+        if !x_delta.is_finite() || !y_delta.is_finite() {
+            return Err(ChartError::InvalidTransform);
+        }
+        self.current = Viewport::new(
+            AxisRange::new(self.current.x.start + x_delta, self.current.x.end + x_delta)?,
+            AxisRange::new(self.current.y.start + y_delta, self.current.y.end + y_delta)?,
+        );
+        Ok(())
+    }
+
+    /// Zooms both axes around a data-coordinate anchor.
+    ///
+    /// A factor above one zooms in; a factor below one zooms out.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChartError::InvalidTransform`] for invalid inputs.
+    pub fn zoom_at(&mut self, anchor: DataPoint, factor: f64) -> Result<(), ChartError> {
+        if !anchor.x.is_finite() || !anchor.y.is_finite() || !factor.is_finite() || factor <= 0.0 {
+            return Err(ChartError::InvalidTransform);
+        }
+        self.current = Viewport::new(
+            zoom_range(self.current.x, anchor.x, factor)?,
+            zoom_range(self.current.y, anchor.y, factor)?,
+        );
+        Ok(())
+    }
+
+    pub fn reset(&mut self) {
+        self.current = self.home;
+    }
+}
+
+fn zoom_range(range: AxisRange, anchor: f64, factor: f64) -> Result<AxisRange, ChartError> {
+    AxisRange::new(
+        anchor - (anchor - range.start) / factor,
+        anchor + (range.end - anchor) / factor,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn range(start: f64, end: f64) -> AxisRange {
+        AxisRange::new(start, end).expect("test range should be valid")
+    }
+
+    fn series() -> Series {
+        Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![DataPoint::new(0.0, 0.0), DataPoint::new(10.0, 10.0)],
+        )
+        .expect("test series should be valid")
+    }
+
+    #[test]
+    fn path_cache_reuses_matching_paths_and_invalidates_by_series() {
+        let series = series();
+        let viewport = Viewport::new(range(0.0, 10.0), range(0.0, 10.0));
+        let canvas = CanvasSize::new(100.0, 100.0).expect("test canvas should be valid");
+        let mut cache = PathCache::default();
+
+        let first = cache
+            .path_for(&series, 1, viewport, canvas, None)
+            .expect("path should build");
+        let second = cache
+            .path_for(&series, 1, viewport, canvas, None)
+            .expect("path should build");
+
+        assert!(Arc::ptr_eq(&first, &second));
+        let replacement = cache
+            .path_for(&series, 2, viewport, canvas, None)
+            .expect("path should build");
+        assert!(!Arc::ptr_eq(&first, &replacement));
+        assert_eq!(cache.len(), 1);
+        cache.invalidate_series(series.id());
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn hit_test_projects_cursor_onto_nearest_segment() {
+        let path = [ScreenPoint::new(0.0, 0.0), ScreenPoint::new(10.0, 0.0)];
+
+        assert_eq!(
+            hit_test(&path, ScreenPoint::new(4.0, 3.0), 3.0),
+            Some(Hit {
+                segment_index: 0,
+                position: ScreenPoint::new(4.0, 0.0),
+                distance: 3.0,
+            })
+        );
+    }
+
+    #[test]
+    fn selection_state_toggles_independent_series() {
+        let mut selection = SelectionState::default();
+        let loss = SeriesId::new("loss").expect("test id should be valid");
+        let accuracy = SeriesId::new("accuracy").expect("test id should be valid");
+
+        assert!(selection.toggle(loss.clone()));
+        assert!(selection.toggle(accuracy));
+        assert!(!selection.toggle(loss));
+        assert_eq!(selection.selected().len(), 1);
+    }
+
+    #[test]
+    fn zoom_state_pans_zooms_around_anchor_and_resets() {
+        let home = Viewport::new(range(0.0, 10.0), range(0.0, 20.0));
+        let mut zoom = ZoomState::new(home);
+
+        zoom.zoom_at(DataPoint::new(5.0, 10.0), 2.0)
+            .expect("zoom should be valid");
+        assert_eq!(zoom.viewport().x, range(2.5, 7.5));
+        zoom.pan_by(1.0, -2.0).expect("pan should be valid");
+        assert_eq!(zoom.viewport().y, range(3.0, 13.0));
+        zoom.reset();
+        assert_eq!(zoom.viewport(), home);
+    }
+}
