@@ -13,13 +13,14 @@ use crate::time::timestamp_from_millis;
 const EXTREMA_PER_BUCKET: usize = 4;
 
 #[derive(Clone, Copy)]
-pub(crate) enum AlignmentSource {
+pub(crate) enum AlignmentSource<'a> {
     Project,
+    Parquet(&'a str),
 }
 
 pub(crate) fn query_aligned_metric(
     connection: &Connection,
-    source: AlignmentSource,
+    source: AlignmentSource<'_>,
     query: &AlignmentQuery,
     run_start_millis: Option<i64>,
 ) -> Result<AlignmentQueryResult, StorageError> {
@@ -39,7 +40,7 @@ pub(crate) fn query_aligned_metric(
         }
     };
     let sql = aligned_points_sql(source, query.axis, bucket_count.is_some());
-    let values = query_values(query, run_start_millis, bucket_count)?;
+    let values = query_values(source, query, run_start_millis, bucket_count)?;
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         duckdb::params_from_iter(values.iter().map(|value| value.as_ref())),
@@ -61,7 +62,7 @@ pub(crate) fn query_aligned_metric(
 
 fn query_axis_reasons(
     connection: &Connection,
-    source: AlignmentSource,
+    source: AlignmentSource<'_>,
     query: &AlignmentQuery,
     run_start_millis: Option<i64>,
 ) -> Result<Vec<AlignmentReason>, StorageError> {
@@ -74,7 +75,7 @@ fn query_axis_reasons(
          FROM ordered",
         ordered_ctes(source, query.axis)
     );
-    let values = base_values(query, run_start_millis);
+    let values = base_values(source, query, run_start_millis);
     let (negative, decreasing): (bool, bool) = connection.query_row(
         &sql,
         duckdb::params_from_iter(values.iter().map(|value| value.as_ref())),
@@ -91,7 +92,7 @@ fn query_axis_reasons(
 }
 
 fn aligned_points_sql(
-    source: AlignmentSource,
+    source: AlignmentSource<'_>,
     axis: AlignmentAxis,
     screen_reduced: bool,
 ) -> String {
@@ -152,9 +153,14 @@ fn aligned_points_sql(
     )
 }
 
-fn ordered_ctes(source: AlignmentSource, axis: AlignmentAxis) -> String {
+fn ordered_ctes(source: AlignmentSource<'_>, axis: AlignmentAxis) -> String {
     let (relation, tie_breaker) = match source {
         AlignmentSource::Project => ("dl.metric_points", "rowid DESC"),
+        AlignmentSource::Parquet(_) => (
+            "read_parquet(?, hive_partitioning = true, union_by_name = true, \
+             filename = true, file_row_number = true)",
+            "filename DESC, file_row_number DESC",
+        ),
     };
     let axis_expression = match axis {
         AlignmentAxis::Step => "step",
@@ -185,10 +191,14 @@ fn ordered_ctes(source: AlignmentSource, axis: AlignmentAxis) -> String {
 }
 
 fn base_values(
+    source: AlignmentSource<'_>,
     query: &AlignmentQuery,
     run_start_millis: Option<i64>,
 ) -> Vec<Box<dyn duckdb::ToSql>> {
     let mut values: Vec<Box<dyn duckdb::ToSql>> = Vec::with_capacity(5);
+    if let AlignmentSource::Parquet(location) = source {
+        values.push(Box::new(location.to_owned()));
+    }
     values.extend([
         Box::new(query.run_id.as_str().to_owned()) as Box<dyn duckdb::ToSql>,
         Box::new(query.metric_key.as_str().to_owned()),
@@ -201,11 +211,12 @@ fn base_values(
 }
 
 fn query_values(
+    source: AlignmentSource<'_>,
     query: &AlignmentQuery,
     run_start_millis: Option<i64>,
     bucket_count: Option<usize>,
 ) -> Result<Vec<Box<dyn duckdb::ToSql>>, StorageError> {
-    let mut values = base_values(query, run_start_millis);
+    let mut values = base_values(source, query, run_start_millis);
     values.extend([
         Box::new(query.viewport.start()) as Box<dyn duckdb::ToSql>,
         Box::new(query.viewport.end()),
@@ -349,6 +360,24 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0, 10, 20, 20, 10, 50]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn elapsed_screen_query_uses_extrema_without_lttb() -> Result<(), Box<dyn Error>> {
+        let connection = connection()?;
+        let mut elapsed = query(
+            AlignmentAxis::ElapsedTime,
+            AlignmentReduction::screen_budget(1, 1)?,
+        );
+        elapsed.viewport = AlignmentViewport::new(10, 50)?;
+        let result = ProjectMetricReader::new(&connection).query_aligned_metric(&elapsed)?;
+
+        assert_eq!(result.source_row_count, 7);
+        assert!(result.downsampled());
+        assert!(result.reasons.is_empty());
+        assert_eq!(result.points.first().map(|point| point.axis_value), Some(0));
+        assert_eq!(result.points.last().map(|point| point.axis_value), Some(60));
         Ok(())
     }
 

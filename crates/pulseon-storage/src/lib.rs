@@ -15,6 +15,7 @@ mod sql;
 pub mod time;
 pub mod write;
 
+use pulseon_model::alignment::{AlignmentQuery, AlignmentQueryResult};
 use pulseon_model::metric::{MetricQuery, MetricQueryResult};
 
 pub use lock::RunWriterGuard;
@@ -26,6 +27,10 @@ pub use schema::{ColumnSchema, SchemaReport, validate_metric_point_schema};
 /// Common metric-series query interface for current storage inputs.
 pub trait MetricReader {
     fn query_metric(&self, query: &MetricQuery) -> Result<MetricQueryResult, StorageError>;
+    fn query_aligned_metric(
+        &self,
+        query: &AlignmentQuery,
+    ) -> Result<AlignmentQueryResult, StorageError>;
 }
 
 /// Failures returned by PulseOn storage operations.

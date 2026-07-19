@@ -188,6 +188,13 @@ impl MetricReader for ProjectMetricReader<'_> {
     fn query_metric(&self, query: &MetricQuery) -> Result<MetricQueryResult, StorageError> {
         Self::query_metric(self, query)
     }
+
+    fn query_aligned_metric(
+        &self,
+        query: &AlignmentQuery,
+    ) -> Result<AlignmentQueryResult, StorageError> {
+        Self::query_aligned_metric(self, query)
+    }
 }
 
 pub(crate) fn query_metric(
