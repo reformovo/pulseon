@@ -1,6 +1,12 @@
 use pulseon_storage::{ProjectConnection, ProjectMetricReader};
 
 use crate::engine::EngineError;
+use crate::model::alignment::{
+    AlignedMetricResult, AlignmentQuery, AlignmentQueryResult, AlignmentReason,
+};
+use crate::model::comparison::{
+    EvidenceCompleteness, EvidenceReason, ObjectiveEvidence, ObjectiveMetric,
+};
 use crate::model::metric::{
     MetricAggregate, MetricKey, MetricPoint, MetricQuery, ReductionPolicy, Step,
 };
@@ -76,6 +82,28 @@ impl<'connection> NativeQueryStore<'connection> {
         Ok(self.reader().query_metric(&query)?)
     }
 
+    pub fn query_aligned_metric(
+        &self,
+        query: &AlignmentQuery,
+        run_status: RunStatus,
+    ) -> Result<AlignedMetricResult, EngineError> {
+        let result = self.reader().query_aligned_metric(query)?;
+        Ok(aligned_metric_result(result, run_status))
+    }
+
+    pub fn objective_evidence(
+        &self,
+        run_id: &RunId,
+        run_status: RunStatus,
+        objective: &ObjectiveMetric,
+    ) -> Result<ObjectiveEvidence, EngineError> {
+        let aggregate = self
+            .query_metric_summaries(std::slice::from_ref(run_id), &objective.metric_key)?
+            .into_iter()
+            .next();
+        Ok(objective_evidence(run_id, run_status, aggregate))
+    }
+
     pub fn metric_aggregate(
         &self,
         run_id: &RunId,
@@ -106,5 +134,145 @@ impl<'connection> NativeQueryStore<'connection> {
             #[cfg(test)]
             QuerySource::DuckDb(connection) => ProjectMetricReader::new(connection),
         }
+    }
+}
+
+fn aligned_metric_result(
+    result: AlignmentQueryResult,
+    run_status: RunStatus,
+) -> AlignedMetricResult {
+    let mut reasons = result
+        .reasons
+        .into_iter()
+        .map(|reason| match reason {
+            AlignmentReason::MissingRunStart => EvidenceReason::MissingRunStart,
+            AlignmentReason::NegativeAxis => EvidenceReason::NegativeAxis,
+            AlignmentReason::DecreasingAxis => EvidenceReason::DecreasingAxis,
+        })
+        .collect::<Vec<_>>();
+    let mut completeness = if reasons.iter().any(|reason| {
+        matches!(
+            reason,
+            EvidenceReason::NegativeAxis | EvidenceReason::DecreasingAxis
+        )
+    }) {
+        EvidenceCompleteness::Invalid
+    } else if reasons.contains(&EvidenceReason::MissingRunStart) || result.points.is_empty() {
+        if reasons.is_empty() {
+            reasons.push(EvidenceReason::MissingMetric);
+        }
+        EvidenceCompleteness::Unavailable
+    } else {
+        EvidenceCompleteness::Complete
+    };
+    qualify_lifecycle(run_status, &mut completeness, &mut reasons);
+    AlignedMetricResult {
+        points: result.points,
+        source_row_count: result.source_row_count,
+        completeness,
+        reasons,
+    }
+}
+
+fn objective_evidence(
+    run_id: &RunId,
+    run_status: RunStatus,
+    aggregate: Option<MetricAggregate>,
+) -> ObjectiveEvidence {
+    let (last_step, last_value_f64, mut completeness, mut reasons) = match aggregate {
+        None => (
+            None,
+            None,
+            EvidenceCompleteness::Unavailable,
+            vec![EvidenceReason::MissingMetric],
+        ),
+        Some(aggregate) if !aggregate.last_value_f64.is_finite() => (
+            Some(aggregate.last_step),
+            Some(aggregate.last_value_f64),
+            EvidenceCompleteness::Invalid,
+            vec![EvidenceReason::NonFiniteValue],
+        ),
+        Some(aggregate) => (
+            Some(aggregate.last_step),
+            Some(aggregate.last_value_f64),
+            EvidenceCompleteness::Complete,
+            Vec::new(),
+        ),
+    };
+    qualify_lifecycle(run_status, &mut completeness, &mut reasons);
+    ObjectiveEvidence {
+        run_id: run_id.clone(),
+        run_status,
+        last_step,
+        last_value_f64,
+        completeness,
+        reasons,
+    }
+}
+
+fn qualify_lifecycle(
+    run_status: RunStatus,
+    completeness: &mut EvidenceCompleteness,
+    reasons: &mut Vec<EvidenceReason>,
+) {
+    let reason = match run_status {
+        RunStatus::Running => Some(EvidenceReason::RunRunning),
+        RunStatus::Failed => Some(EvidenceReason::RunFailed),
+        RunStatus::Finished => None,
+    };
+    if let Some(reason) = reason {
+        *completeness = (*completeness).max(EvidenceCompleteness::Partial);
+        reasons.push(reason);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn objective_evidence_retains_invalid_value_and_failed_reason() {
+        let run_id = RunId::from_string("run-1");
+        let evidence = objective_evidence(
+            &run_id,
+            RunStatus::Failed,
+            Some(MetricAggregate {
+                run_id: run_id.clone(),
+                metric_key: MetricKey::from_string("loss"),
+                effective_count: 1,
+                last_step: Step::new(4),
+                last_value_f64: f64::NAN,
+                min_value_f64: f64::NAN,
+                max_value_f64: f64::NAN,
+            }),
+        );
+
+        assert_eq!(
+            (evidence.completeness, evidence.reasons),
+            (
+                EvidenceCompleteness::Invalid,
+                vec![EvidenceReason::NonFiniteValue, EvidenceReason::RunFailed]
+            )
+        );
+    }
+
+    #[test]
+    fn aligned_empty_running_series_is_unavailable_with_both_reasons() {
+        let result = aligned_metric_result(
+            AlignmentQueryResult {
+                points: Vec::new(),
+                source_row_count: 0,
+                reasons: Vec::new(),
+            },
+            RunStatus::Running,
+        );
+
+        assert_eq!(
+            (result.completeness, result.reasons),
+            (
+                EvidenceCompleteness::Unavailable,
+                vec![EvidenceReason::MissingMetric, EvidenceReason::RunRunning]
+            )
+        );
     }
 }

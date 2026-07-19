@@ -1,3 +1,4 @@
+use crate::comparison::{EvidenceCompleteness, EvidenceReason};
 use crate::metric::{MetricKey, MetricPoint};
 use crate::run::RunId;
 
@@ -125,6 +126,21 @@ pub struct AlignmentQueryResult {
 }
 
 impl AlignmentQueryResult {
+    pub fn downsampled(&self) -> bool {
+        self.source_row_count > self.points.len() as u64
+    }
+}
+
+/// Product-level aligned metric evidence returned by Core.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AlignedMetricResult {
+    pub points: Vec<AlignedMetricPoint>,
+    pub source_row_count: u64,
+    pub completeness: EvidenceCompleteness,
+    pub reasons: Vec<EvidenceReason>,
+}
+
+impl AlignedMetricResult {
     pub fn downsampled(&self) -> bool {
         self.source_row_count > self.points.len() as u64
     }

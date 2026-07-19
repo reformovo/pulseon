@@ -396,6 +396,25 @@ impl NativeClient {
             .query_metric_with_metadata(run_id, metric_key, start_step, end_step, max_points)
     }
 
+    pub fn query_aligned_metric(
+        &self,
+        query: &crate::model::alignment::AlignmentQuery,
+    ) -> Result<crate::model::alignment::AlignedMetricResult, EngineError> {
+        let run = self.get_run(&query.run_id)?;
+        let connection = self.connection()?;
+        NativeQueryStore::new(&connection).query_aligned_metric(query, run.status)
+    }
+
+    pub fn objective_evidence(
+        &self,
+        run_id: &RunId,
+        objective: &crate::model::comparison::ObjectiveMetric,
+    ) -> Result<crate::model::comparison::ObjectiveEvidence, EngineError> {
+        let run = self.get_run(run_id)?;
+        let connection = self.connection()?;
+        NativeQueryStore::new(&connection).objective_evidence(run_id, run.status, objective)
+    }
+
     pub fn query_metric_summaries(
         &self,
         run_ids: &[RunId],
