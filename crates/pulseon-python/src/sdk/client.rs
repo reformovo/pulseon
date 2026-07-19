@@ -13,7 +13,7 @@ use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 use crate::sdk::alignment::{PyAlignedMetricResult, alignment_query};
 use crate::sdk::arrow::PyArrowTable;
-use crate::sdk::comparison::{PyComparisonResult, objective};
+use crate::sdk::comparison::{PyComparisonResult, PyRankingResult, objective};
 use pulseon_core::config::{InitConfigError, S3ConnectionOverrides, resolve_init_config};
 
 create_exception!(
@@ -269,6 +269,24 @@ impl PyClient {
                 &objective,
             )
             .map(PyComparisonResult::from)
+            .map_err(runtime_error)
+    }
+
+    #[pyo3(signature = (run_ids, *, metric_key, direction))]
+    pub fn rank_runs(
+        &self,
+        run_ids: Vec<String>,
+        metric_key: &str,
+        direction: &str,
+    ) -> PyResult<PyRankingResult> {
+        let objective = objective(metric_key, direction)?;
+        let run_ids = run_ids
+            .into_iter()
+            .map(RunId::from_string)
+            .collect::<Vec<_>>();
+        self._inner
+            .rank_runs(&run_ids, &objective)
+            .map(PyRankingResult::from)
             .map_err(runtime_error)
     }
 

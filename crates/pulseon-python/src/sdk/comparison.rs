@@ -3,7 +3,8 @@ use pyo3::prelude::*;
 
 use crate::model::comparison::{
     ComparisonOutcome, ComparisonPreference, ComparisonResult, EvidenceCompleteness,
-    EvidenceReason, ObjectiveDirection, ObjectiveEvidence, ObjectiveMetric,
+    EvidenceReason, ObjectiveDirection, ObjectiveEvidence, ObjectiveMetric, RankingEntry,
+    RankingResult,
 };
 use crate::model::metric::MetricKey;
 use crate::model::run::RunStatus;
@@ -117,6 +118,67 @@ impl From<ComparisonResult> for PyComparisonResult {
             normalized_improvement: result.normalized_improvement,
             outcome: result.outcome.map(outcome_value).map(str::to_owned),
             preference: preference_value(result.preference).to_owned(),
+        }
+    }
+}
+
+#[derive(Clone)]
+#[pyclass(
+    name = "RankingEntry",
+    module = "pulseon._pulseon",
+    skip_from_py_object
+)]
+pub struct PyRankingEntry {
+    evidence: PyObjectiveEvidence,
+    #[pyo3(get)]
+    rank: Option<u64>,
+}
+
+#[pymethods]
+impl PyRankingEntry {
+    #[getter]
+    fn evidence(&self) -> PyObjectiveEvidence {
+        self.evidence.clone()
+    }
+}
+
+impl From<RankingEntry> for PyRankingEntry {
+    fn from(entry: RankingEntry) -> Self {
+        Self {
+            evidence: entry.evidence.into(),
+            rank: entry.rank,
+        }
+    }
+}
+
+#[pyclass(name = "RankingResult", module = "pulseon._pulseon")]
+pub struct PyRankingResult {
+    objective: PyObjectiveMetric,
+    entries: Vec<PyRankingEntry>,
+}
+
+#[pymethods]
+impl PyRankingResult {
+    #[getter]
+    fn objective(&self) -> PyObjectiveMetric {
+        self.objective.clone()
+    }
+
+    #[getter]
+    fn entries(&self) -> Vec<PyRankingEntry> {
+        self.entries.clone()
+    }
+}
+
+impl From<RankingResult> for PyRankingResult {
+    fn from(result: RankingResult) -> Self {
+        Self {
+            objective: result.objective.into(),
+            entries: result
+                .entries
+                .into_iter()
+                .map(PyRankingEntry::from)
+                .collect(),
         }
     }
 }
