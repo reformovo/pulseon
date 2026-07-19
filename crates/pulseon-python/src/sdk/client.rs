@@ -11,6 +11,7 @@ use crate::engine::reporting::MetricReporterDiagnostics;
 use crate::model::metric::{MetricAggregate, MetricKey, MetricPoint, Step};
 use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
+use crate::sdk::alignment::{PyAlignedMetricResult, alignment_query};
 use crate::sdk::arrow::PyArrowTable;
 use pulseon_core::config::{InitConfigError, S3ConnectionOverrides, resolve_init_config};
 
@@ -219,6 +220,36 @@ impl PyClient {
 
     pub fn diagnostics(&self) -> PyDiagnostics {
         PyDiagnostics::from(self._inner.diagnostics())
+    }
+
+    #[pyo3(signature = (run_id, metric_key, *, axis, start, end, pixel_width=None, points_per_pixel=None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the approved Python API keeps viewport and screen-budget inputs explicit"
+    )]
+    pub fn query_aligned_metric(
+        &self,
+        run_id: &str,
+        metric_key: &str,
+        axis: &str,
+        start: i64,
+        end: i64,
+        pixel_width: Option<u32>,
+        points_per_pixel: Option<u16>,
+    ) -> PyResult<PyAlignedMetricResult> {
+        let query = alignment_query(
+            run_id,
+            metric_key,
+            axis,
+            start,
+            end,
+            pixel_width,
+            points_per_pixel,
+        )?;
+        self._inner
+            .query_aligned_metric(&query)
+            .map(PyAlignedMetricResult::from)
+            .map_err(runtime_error)
     }
 
     #[pyo3(signature = (run_id, metric_key, start_step=None, end_step=None, max_points=None))]
