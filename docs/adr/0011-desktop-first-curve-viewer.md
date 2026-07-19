@@ -76,6 +76,5 @@ The viewer does not change the Python/Rust SDK surface or the Parquet schema.
   boundary, avoiding a second, non-equivalent downsampling pass.
 - Replacing GPUI later would require a renderer adapter rewrite, not a data
   model rewrite — this is the boundary the split protects.
-- Comparison alignment semantics (step, wall time, cumulative tokens, normalized
-  budget progress) are defined in Core and consumed by the viewer, not invented
-  inside the renderer.
+- Supported comparison alignment semantics are defined by the versioned Core
+  contract and consumed by the viewer, not invented inside the renderer.

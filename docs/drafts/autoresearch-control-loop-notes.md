@@ -42,8 +42,8 @@ decision. Curve comparison is also ambiguous when Runs have different step
 counts. In the case study, changing batch size moved the terminal step from
 roughly 240 to roughly 984 under the same wall-time budget.
 
-Useful comparison axes are raw step, elapsed wall time, cumulative tokens, and
-normalized budget progress from zero to one.
+PulseOn 0.2.x comparison uses raw step and elapsed wall time. Cumulative-token
+and normalized-budget axes are intentionally deferred.
 
 The curve viewer direction in `docs/drafts/gpui-curve-viewer-spike.md` should
 own interactive rendering. Autoresearch support should define comparison and
@@ -182,7 +182,7 @@ create a backup rather than silently rewriting a store during initialization.
 - Reproduce the case study without parsing Run names or manually deriving delta.
 - Preserve `RunStatus` lifecycle meaning and the existing Parquet metric schema.
 - Keep metric-reporting admission latency and finalization semantics unchanged.
-- Compare by step, time, tokens, and budget progress while preserving endpoints.
+- Compare by step and elapsed time while preserving endpoints.
 - Emit deterministic, versioned JSON suitable for an agent to consume without
   scraping human-readable output.
 - Return `inconclusive` when a rigor policy lacks enough evidence.

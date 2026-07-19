@@ -40,6 +40,19 @@ release.
   points that follows the PulseOn Parquet compatibility contract. It is not a
   catalog or an authoritative native project store.
 - **Run summary**: Derived per-run values for run lists and comparisons.
+- **Comparison axis**: Requested basis for ordering metric observations across
+  Runs without changing their measured values.
+- **Objective metric**: Primary metric and direction used to compare Runs.
+- **Comparison evidence**: Derived facts and qualifications supporting a Run
+  comparison.
+- **Completeness**: Whether comparison evidence is complete, partial,
+  unavailable, or invalid.
+- **Outcome**: Numeric relationship between a candidate and its reference.
+- **Preference**: Read-only advice derived from an outcome and its evidence.
+- **Candidate**: Request role for the Run being evaluated.
+- **Reference**: Request role for the Run against which a candidate is compared.
+- **Baseline**: Explicitly requested reference role in a generic comparison.
+- **Incumbent**: Reference role in an autoresearch comparison.
 - **Metric aggregate**: Materialized-view-like index/state from metric writes.
 - **Reporting diagnostics**: Minimal observable state for pending reports,
   queue-full failures, persisted reports, writer state, and last errors.

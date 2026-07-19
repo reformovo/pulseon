@@ -45,17 +45,106 @@ training deferral.
 
 ### Phase 2: Comparison Alignment Semantics
 
-- [ ] Define the comparison contract (step, elapsed wall time, cumulative
-  tokens, normalized budget progress [0,1]) as a shareable, renderer-agnostic
-  surface. Document in a `docs/comparison-semantics.md`-style spec marked as a
-  0.2.x contract that may change before 1.0; no ADR until 1.0 freezes it.
-- [ ] `metrics compare` / `autoresearch compare` with objective direction,
-  incumbent derivation, absolute and relative delta, secondary metrics, evidence
-  completeness, and versioned JSON envelope. Comparison output is evidence
-  (deltas, compute-only advice), never persisted research decisions or catalog
-  state.
-- [ ] `autoresearch leaderboard` / `autoresearch best` building on pairwise
-  comparison: direction-aware ranking across many runs.
+Phase 2 is a read-only derived layer over existing Runs and metric facts. It
+does not add catalog or Parquet fields, persisted research context or decisions,
+source/Git mutation, repetition or significance policy, runtime dependencies,
+or a renderer dependency. It may add typed Rust/Python read APIs and replaces
+the pre-1.0 CLI JSON envelope with version 2.
+
+#### Phase 2A: Contract and Product Language
+
+- [x] Write `docs/comparison-semantics.md` as the renderer-agnostic 0.2.x
+  contract, explicitly marked as changeable before 1.0. Define comparison axis,
+  objective metric, comparison evidence, completeness, outcome, and preference
+  as general product terms. Candidate and incumbent remain request roles, not
+  stored Run identities. Do not create an ADR before 1.0 freezes the contract.
+- [x] Lock two axes: raw step and elapsed wall time from `Run.started_at`.
+  Elapsed values may repeat but not decrease; negative or non-monotonic axes
+  are invalid, and missing Run start metadata is unavailable.
+- [x] Define invalid and partial evidence without repairing it. Preserve usable
+  numeric evidence from running and failed Runs while keeping their preference
+  inconclusive; do not reorder, interpolate, clamp, or replace invalid values.
+- [x] Define scalar comparison from the last effective value at the greatest
+  step. Raw delta is `candidate - reference`; relative delta divides by the
+  absolute reference and is absent for a zero reference. Direction-normalized
+  improvement is positive when better. No tolerance, significance, or
+  uncertainty claim is made in 0.2.x.
+
+#### Phase 2B: Observation Time and Aligned Query Foundation
+
+- [ ] Capture a metric's observation timestamp on the `run.log(...)` enqueue
+  path while leaving `ingested_at` on the background writer. Preserve the
+  logging signature, queue admission, drain/finalization behavior, and metric
+  schema. Document pre-0.2 timestamps as best-effort elapsed evidence because
+  their writer-time origin cannot be detected or migrated safely.
+- [ ] Add shared alignment request/result types and axis-aware storage queries
+  for the native project store and standalone Parquet facts. Alignment uses a
+  closed viewport plus one neighboring point on each side. Both axes support
+  full and screen-budgeted extrema queries; elapsed queries do not use LTTB.
+- [ ] Keep standalone Parquet fact-only: step alignment remains available,
+  while elapsed alignment reports `missing_run_start` rather than treating the
+  first point as the Run origin.
+
+#### Phase 2C: Typed Shared Read API
+
+- [ ] Expose typed, renderer-independent alignment, objective, comparison,
+  ranking, evidence, and result value objects from the shared Rust
+  model/Core boundary. Keep storage execution behind the metric-reader
+  contract and rendering conversion outside Core.
+- [ ] Expose matching read-only Python value objects and Client methods for
+  aligned metric queries, Run comparison, and ranking; update the type stub and
+  Python type-check fixtures. Do not add autoresearch-specific SDK types: the
+  SDK language remains Project, Run, metric, comparison, and ranking.
+
+#### Phase 2D: Generic and Autoresearch Comparison Reports
+
+- [ ] Upgrade `metrics compare` to require an explicit baseline contained in
+  the requested Run set and an explicit `minimize` or `maximize` direction.
+  Permit cross-Project comparison. Preserve input order for candidate reports.
+- [ ] Add `autoresearch compare` as a role-oriented view over the same Core
+  report. Its incumbent is either explicit or the direction-aware best eligible
+  Run from an explicit comparator pool; it is never inferred from project
+  history. No eligible incumbent yields insufficient evidence, not mutation.
+- [ ] Report primary and secondary last values, raw and relative deltas,
+  normalized improvement, structured completeness/reasons, numeric outcome,
+  and compute-only preference. Secondary metrics never affect outcome,
+  preference, ranking, or tie-breaking in 0.2.x.
+- [ ] Allow running and failed Runs to expose available numeric evidence but
+  mark their report partial and preference inconclusive. Unknown or duplicate
+  Run identities are request errors; missing metrics and non-finite values are
+  per-item unavailable/invalid evidence.
+
+#### Phase 2E: Ranking and Machine Output
+
+- [ ] Add `autoresearch leaderboard` and `autoresearch best` over a required
+  Project with an optional explicit Run subset. Only finished Runs with a
+  finite primary objective are eligible; other Runs remain visible with a null
+  rank and structured reason.
+- [ ] Use direction-aware competition ranking (`1, 1, 3`). Exact ties share a
+  rank; selecting one best/incumbent prefers the earlier `created_at`, then
+  lexical `run_id`. An empty eligible set is a successful `best = null` result.
+- [ ] Default leaderboard output to 50 entries with limit/offset pagination and
+  an explicit all-results option. Compute ranks over the full eligible set
+  before pagination.
+- [ ] Bump every CLI success and error JSON envelope to schema version 2. Keep
+  deterministic kinds, ordering, reason codes, pagination metadata, standard
+  JSON encoding for non-finite metric values, and null relative deltas when the
+  reference is zero. CLI comparison output stays bounded evidence; aligned
+  curve points remain on the typed Rust/Python read surface.
+
+#### Phase 2 Validation Gates
+
+- [ ] Preserve the native storage and crate dependency boundaries, effective
+  last-write-wins series, half-open ordinary step queries, Parquet schema, and
+  non-blocking metric-reporting contract.
+- [ ] Cover native/Parquet alignment parity, negative and decreasing elapsed
+  axes, missing Run starts, viewport neighbors, screen budgets, both objective
+  directions, zero/non-finite values, partial Runs, cross-Project pairs,
+  incumbent pools, ranking ties, empty best, pagination, typed Python use, and
+  deterministic JSON.
+- [ ] Pass `cargo check`, `cargo test`, `uv run maturin develop --uv`,
+  `uv run pyright`, and `uv run pytest`; run the logging throughput benchmark
+  after moving timestamp capture and document any measurable regression.
 
 ### Phase 3: GPUI Desktop Viewer
 
@@ -72,6 +161,7 @@ training deferral.
 
 ### Out of 0.2.x Scope
 
+- Cumulative-token and normalized-budget comparison axes.
 - Stable Contract / compatibility ADR / schema version marker / deprecation
   policy (deferred to 1.0).
 - Retry-safe migration command (mutates state; deferred to 1.0).
