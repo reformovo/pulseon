@@ -40,6 +40,14 @@ series semantics before optional reduction. The storage crate owns full-series,
 LTTB, and screen-budgeted extrema query strategies; chart code projects every
 point returned by storage and does not downsample again.
 
+Aligned queries are separate from ordinary half-open step queries. They derive
+raw-step or elapsed-time coordinates after last-write-wins, use a closed
+viewport plus one strict neighbor on each side, and expose full or
+screen-budgeted extrema results through the shared metric-reader interface.
+The native reader resolves elapsed origin from Run metadata. The standalone
+Parquet reader remains fact-only: it supports step alignment and reports
+`missing_run_start` for elapsed alignment.
+
 The native project store is the authoritative read source for catalog discovery
 and inline plus Parquet-backed facts. A standalone Parquet dataset is a
 compatibility source for flushed facts only and does not imply project or run

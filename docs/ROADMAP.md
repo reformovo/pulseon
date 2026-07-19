@@ -72,16 +72,16 @@ the pre-1.0 CLI JSON envelope with version 2.
 
 #### Phase 2B: Observation Time and Aligned Query Foundation
 
-- [ ] Capture a metric's observation timestamp on the `run.log(...)` enqueue
+- [x] Capture a metric's observation timestamp on the `run.log(...)` enqueue
   path while leaving `ingested_at` on the background writer. Preserve the
   logging signature, queue admission, drain/finalization behavior, and metric
   schema. Document pre-0.2 timestamps as best-effort elapsed evidence because
   their writer-time origin cannot be detected or migrated safely.
-- [ ] Add shared alignment request/result types and axis-aware storage queries
+- [x] Add shared alignment request/result types and axis-aware storage queries
   for the native project store and standalone Parquet facts. Alignment uses a
   closed viewport plus one neighboring point on each side. Both axes support
   full and screen-budgeted extrema queries; elapsed queries do not use LTTB.
-- [ ] Keep standalone Parquet fact-only: step alignment remains available,
+- [x] Keep standalone Parquet fact-only: step alignment remains available,
   while elapsed alignment reports `missing_run_start` rather than treating the
   first point as the Run origin.
 

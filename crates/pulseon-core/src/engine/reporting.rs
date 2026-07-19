@@ -83,11 +83,13 @@ impl MetricReporter {
             });
         }
         let enqueue_sequence = self.inner.next_enqueue_sequence.load(Ordering::Relaxed);
+        let timestamp_millis = chrono::Utc::now().timestamp_millis();
         let report = MetricReport {
             run_id,
             metric_key,
             step,
             value_f64,
+            timestamp_millis,
             enqueue_sequence,
         };
         self.inner.diagnostics.increment_pending();
@@ -420,6 +422,7 @@ struct MetricReport {
     metric_key: MetricKey,
     step: Step,
     value_f64: f64,
+    timestamp_millis: i64,
     enqueue_sequence: u64,
 }
 
@@ -540,7 +543,7 @@ fn write_metric_batch(
             run_id: report.run_id.as_str().to_owned(),
             metric_key: report.metric_key.as_str().to_owned(),
             step: report.step.value(),
-            timestamp_millis: ingested_at_millis,
+            timestamp_millis: report.timestamp_millis,
             value_f64: report.value_f64,
             ingested_at_millis,
         });
@@ -571,7 +574,7 @@ mod tests {
 
     #[test]
     fn metric_report_struct_footprint_matches_capacity_planning() {
-        assert_eq!(std::mem::size_of::<MetricReport>(), 72);
+        assert_eq!(std::mem::size_of::<MetricReport>(), 80);
         assert_eq!(std::mem::align_of::<MetricReport>(), 8);
     }
 
@@ -984,7 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn write_metric_batch_appends_rows_and_assigns_ingested_at_in_enqueue_order()
+    fn write_metric_batch_preserves_observation_time_and_orders_ingested_at()
     -> Result<(), Box<dyn std::error::Error>> {
         let root_path =
             std::env::temp_dir().join(format!("pulseon-reporter-{}", uuid::Uuid::new_v4()));
@@ -1011,23 +1014,30 @@ mod tests {
             write_metric_batch(&connection, &batch, first_ingested_at_millis)?;
 
         let connection = connection.lock().expect("test connection lock");
-        let stored: Vec<(i64, i64)> = connection
+        let stored: Vec<(i64, i64, i64)> = connection
             .prepare(
-                "SELECT step, epoch_ms(ingested_at)
+                "SELECT step, epoch_ms(timestamp), epoch_ms(ingested_at)
                  FROM dl.metric_points
                  WHERE run_id = 'run-1'
                  ORDER BY ingested_at",
             )?
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
             .collect::<Result<_, _>>()?;
         assert_eq!(
-            stored.iter().map(|(step, _)| *step).collect::<Vec<_>>(),
+            stored.iter().map(|(step, _, _)| *step).collect::<Vec<_>>(),
             vec![0, 1, 2]
         );
-        assert_eq!(stored[1].1, stored[0].1 + 1);
-        assert_eq!(stored[2].1, stored[1].1 + 1);
-        assert_eq!(next_ingested_at_millis, stored[2].1 + 1);
-        assert!(stored[0].1 >= first_ingested_at_millis);
+        assert_eq!(
+            stored
+                .iter()
+                .map(|(_, timestamp, _)| *timestamp)
+                .collect::<Vec<_>>(),
+            vec![1_700_000_000_000, 1_700_000_000_001, 1_700_000_000_002]
+        );
+        assert_eq!(stored[1].2, stored[0].2 + 1);
+        assert_eq!(stored[2].2, stored[1].2 + 1);
+        assert_eq!(next_ingested_at_millis, stored[2].2 + 1);
+        assert!(stored[0].2 >= first_ingested_at_millis);
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }
@@ -1076,6 +1086,8 @@ mod tests {
             metric_key: MetricKey::from_string("train/loss"),
             step: Step::new(i64::try_from(step).expect("test step should fit i64")),
             value_f64: step as f64,
+            timestamp_millis: 1_700_000_000_000
+                + i64::try_from(step).expect("test step should fit i64"),
             enqueue_sequence: u64::try_from(step + 1).expect("test step should fit u64"),
         }
     }
