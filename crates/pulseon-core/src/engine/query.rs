@@ -141,6 +141,10 @@ fn aligned_metric_result(
     result: AlignmentQueryResult,
     run_status: RunStatus,
 ) -> AlignedMetricResult {
+    let has_non_finite_value = result
+        .points
+        .iter()
+        .any(|point| !point.point.value_f64.is_finite());
     let mut reasons = result
         .reasons
         .into_iter()
@@ -150,10 +154,15 @@ fn aligned_metric_result(
             AlignmentReason::DecreasingAxis => EvidenceReason::DecreasingAxis,
         })
         .collect::<Vec<_>>();
+    if has_non_finite_value {
+        reasons.push(EvidenceReason::NonFiniteValue);
+    }
     let mut completeness = if reasons.iter().any(|reason| {
         matches!(
             reason,
-            EvidenceReason::NegativeAxis | EvidenceReason::DecreasingAxis
+            EvidenceReason::NegativeAxis
+                | EvidenceReason::DecreasingAxis
+                | EvidenceReason::NonFiniteValue
         )
     }) {
         EvidenceCompleteness::Invalid
@@ -230,6 +239,21 @@ fn qualify_lifecycle(
 mod tests {
     use super::*;
 
+    fn aligned_point(value_f64: f64) -> crate::model::alignment::AlignedMetricPoint {
+        let timestamp = chrono::Utc::now();
+        crate::model::alignment::AlignedMetricPoint {
+            point: MetricPoint {
+                run_id: RunId::from_string("run-1"),
+                metric_key: MetricKey::from_string("loss"),
+                step: Step::new(0),
+                timestamp,
+                value_f64,
+                ingested_at: timestamp,
+            },
+            axis_value: 0,
+        }
+    }
+
     #[test]
     fn objective_evidence_retains_invalid_value_and_failed_reason() {
         let run_id = RunId::from_string("run-1");
@@ -274,5 +298,21 @@ mod tests {
                 vec![EvidenceReason::MissingMetric, EvidenceReason::RunRunning]
             )
         );
+    }
+
+    #[test]
+    fn aligned_non_finite_finished_series_is_invalid_without_repair() {
+        let result = aligned_metric_result(
+            AlignmentQueryResult {
+                points: vec![aligned_point(f64::NAN)],
+                source_row_count: 1,
+                reasons: Vec::new(),
+            },
+            RunStatus::Finished,
+        );
+
+        assert_eq!(result.completeness, EvidenceCompleteness::Invalid);
+        assert_eq!(result.reasons, vec![EvidenceReason::NonFiniteValue]);
+        assert!(result.points[0].point.value_f64.is_nan());
     }
 }

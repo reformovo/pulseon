@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import pathlib
 
 import pytest
@@ -84,6 +85,29 @@ def test_aligned_metric_rejects_invalid_public_arguments(
         client.query_aligned_metric(
             "run-1", "loss", axis="step", start=2, end=1
         )
+
+
+def test_aligned_metric_marks_non_finite_evidence_invalid(
+    tmp_path: pathlib.Path,
+) -> None:
+    client = pulseon.init(tmp_path / "pulseon")
+    project = client.create_project("alignment", project_id="project-1")
+    run = client.create_run(project.project_id, "curve", run_id="run-1")
+    run.log("loss", 0, float("nan"))
+    helpers.wait_for_metric_points(client, run.run_id, "loss", expected_count=1)
+    client.finish_run(run.run_id)
+
+    result = client.query_aligned_metric(
+        run.run_id,
+        "loss",
+        axis="step",
+        start=0,
+        end=0,
+    )
+
+    assert result.completeness == "invalid"
+    assert result.reasons == ["non_finite_value"]
+    assert math.isnan(result.points[0].value_f64)
 
 
 def test_compare_runs_reports_complete_partial_and_unavailable_evidence(
