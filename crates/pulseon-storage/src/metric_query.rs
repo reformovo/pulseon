@@ -8,7 +8,7 @@ use pulseon_model::metric::{
 };
 use pulseon_model::run::{RunId, RunStatus};
 
-use crate::alignment_query::{AlignmentSource, query_aligned_metric};
+use crate::alignment_query::{AlignmentSource, query_aligned_metric, validate_alignment_identity};
 use crate::rows::StoredMetricAggregate;
 use crate::sql::string_literal as sql_string_literal;
 use crate::{MetricReader, StorageError};
@@ -51,6 +51,7 @@ impl<'connection> ProjectMetricReader<'connection> {
         &self,
         query: &AlignmentQuery,
     ) -> Result<AlignmentQueryResult, StorageError> {
+        validate_alignment_identity(query)?;
         let run_start_millis = match query.axis {
             AlignmentAxis::Step => None,
             AlignmentAxis::ElapsedTime => Some(self.run_start_millis(&query.run_id)?),

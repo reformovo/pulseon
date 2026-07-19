@@ -24,9 +24,7 @@ pub(crate) fn query_aligned_metric(
     query: &AlignmentQuery,
     run_start_millis: Option<i64>,
 ) -> Result<AlignmentQueryResult, StorageError> {
-    if query.run_id.as_str().trim().is_empty() || query.metric_key.as_str().trim().is_empty() {
-        return Err(StorageError::InvalidIdentity);
-    }
+    validate_alignment_identity(query)?;
 
     let reasons = query_axis_reasons(connection, source, query, run_start_millis)?;
     let bucket_count = match query.reduction {
@@ -58,6 +56,13 @@ pub(crate) fn query_aligned_metric(
         source_row_count,
         reasons,
     })
+}
+
+pub(crate) fn validate_alignment_identity(query: &AlignmentQuery) -> Result<(), StorageError> {
+    if query.run_id.as_str().trim().is_empty() || query.metric_key.as_str().trim().is_empty() {
+        return Err(StorageError::InvalidIdentity);
+    }
+    Ok(())
 }
 
 fn query_axis_reasons(
@@ -417,6 +422,18 @@ mod tests {
 
         assert_eq!(result.reasons, vec![AlignmentReason::NegativeAxis]);
         assert!(result.points.iter().any(|point| point.axis_value == -1));
+        Ok(())
+    }
+
+    #[test]
+    fn native_elapsed_query_validates_identity_before_run_lookup() -> Result<(), Box<dyn Error>> {
+        let connection = connection()?;
+        let mut invalid = query(AlignmentAxis::ElapsedTime, AlignmentReduction::Full);
+        invalid.run_id = RunId::from_string("");
+
+        let result = ProjectMetricReader::new(&connection).query_aligned_metric(&invalid);
+
+        assert!(matches!(result, Err(StorageError::InvalidIdentity)));
         Ok(())
     }
 }

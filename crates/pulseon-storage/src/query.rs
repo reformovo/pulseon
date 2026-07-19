@@ -4,7 +4,7 @@ use pulseon_model::alignment::{
 };
 use pulseon_model::metric::{MetricQuery, MetricQueryResult};
 
-use crate::alignment_query::{AlignmentSource, query_aligned_metric};
+use crate::alignment_query::{AlignmentSource, query_aligned_metric, validate_alignment_identity};
 use crate::metric_query::{MetricSource, query_metric};
 use crate::{ColumnSchema, MetricReader, SchemaReport, StorageError, validate_metric_point_schema};
 
@@ -85,6 +85,7 @@ impl<'connection> ParquetMetricReader<'connection> {
         &self,
         query: &AlignmentQuery,
     ) -> Result<AlignmentQueryResult, StorageError> {
+        validate_alignment_identity(query)?;
         if matches!(query.axis, AlignmentAxis::ElapsedTime) {
             return Ok(AlignmentQueryResult {
                 points: Vec::new(),
@@ -365,6 +366,25 @@ mod tests {
         assert!(result.points.is_empty());
         assert_eq!(result.source_row_count, 0);
         assert_eq!(result.reasons, vec![AlignmentReason::MissingRunStart]);
+        Ok(())
+    }
+
+    #[test]
+    fn elapsed_reader_validates_identity_before_missing_run_start() -> Result<(), Box<dyn Error>> {
+        let connection = Connection::open_in_memory()?;
+        let parquet = TestParquet::create(&connection)?;
+        let reader =
+            ParquetMetricReader::open(&connection, ParquetSource::new(parquet.location.clone())?)?;
+        let mut invalid = aligned_query(
+            AlignmentAxis::ElapsedTime,
+            AlignmentViewport::new(0, 1)?,
+            AlignmentReduction::Full,
+        );
+        invalid.metric_key = MetricKey::from_string(" ");
+
+        let result = reader.query_aligned_metric(&invalid);
+
+        assert!(matches!(result, Err(StorageError::InvalidIdentity)));
         Ok(())
     }
 }
