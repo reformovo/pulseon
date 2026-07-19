@@ -44,10 +44,19 @@ impl AlignmentViewport {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlignmentReduction {
     Full,
-    ScreenBudget {
-        pixel_width: u32,
-        points_per_pixel: u16,
-    },
+    ScreenBudget(AlignmentScreenBudget),
+}
+
+/// Validated positive inputs for screen-budgeted extrema reduction.
+///
+/// ```compile_fail
+/// use pulseon_model::alignment::AlignmentScreenBudget;
+/// let _invalid = AlignmentScreenBudget { pixel_width: 0, points_per_pixel: 1 };
+/// ```
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AlignmentScreenBudget {
+    pixel_width: u32,
+    points_per_pixel: u16,
 }
 
 impl AlignmentReduction {
@@ -63,21 +72,18 @@ impl AlignmentReduction {
         if pixel_width == 0 || points_per_pixel == 0 {
             return Err(AlignmentQueryError::InvalidScreenBudget);
         }
-        Ok(Self::ScreenBudget {
+        Ok(Self::ScreenBudget(AlignmentScreenBudget {
             pixel_width,
             points_per_pixel,
-        })
+        }))
     }
 
     pub fn max_points(self) -> Option<usize> {
         match self {
             Self::Full => None,
-            Self::ScreenBudget {
-                pixel_width,
-                points_per_pixel,
-            } => Some(
-                (pixel_width as usize)
-                    .saturating_mul(points_per_pixel as usize)
+            Self::ScreenBudget(budget) => Some(
+                (budget.pixel_width as usize)
+                    .saturating_mul(budget.points_per_pixel as usize)
                     .clamp(EXTREMA_PER_BUCKET, MAX_SCREEN_QUERY_POINTS),
             ),
         }

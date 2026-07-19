@@ -31,7 +31,7 @@ pub(crate) fn query_aligned_metric(
     let reasons = query_axis_reasons(connection, source, query, run_start_millis)?;
     let bucket_count = match query.reduction {
         AlignmentReduction::Full => None,
-        AlignmentReduction::ScreenBudget { .. } => {
+        AlignmentReduction::ScreenBudget(_) => {
             let max_points = query
                 .reduction
                 .max_points()
