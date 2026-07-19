@@ -6,6 +6,7 @@ notes, and historical architecture snapshots.
 ## Current Docs
 
 - `docs/ROADMAP.md` for the current release plan and later backlog.
+- `docs/comparison-semantics.md` for the renderer-agnostic comparison contract.
 - `docs/native-storage-boundary.md` for the current native storage boundary.
 - `docs/crate-boundaries.md` for workspace crate responsibilities and dependency
   direction.
