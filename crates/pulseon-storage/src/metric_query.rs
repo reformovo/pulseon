@@ -2,11 +2,13 @@ use std::path::Path;
 
 use chrono::{TimeZone, Utc};
 use duckdb::Connection;
+use pulseon_model::alignment::{AlignmentAxis, AlignmentQuery, AlignmentQueryResult};
 use pulseon_model::metric::{
     MetricAggregate, MetricKey, MetricPoint, MetricQuery, MetricQueryResult, ReductionPolicy, Step,
 };
 use pulseon_model::run::{RunId, RunStatus};
 
+use crate::alignment_query::{AlignmentSource, query_aligned_metric};
 use crate::rows::StoredMetricAggregate;
 use crate::sql::string_literal as sql_string_literal;
 use crate::{MetricReader, StorageError};
@@ -38,6 +40,43 @@ impl<'connection> ProjectMetricReader<'connection> {
     /// Returns [`StorageError`] for query, extension, or conversion failures.
     pub fn query_metric(&self, query: &MetricQuery) -> Result<MetricQueryResult, StorageError> {
         query_metric(self.connection, MetricSource::Project, query)
+    }
+
+    /// Queries project metric points on a derived comparison axis.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] for query or conversion failures.
+    pub fn query_aligned_metric(
+        &self,
+        query: &AlignmentQuery,
+    ) -> Result<AlignmentQueryResult, StorageError> {
+        let run_start_millis = match query.axis {
+            AlignmentAxis::Step => None,
+            AlignmentAxis::ElapsedTime => Some(self.run_start_millis(&query.run_id)?),
+        };
+        query_aligned_metric(
+            self.connection,
+            AlignmentSource::Project,
+            query,
+            run_start_millis,
+        )
+    }
+
+    fn run_start_millis(&self, run_id: &RunId) -> Result<i64, StorageError> {
+        let result = self.connection.query_row(
+            "SELECT epoch_ms(started_at::TIMESTAMPTZ)
+             FROM pulseon_runs WHERE run_id = ?",
+            [run_id.as_str()],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(started_at) => Ok(started_at),
+            Err(duckdb::Error::QueryReturnedNoRows) => Err(StorageError::RunNotFound {
+                run_id: run_id.as_str().to_owned(),
+            }),
+            Err(source) => Err(source.into()),
+        }
     }
 
     pub fn metric_aggregate(

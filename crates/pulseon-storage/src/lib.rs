@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod alignment_query;
 pub mod bootstrap;
 pub mod config;
 mod lock;
