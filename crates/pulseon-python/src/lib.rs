@@ -20,6 +20,9 @@ fn _pulseon(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<sdk::client::PyMetricSummary>()?;
     m.add_class::<sdk::client::PyProject>()?;
     m.add_class::<sdk::client::PyRun>()?;
+    m.add_class::<sdk::comparison::PyComparisonResult>()?;
+    m.add_class::<sdk::comparison::PyObjectiveEvidence>()?;
+    m.add_class::<sdk::comparison::PyObjectiveMetric>()?;
     m.add("PulseOnError", py.get_type::<sdk::client::PulseOnError>())?;
     macro_rules! add_exception {
         ($name:ident) => {

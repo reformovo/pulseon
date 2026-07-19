@@ -4,3 +4,4 @@
 pub mod alignment;
 pub mod arrow;
 pub mod client;
+pub mod comparison;

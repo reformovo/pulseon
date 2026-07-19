@@ -13,6 +13,7 @@ use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 use crate::sdk::alignment::{PyAlignedMetricResult, alignment_query};
 use crate::sdk::arrow::PyArrowTable;
+use crate::sdk::comparison::{PyComparisonResult, objective};
 use pulseon_core::config::{InitConfigError, S3ConnectionOverrides, resolve_init_config};
 
 create_exception!(
@@ -249,6 +250,25 @@ impl PyClient {
         self._inner
             .query_aligned_metric(&query)
             .map(PyAlignedMetricResult::from)
+            .map_err(runtime_error)
+    }
+
+    #[pyo3(signature = (candidate_run_id, reference_run_id, *, metric_key, direction))]
+    pub fn compare_runs(
+        &self,
+        candidate_run_id: &str,
+        reference_run_id: &str,
+        metric_key: &str,
+        direction: &str,
+    ) -> PyResult<PyComparisonResult> {
+        let objective = objective(metric_key, direction)?;
+        self._inner
+            .compare_runs(
+                &RunId::from_string(candidate_run_id),
+                &RunId::from_string(reference_run_id),
+                &objective,
+            )
+            .map(PyComparisonResult::from)
             .map_err(runtime_error)
     }
 
