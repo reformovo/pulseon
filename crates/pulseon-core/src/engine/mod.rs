@@ -7,6 +7,7 @@ pub mod bootstrap {
 pub mod client;
 pub mod comparison;
 pub mod query;
+pub mod ranking;
 pub mod reporting;
 mod time {
     pub use pulseon_storage::time::*;
