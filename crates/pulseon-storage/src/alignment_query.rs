@@ -26,7 +26,6 @@ pub(crate) fn query_aligned_metric(
 ) -> Result<AlignmentQueryResult, StorageError> {
     validate_alignment_identity(query)?;
 
-    let reasons = query_axis_reasons(connection, source, query, run_start_millis)?;
     let bucket_count = match query.reduction {
         AlignmentReduction::Full => None,
         AlignmentReduction::ScreenBudget(_) => {
@@ -42,14 +41,27 @@ pub(crate) fn query_aligned_metric(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         duckdb::params_from_iter(values.iter().map(|value| value.as_ref())),
-        stored_aligned_point_from_row,
+        stored_alignment_row,
     )?;
     let mut points = Vec::new();
     let mut source_row_count = 0;
+    let mut has_negative_axis = false;
+    let mut has_decreasing_axis = false;
     for row in rows {
-        let (point, count) = row?;
-        points.push(point.into_aligned_metric_point()?);
+        let (point, count, negative, decreasing) = row?;
+        if let Some(point) = point {
+            points.push(point.into_aligned_metric_point()?);
+        }
         source_row_count = count;
+        has_negative_axis = negative;
+        has_decreasing_axis = decreasing;
+    }
+    let mut reasons = Vec::with_capacity(2);
+    if has_negative_axis {
+        reasons.push(AlignmentReason::NegativeAxis);
+    }
+    if has_decreasing_axis {
+        reasons.push(AlignmentReason::DecreasingAxis);
     }
     Ok(AlignmentQueryResult {
         points,
@@ -63,37 +75,6 @@ pub(crate) fn validate_alignment_identity(query: &AlignmentQuery) -> Result<(), 
         return Err(StorageError::InvalidIdentity);
     }
     Ok(())
-}
-
-fn query_axis_reasons(
-    connection: &Connection,
-    source: AlignmentSource<'_>,
-    query: &AlignmentQuery,
-    run_start_millis: Option<i64>,
-) -> Result<Vec<AlignmentReason>, StorageError> {
-    let sql = format!(
-        "{}
-         SELECT coalesce(bool_or(axis_value < 0), false),
-                coalesce(bool_or(
-                    previous_axis_value IS NOT NULL AND axis_value < previous_axis_value
-                ), false)
-         FROM ordered",
-        ordered_ctes(source, query.axis)
-    );
-    let values = base_values(source, query, run_start_millis);
-    let (negative, decreasing): (bool, bool) = connection.query_row(
-        &sql,
-        duckdb::params_from_iter(values.iter().map(|value| value.as_ref())),
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let mut reasons = Vec::with_capacity(2);
-    if negative {
-        reasons.push(AlignmentReason::NegativeAxis);
-    }
-    if decreasing {
-        reasons.push(AlignmentReason::DecreasingAxis);
-    }
-    Ok(reasons)
 }
 
 fn aligned_points_sql(
@@ -133,6 +114,13 @@ fn aligned_points_sql(
     };
     format!(
         "{},
+         axis_stats AS (
+             SELECT coalesce(bool_or(axis_value < 0), false) AS has_negative_axis,
+                    coalesce(bool_or(
+                        previous_axis_value IS NOT NULL AND axis_value < previous_axis_value
+                    ), false) AS has_decreasing_axis
+             FROM ordered
+         ),
          inside AS (
              SELECT * FROM ordered WHERE axis_value >= ? AND axis_value <= ?
          ),
@@ -149,11 +137,18 @@ fn aligned_points_sql(
              UNION ALL SELECT * FROM left_neighbor
              UNION ALL SELECT * FROM right_neighbor
          ),
+         source_stats AS (
+             SELECT count(*)::UBIGINT AS source_row_count FROM visible_source
+         ),
          {selection}
-         SELECT run_id, metric_key, step, epoch_ms(timestamp), value_f64,
-                epoch_ms(ingested_at), axis_value,
-                (SELECT count(*)::UBIGINT FROM visible_source)
-         FROM selected ORDER BY step",
+         SELECT selected.run_id, selected.metric_key, selected.step,
+                epoch_ms(selected.timestamp), selected.value_f64,
+                epoch_ms(selected.ingested_at), selected.axis_value,
+                source_stats.source_row_count, axis_stats.has_negative_axis,
+                axis_stats.has_decreasing_axis
+         FROM source_stats CROSS JOIN axis_stats
+         LEFT JOIN selected ON true
+         ORDER BY selected.step",
         ordered_ctes(source, axis)
     )
 }
@@ -188,7 +183,7 @@ fn ordered_ctes(source: AlignmentSource<'_>, axis: AlignmentAxis) -> String {
          derived AS (
              SELECT *, {axis_expression} AS axis_value FROM effective
          ),
-         ordered AS (
+         ordered AS MATERIALIZED (
              SELECT *, lag(axis_value) OVER (ORDER BY step) AS previous_axis_value
              FROM derived
          )"
@@ -264,21 +259,23 @@ impl StoredAlignedPoint {
     }
 }
 
-fn stored_aligned_point_from_row(
+fn stored_alignment_row(
     row: &duckdb::Row<'_>,
-) -> duckdb::Result<(StoredAlignedPoint, u64)> {
-    Ok((
-        StoredAlignedPoint {
-            run_id: row.get(0)?,
+) -> duckdb::Result<(Option<StoredAlignedPoint>, u64, bool, bool)> {
+    let run_id: Option<String> = row.get(0)?;
+    let point = match run_id {
+        Some(run_id) => Some(StoredAlignedPoint {
+            run_id,
             metric_key: row.get(1)?,
             step: row.get(2)?,
             timestamp_millis: row.get(3)?,
             value_f64: row.get(4)?,
             ingested_at_millis: row.get(5)?,
             axis_value: row.get(6)?,
-        },
-        row.get(7)?,
-    ))
+        }),
+        None => None,
+    };
+    Ok((point, row.get(7)?, row.get(8)?, row.get(9)?))
 }
 
 #[cfg(test)]
@@ -434,6 +431,28 @@ mod tests {
         let result = ProjectMetricReader::new(&connection).query_aligned_metric(&invalid);
 
         assert!(matches!(result, Err(StorageError::InvalidIdentity)));
+        Ok(())
+    }
+
+    #[test]
+    fn aligned_query_materializes_one_effective_source_scan() {
+        let sql = aligned_points_sql(AlignmentSource::Project, AlignmentAxis::Step, true);
+
+        assert_eq!(sql.matches("FROM dl.metric_points").count(), 1);
+        assert!(sql.contains("ordered AS MATERIALIZED"));
+    }
+
+    #[test]
+    fn aligned_query_returns_empty_result_from_metadata_row() -> Result<(), Box<dyn Error>> {
+        let connection = connection()?;
+        let mut missing = query(AlignmentAxis::Step, AlignmentReduction::Full);
+        missing.metric_key = MetricKey::from_string("missing");
+
+        let result = ProjectMetricReader::new(&connection).query_aligned_metric(&missing)?;
+
+        assert!(result.points.is_empty());
+        assert_eq!(result.source_row_count, 0);
+        assert!(result.reasons.is_empty());
         Ok(())
     }
 }
