@@ -725,6 +725,9 @@ mod tests {
     use crate::engine::bootstrap::{
         attach_ducklake, open_native_connection, setup_duckdb_catalog_adapter,
     };
+    use crate::model::comparison::{
+        ComparisonOutcome, ComparisonPreference, ObjectiveDirection, ObjectiveMetric,
+    };
 
     fn partition_contains_parquet(path: &Path) -> std::io::Result<bool> {
         if !path.is_dir() {
@@ -1601,6 +1604,78 @@ mod tests {
 
         assert_eq!(resumed.run_id, run.run_id);
         second_client.shutdown(None)?;
+        std::fs::remove_dir_all(root_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn comparison_and_ranking_read_cross_project_objectives()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root_path =
+            std::env::temp_dir().join(format!("pulseon-client-{}", uuid::Uuid::new_v4()));
+        let client = NativeClient::open(&root_path)?;
+        let project_a = client.create_project(
+            "project a",
+            Some(ProjectId::from_string("comparison-project-a")),
+        )?;
+        let project_b = client.create_project(
+            "project b",
+            Some(ProjectId::from_string("comparison-project-b")),
+        )?;
+        let reference = client.create_run(
+            &project_a.project_id,
+            "reference",
+            Some(RunId::from_string("comparison-reference")),
+        )?;
+        let candidate = client.create_run(
+            &project_b.project_id,
+            "candidate",
+            Some(RunId::from_string("comparison-candidate")),
+        )?;
+        let missing = client.create_run(
+            &project_b.project_id,
+            "missing",
+            Some(RunId::from_string("comparison-missing")),
+        )?;
+        client
+            .run_handle(reference.clone())
+            .log_metric_at_step("loss", 1, 2.0)?;
+        client
+            .run_handle(candidate.clone())
+            .log_metric_at_step("loss", 1, 1.0)?;
+        client.finish_run(&reference.run_id)?;
+        client.finish_run(&candidate.run_id)?;
+        client.finish_run(&missing.run_id)?;
+        let objective = ObjectiveMetric {
+            metric_key: MetricKey::from_string("loss"),
+            direction: ObjectiveDirection::Minimize,
+        };
+
+        let comparison = client.compare_runs(&candidate.run_id, &reference.run_id, &objective)?;
+        let ranking = client.rank_runs(
+            &[
+                reference.run_id.clone(),
+                candidate.run_id.clone(),
+                missing.run_id.clone(),
+            ],
+            &objective,
+        )?;
+
+        assert_eq!(comparison.outcome, Some(ComparisonOutcome::Improved));
+        assert_eq!(comparison.preference, ComparisonPreference::Candidate);
+        assert_eq!(
+            ranking
+                .entries
+                .iter()
+                .map(|entry| (entry.evidence.run_id.as_str(), entry.rank))
+                .collect::<Vec<_>>(),
+            vec![
+                ("comparison-candidate", Some(1)),
+                ("comparison-reference", Some(2)),
+                ("comparison-missing", None),
+            ]
+        );
+        client.shutdown(None)?;
         std::fs::remove_dir_all(root_path)?;
         Ok(())
     }
