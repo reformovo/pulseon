@@ -191,3 +191,9 @@ def test_rank_runs_keeps_ineligible_entries_and_rejects_duplicates(
             metric_key="loss",
             direction="minimize",
         )
+    with pytest.raises(pulseon.StorageError, match="run not found: unknown"):
+        client.rank_runs(
+            [tied_a.run_id, "unknown"],
+            metric_key="loss",
+            direction="minimize",
+        )

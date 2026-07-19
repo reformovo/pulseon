@@ -30,20 +30,23 @@ impl NativeClient {
         objective: &ObjectiveMetric,
     ) -> Result<RankingResult, EngineError> {
         let mut seen = HashSet::with_capacity(run_ids.len());
-        let mut candidates = Vec::with_capacity(run_ids.len());
-        for (ordinal, run_id) in run_ids.iter().enumerate() {
+        for run_id in run_ids {
             if !seen.insert(run_id) {
                 return Err(EngineError::DuplicateRunIdentity {
                     run_id: run_id.as_str().to_owned(),
                 });
             }
-            let run = self.get_run(run_id)?;
-            candidates.push(RankingCandidate {
-                evidence: self.objective_evidence(run_id, objective)?,
+        }
+        let candidates = self
+            .ranking_evidence(run_ids, objective)?
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, (run, evidence))| RankingCandidate {
+                evidence,
                 created_at: run.created_at,
                 ordinal,
-            });
-        }
+            })
+            .collect();
         Ok(rank_candidates(objective, candidates))
     }
 }

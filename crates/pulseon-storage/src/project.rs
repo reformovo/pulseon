@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use pulseon_model::run::{Run, RunId, RunStatus};
 use pulseon_model::types::{Project, ProjectId};
 
-use crate::rows::status_as_str;
+use crate::rows::{StoredRun, status_as_str};
 use crate::time::{timestamp_as_rfc3339, timestamp_from_millis};
 use crate::write::NativeWriteStore;
 use crate::{StorageError, percent_encode_metric_key};
@@ -101,6 +101,56 @@ impl ProjectConnection {
 
     pub fn get_run(&self, run_id: &RunId) -> Result<Run, StorageError> {
         NativeWriteStore::new(&self.connection).resume_run(run_id)
+    }
+
+    pub fn get_runs(&self, run_ids: &[RunId]) -> Result<Vec<Run>, StorageError> {
+        if run_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let requested_rows = (0..run_ids.len())
+            .map(|ordinal| format!("(?, {ordinal})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "WITH requested(run_id, ordinal) AS (VALUES {requested_rows})
+             SELECT requested.run_id, stored.run_id IS NOT NULL,
+                    stored.project_id, stored.name, stored.status,
+                    epoch_ms(stored.created_at::TIMESTAMPTZ),
+                    epoch_ms(stored.started_at::TIMESTAMPTZ),
+                    epoch_ms(stored.finished_at::TIMESTAMPTZ)
+             FROM requested
+             LEFT JOIN pulseon_runs AS stored USING (run_id)
+             ORDER BY requested.ordinal"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(
+            duckdb::params_from_iter(run_ids.iter().map(RunId::as_str)),
+            |row| {
+                let requested_run_id: String = row.get(0)?;
+                let found: bool = row.get(1)?;
+                let stored = if found {
+                    Some(StoredRun {
+                        run_id: requested_run_id.clone(),
+                        project_id: row.get(2)?,
+                        name: row.get(3)?,
+                        status: row.get(4)?,
+                        created_at_millis: row.get(5)?,
+                        started_at_millis: row.get(6)?,
+                        finished_at_millis: row.get(7)?,
+                    })
+                } else {
+                    None
+                };
+                Ok((requested_run_id, stored))
+            },
+        )?;
+        rows.map(|row| {
+            let (run_id, stored) = row?;
+            stored
+                .ok_or(StorageError::RunNotFound { run_id })?
+                .into_run()
+        })
+        .collect()
     }
 
     pub fn list_runs(

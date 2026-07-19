@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use pulseon_storage::{ProjectConnection, ProjectMetricReader};
 
 use crate::engine::EngineError;
@@ -10,7 +12,7 @@ use crate::model::comparison::{
 use crate::model::metric::{
     MetricAggregate, MetricKey, MetricPoint, MetricQuery, ReductionPolicy, Step,
 };
-use crate::model::run::{RunId, RunStatus};
+use crate::model::run::{Run, RunId, RunStatus};
 
 pub struct NativeQueryStore<'connection> {
     source: QuerySource<'connection>,
@@ -102,6 +104,26 @@ impl<'connection> NativeQueryStore<'connection> {
             .into_iter()
             .next();
         Ok(objective_evidence(run_id, run_status, aggregate))
+    }
+
+    pub fn objective_evidence_for_runs(
+        &self,
+        runs: &[Run],
+        objective: &ObjectiveMetric,
+    ) -> Result<Vec<ObjectiveEvidence>, EngineError> {
+        let run_ids = runs
+            .iter()
+            .map(|run| run.run_id.clone())
+            .collect::<Vec<_>>();
+        let mut aggregates = self
+            .query_metric_summaries(&run_ids, &objective.metric_key)?
+            .into_iter()
+            .map(|aggregate| (aggregate.run_id.clone(), aggregate))
+            .collect::<HashMap<_, _>>();
+        Ok(runs
+            .iter()
+            .map(|run| objective_evidence(&run.run_id, run.status, aggregates.remove(&run.run_id)))
+            .collect())
     }
 
     pub fn metric_aggregate(

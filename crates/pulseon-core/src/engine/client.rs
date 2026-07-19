@@ -415,6 +415,18 @@ impl NativeClient {
         NativeQueryStore::new(&connection).objective_evidence(run_id, run.status, objective)
     }
 
+    pub(crate) fn ranking_evidence(
+        &self,
+        run_ids: &[RunId],
+        objective: &crate::model::comparison::ObjectiveMetric,
+    ) -> Result<Vec<(Run, crate::model::comparison::ObjectiveEvidence)>, EngineError> {
+        let connection = self.connection()?;
+        let runs = connection.get_runs(run_ids)?;
+        let evidence =
+            NativeQueryStore::new(&connection).objective_evidence_for_runs(&runs, objective)?;
+        Ok(runs.into_iter().zip(evidence).collect())
+    }
+
     pub fn query_metric_summaries(
         &self,
         run_ids: &[RunId],
