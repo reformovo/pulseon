@@ -7,9 +7,12 @@ from typing import Literal
 
 from pulseon import _pulseon
 
+AlignedMetricPoint = _pulseon.AlignedMetricPoint
+AlignedMetricResult = _pulseon.AlignedMetricResult
 ArrowTable = _pulseon.ArrowTable
 Client = _pulseon.Client
 ClientClosedError = _pulseon.ClientClosedError
+ComparisonResult = _pulseon.ComparisonResult
 Diagnostics = _pulseon.Diagnostics
 InvalidConfigurationError = _pulseon.InvalidConfigurationError
 InvalidRunStateError = _pulseon.InvalidRunStateError
@@ -20,8 +23,12 @@ MetricPoint = _pulseon.MetricPoint
 MetricQueueFullError = _pulseon.MetricQueueFullError
 MetricSummary = _pulseon.MetricSummary
 MetricWriterFailedError = _pulseon.MetricWriterFailedError
+ObjectiveEvidence = _pulseon.ObjectiveEvidence
+ObjectiveMetric = _pulseon.ObjectiveMetric
 PulseOnError = _pulseon.PulseOnError
 Project = _pulseon.Project
+RankingEntry = _pulseon.RankingEntry
+RankingResult = _pulseon.RankingResult
 Run = _pulseon.Run
 RunAlreadyActiveError = _pulseon.RunAlreadyActiveError
 RunAlreadyExistsError = _pulseon.RunAlreadyExistsError
@@ -61,9 +68,12 @@ def init(
 
 
 __all__ = [
+    "AlignedMetricPoint",
+    "AlignedMetricResult",
     "ArrowTable",
     "Client",
     "ClientClosedError",
+    "ComparisonResult",
     "Diagnostics",
     "InvalidConfigurationError",
     "InvalidRunStateError",
@@ -74,8 +84,12 @@ __all__ = [
     "MetricQueueFullError",
     "MetricSummary",
     "MetricWriterFailedError",
+    "ObjectiveEvidence",
+    "ObjectiveMetric",
     "PulseOnError",
     "Project",
+    "RankingEntry",
+    "RankingResult",
     "Run",
     "RunAlreadyActiveError",
     "RunAlreadyExistsError",

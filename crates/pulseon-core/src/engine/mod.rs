@@ -5,7 +5,9 @@ pub mod bootstrap {
     pub use pulseon_storage::bootstrap::*;
 }
 pub mod client;
+pub mod comparison;
 pub mod query;
+pub mod ranking;
 pub mod reporting;
 mod time {
     pub use pulseon_storage::time::*;
@@ -33,6 +35,8 @@ pub enum EngineError {
     RunAlreadyActive { run_id: String },
     #[error("run not found: {run_id}")]
     RunNotFound { run_id: String },
+    #[error("duplicate run identity in request: {run_id}")]
+    DuplicateRunIdentity { run_id: String },
     #[error("run is closed for metric reporting: {run_id}")]
     RunClosed { run_id: String },
     #[error("invalid run transition for {run_id}: {from} -> {to}")]

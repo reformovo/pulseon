@@ -87,11 +87,11 @@ the pre-1.0 CLI JSON envelope with version 2.
 
 #### Phase 2C: Typed Shared Read API
 
-- [ ] Expose typed, renderer-independent alignment, objective, comparison,
+- [x] Expose typed, renderer-independent alignment, objective, comparison,
   ranking, evidence, and result value objects from the shared Rust
   model/Core boundary. Keep storage execution behind the metric-reader
   contract and rendering conversion outside Core.
-- [ ] Expose matching read-only Python value objects and Client methods for
+- [x] Expose matching read-only Python value objects and Client methods for
   aligned metric queries, Run comparison, and ranking; update the type stub and
   Python type-check fixtures. Do not add autoresearch-specific SDK types: the
   SDK language remains Project, Run, metric, comparison, and ranking.

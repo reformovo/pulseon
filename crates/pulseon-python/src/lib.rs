@@ -11,6 +11,8 @@ use pyo3::prelude::*;
 #[pymodule]
 fn _pulseon(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
+    m.add_class::<sdk::alignment::PyAlignedMetricPoint>()?;
+    m.add_class::<sdk::alignment::PyAlignedMetricResult>()?;
     m.add_class::<sdk::arrow::PyArrowTable>()?;
     m.add_class::<sdk::client::PyClient>()?;
     m.add_class::<sdk::client::PyDiagnostics>()?;
@@ -18,6 +20,11 @@ fn _pulseon(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<sdk::client::PyMetricSummary>()?;
     m.add_class::<sdk::client::PyProject>()?;
     m.add_class::<sdk::client::PyRun>()?;
+    m.add_class::<sdk::comparison::PyComparisonResult>()?;
+    m.add_class::<sdk::comparison::PyObjectiveEvidence>()?;
+    m.add_class::<sdk::comparison::PyObjectiveMetric>()?;
+    m.add_class::<sdk::comparison::PyRankingEntry>()?;
+    m.add_class::<sdk::comparison::PyRankingResult>()?;
     m.add("PulseOnError", py.get_type::<sdk::client::PulseOnError>())?;
     macro_rules! add_exception {
         ($name:ident) => {

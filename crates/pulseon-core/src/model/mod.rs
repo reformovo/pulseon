@@ -1,3 +1,11 @@
+pub mod alignment {
+    pub use pulseon_model::alignment::*;
+}
+
+pub mod comparison {
+    pub use pulseon_model::comparison::*;
+}
+
 pub mod metric {
     pub use pulseon_model::metric::*;
 }

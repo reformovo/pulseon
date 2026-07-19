@@ -45,6 +45,94 @@ class Diagnostics:
     @property
     def last_flush_error(self) -> str | None: ...
 
+class AlignedMetricPoint:
+    @property
+    def run_id(self) -> str: ...
+    @property
+    def metric_key(self) -> str: ...
+    @property
+    def step(self) -> int: ...
+    @property
+    def timestamp(self) -> str: ...
+    @property
+    def value_f64(self) -> float: ...
+    @property
+    def ingested_at(self) -> str: ...
+    @property
+    def axis_value(self) -> int: ...
+
+class AlignedMetricResult:
+    @property
+    def points(self) -> list[AlignedMetricPoint]: ...
+    @property
+    def source_row_count(self) -> int: ...
+    @property
+    def downsampled(self) -> bool: ...
+    @property
+    def completeness(
+        self,
+    ) -> Literal["complete", "partial", "unavailable", "invalid"]: ...
+    @property
+    def reasons(self) -> list[str]: ...
+
+class ObjectiveMetric:
+    @property
+    def metric_key(self) -> str: ...
+    @property
+    def direction(self) -> Literal["minimize", "maximize"]: ...
+
+class ObjectiveEvidence:
+    @property
+    def run_id(self) -> str: ...
+    @property
+    def run_status(self) -> Literal["running", "finished", "failed"]: ...
+    @property
+    def last_step(self) -> int | None: ...
+    @property
+    def last_value_f64(self) -> float | None: ...
+    @property
+    def completeness(
+        self,
+    ) -> Literal["complete", "partial", "unavailable", "invalid"]: ...
+    @property
+    def reasons(self) -> list[str]: ...
+
+class ComparisonResult:
+    @property
+    def objective(self) -> ObjectiveMetric: ...
+    @property
+    def candidate(self) -> ObjectiveEvidence: ...
+    @property
+    def reference(self) -> ObjectiveEvidence: ...
+    @property
+    def completeness(
+        self,
+    ) -> Literal["complete", "partial", "unavailable", "invalid"]: ...
+    @property
+    def raw_delta(self) -> float | None: ...
+    @property
+    def relative_delta(self) -> float | None: ...
+    @property
+    def normalized_improvement(self) -> float | None: ...
+    @property
+    def outcome(self) -> Literal["improved", "regressed", "equal"] | None: ...
+    @property
+    def preference(
+        self,
+    ) -> Literal["candidate", "reference", "no_preference", "inconclusive"]: ...
+
+class RankingEntry:
+    @property
+    def evidence(self) -> ObjectiveEvidence: ...
+    @property
+    def rank(self) -> int | None: ...
+
+class RankingResult:
+    @property
+    def objective(self) -> ObjectiveMetric: ...
+    @property
+    def entries(self) -> list[RankingEntry]: ...
+
 class MetricPoint:
     run_id: str
     metric_key: str
@@ -108,6 +196,33 @@ class Client:
         self, exc_type: object, exc_value: object, traceback: object
     ) -> bool: ...
     def diagnostics(self) -> Diagnostics: ...
+    def query_aligned_metric(
+        self,
+        run_id: str,
+        metric_key: str,
+        *,
+        axis: Literal["step", "elapsed_time"],
+        start: int,
+        end: int,
+        pixel_width: int | None = None,
+        points_per_pixel: int | None = None,
+    ) -> AlignedMetricResult:
+        """Queries aligned metric evidence in a closed viewport."""
+    def compare_runs(
+        self,
+        candidate_run_id: str,
+        reference_run_id: str,
+        *,
+        metric_key: str,
+        direction: Literal["minimize", "maximize"],
+    ) -> ComparisonResult: ...
+    def rank_runs(
+        self,
+        run_ids: list[str],
+        *,
+        metric_key: str,
+        direction: Literal["minimize", "maximize"],
+    ) -> RankingResult: ...
     def query_metric(
         self,
         run_id: str,
