@@ -40,7 +40,7 @@ Evidence is never repaired by interpolation, filling, reordering, clamping, or f
 | Axis | Contract |
 | --- | --- |
 | Raw step | Apply effective-series deduplication, then use ascending `step`; a negative step is invalid. |
-| Elapsed wall time | Use integer `timestamp_millis - Run.started_at_millis`, without rebasing to the first point. Equal values are valid; negative or decreasing values are invalid. Missing Run metadata is `missing_run_start`; pre-0.2 writer-time timestamps are best-effort evidence. |
+| Elapsed wall time | Use integer `timestamp_millis - Run.started_at_millis`, without rebasing to the first point. Equal values are valid; negative or decreasing values are invalid. Missing Run metadata is `missing_run_start`; pre-0.2 writer-time timestamps are best-effort evidence because their origin cannot be detected or migrated safely. |
 
 Axis monotonicity is evaluated in effective objective-step order: a decrease is invalid, while equality on the elapsed axis is retained.
 

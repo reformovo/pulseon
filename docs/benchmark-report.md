@@ -58,6 +58,18 @@ is an admission-only ceiling, not durable storage throughput. The result shows
 that the training hot path can enqueue metrics quickly without waiting for
 DuckLake or object storage.
 
+### Phase 2B observation-time follow-up
+
+On 2026-07-20, the observation timestamp was moved from the background writer
+to the `run.log()` enqueue path. On the same macOS arm64 host and Python 3.13.2,
+the unchanged `100000`-report command measured 1,750,997 calls/s before the
+change at commit `e12fd43`. Three runs after the change measured
+1,482,733-1,581,208 calls/s, with a median of 1,522,925 calls/s. The measured
+median regression was 13.0%, attributable to one wall-clock read per admitted
+report. All runs reported zero queue-full errors, and the result remains well
+above the original 100,000 calls/s target. `MetricReport` grew from 72 to 80
+bytes, adding about 512 KiB at the default 65,536-report queue capacity.
+
 ## Persistence Results
 
 Each target ran three independent repeats with 1,000 reports. Values are median

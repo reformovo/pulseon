@@ -30,7 +30,7 @@ external format.
 | `metric_key` | string | yes | User-facing metric key. |
 | `metric_key_encoded` | string | yes | Reversible encoded metric key used for Parquet partitioning. |
 | `step` | int64 | yes | Metric step. |
-| `timestamp` | timestamp | yes | User metric timestamp. |
+| `timestamp` | timestamp | yes | Metric observation timestamp captured when `run.log(...)` enters the enqueue path in 0.2 and later. Earlier writer-time values remain best-effort elapsed evidence. |
 | `value_f64` | float64 | yes | Numeric metric value. |
 | `ingested_at` | timestamp | yes | PulseOn ingestion timestamp. |
 
