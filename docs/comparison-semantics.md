@@ -66,6 +66,9 @@ order and expose last values, raw and relative deltas, completeness, and
 reasons, but have no objective direction, normalized improvement, outcome, or
 preference. Each metric item owns its completeness; unavailable or invalid
 secondary evidence does not downgrade the primary comparison preference.
+When an explicit comparator pool contains no eligible incumbent, the
+autoresearch view returns unavailable evidence with `no_eligible_incumbent`
+and an inconclusive preference. It does not infer another Run or mutate state.
 
 | Scenario | Result |
 | --- | --- |
