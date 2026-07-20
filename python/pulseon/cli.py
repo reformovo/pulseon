@@ -33,6 +33,14 @@ _OPERATION_ERROR_CODES = {
 }
 
 
+class _CliRequestError(Exception):
+    """A semantic CLI request error with a stable machine code."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def _non_negative_int(value: str) -> int:
     try:
         parsed = int(value)
@@ -109,6 +117,17 @@ def _build_parser() -> argparse.ArgumentParser:
     reference.add_argument("--against")
     reference.add_argument("--comparator", action="append")
     autoresearch_compare.add_argument("--secondary", action="append", default=[])
+    leaderboard = autoresearch_actions.add_parser("leaderboard")
+    leaderboard.add_argument("project_id")
+    leaderboard.add_argument("--metric", required=True)
+    leaderboard.add_argument(
+        "--direction", choices=("minimize", "maximize"), required=True
+    )
+    leaderboard.add_argument("--run", dest="run_ids", action="append", default=[])
+    page_size = leaderboard.add_mutually_exclusive_group()
+    page_size.add_argument("--limit", type=_non_negative_int, default=50)
+    page_size.add_argument("--all", action="store_true")
+    leaderboard.add_argument("--offset", type=_non_negative_int, default=0)
     return parser
 
 
@@ -134,6 +153,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def _validate_args(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> None:
+    if args.resource == "autoresearch" and args.action == "leaderboard":
+        if len(set(args.run_ids)) != len(args.run_ids):
+            parser.error("autoresearch Run IDs must be unique")
+        if args.all and args.offset != 0:
+            parser.error("--all cannot be combined with a non-zero --offset")
+        return
     if args.action != "compare":
         return
     if args.resource == "metrics":
@@ -312,6 +337,8 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
             },
         )
     if args.resource == "autoresearch":
+        if args.action == "leaderboard":
+            return _run_autoresearch_leaderboard(client, args)
         return _run_autoresearch_compare(client, args)
     if args.action == "list":
         metrics = client.list_metrics(args.run_id)
@@ -366,6 +393,90 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
         secondary_metric_keys=args.secondary,
     )
     return _render_comparison_reports(reports, args.format, reference_role="baseline")
+
+
+def _ranking_run_ids(
+    client: _pulseon.Client, project_id: str, requested_run_ids: Sequence[str]
+) -> list[str]:
+    if not requested_run_ids:
+        return [run.run_id for run in client.list_runs(project_id)]
+    client.get_project(project_id)
+    run_ids: list[str] = []
+    for run_id in requested_run_ids:
+        run = client.get_run(run_id)
+        if run.project_id != project_id:
+            raise _CliRequestError(
+                "run_project_mismatch",
+                f"run {run_id} does not belong to project {project_id}",
+            )
+        run_ids.append(run_id)
+    return run_ids
+
+
+def _ranking_entry_document(entry: _pulseon.RankingEntry) -> dict[str, object]:
+    return {"rank": entry.rank, "evidence": _evidence_document(entry.evidence)}
+
+
+def _ranking_meta(
+    project_id: str, result: _pulseon.RankingResult
+) -> dict[str, object]:
+    return {
+        "project_id": project_id,
+        "objective": {
+            "metric_key": result.objective.metric_key,
+            "direction": result.objective.direction,
+        },
+        "total_entries": len(result.entries),
+        "eligible_entries": sum(entry.rank is not None for entry in result.entries),
+    }
+
+
+def _ranking_rows(
+    entries: Sequence[_pulseon.RankingEntry],
+) -> list[tuple[object, ...]]:
+    return [
+        (
+            entry.rank if entry.rank is not None else "-",
+            entry.evidence.run_id,
+            entry.evidence.run_status,
+            entry.evidence.last_step,
+            entry.evidence.last_value_f64,
+            entry.evidence.completeness,
+            ",".join(entry.evidence.reasons) or "-",
+        )
+        for entry in entries
+    ]
+
+
+def _run_autoresearch_leaderboard(
+    client: _pulseon.Client, args: argparse.Namespace
+) -> str:
+    run_ids = _ranking_run_ids(client, args.project_id, args.run_ids)
+    result = client.rank_runs(
+        run_ids, metric_key=args.metric, direction=args.direction
+    )
+    limit = None if args.all else args.limit
+    stop = None if limit is None else args.offset + limit
+    entries = result.entries[args.offset:stop]
+    if args.format == "table":
+        return _render_table(
+            ("RANK", "RUN_ID", "STATUS", "LAST_STEP", "LAST_VALUE", "EVIDENCE", "REASONS"),
+            _ranking_rows(entries),
+        )
+    return _dump_json(
+        {
+            "schema_version": _JSON_SCHEMA_VERSION,
+            "kind": "autoresearch_leaderboard",
+            "data": [_ranking_entry_document(entry) for entry in entries],
+            "page": {
+                "offset": args.offset,
+                "limit": limit,
+                "returned": len(entries),
+                "has_more": args.offset + len(entries) < len(result.entries),
+            },
+            "meta": _ranking_meta(args.project_id, result),
+        }
+    )
 
 
 def _run_autoresearch_compare(
@@ -703,6 +814,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             _must_exist=True,
         ) as client:
             print(_run(client, args))
+    except _CliRequestError as error:
+        message = str(error)
+        if args.format == "json":
+            message = _render_error(error.code, message)
+        print(message, file=sys.stderr)
+        return 1
     except _pulseon.PulseOnError as error:
         message = _sanitize_operation_message(str(error), project_path, args)
         code, guidance = _operation_error_details(error)

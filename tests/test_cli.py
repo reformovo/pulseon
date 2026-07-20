@@ -272,6 +272,89 @@ def test_cli_autoresearch_compare_rejects_candidate_in_pool(
     assert "candidate must not be a comparator" in capsys.readouterr().err
 
 
+def test_cli_autoresearch_leaderboard_keeps_structured_ineligible_evidence(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("research", project_id="project-1")
+    specifications = (
+        ("tied-a", 1.0, "finished"),
+        ("tied-b", 1.0, "finished"),
+        ("worse", 2.0, "finished"),
+        ("failed", 0.5, "failed"),
+        ("running", 0.25, "running"),
+        ("missing", None, "finished"),
+        ("invalid", math.inf, "finished"),
+    )
+    for run_id, value, status in specifications:
+        run = client.create_run(project.project_id, run_id, run_id=run_id)
+        if value is not None:
+            run.log("loss", 0, value)
+        if status == "finished":
+            client.finish_run(run_id)
+        elif status == "failed":
+            client.fail_run(run_id)
+    helpers.wait_for_metric_points(client, "running", "loss", expected_count=1)
+    client.shutdown()
+
+    command = [
+        "--path", str(root_path), "--format", "json", "autoresearch",
+        "leaderboard", "project-1", "--metric", "loss", "--direction",
+        "minimize", "--all",
+    ]
+    for run_id in ("worse", "failed", "tied-b", "tied-a", "running", "missing", "invalid"):
+        command.extend(("--run", run_id))
+    assert cli.main(command) == 0
+    document = json.loads(capsys.readouterr().out)
+
+    assert document["kind"] == "autoresearch_leaderboard"
+    assert document["meta"]["eligible_entries"] == 3
+    assert document["page"] == {
+        "offset": 0, "limit": None, "returned": 7, "has_more": False,
+    }
+    assert [item["evidence"]["run_id"] for item in document["data"]] == [
+        "tied-a", "tied-b", "worse", "failed", "running", "missing", "invalid",
+    ]
+    assert [item["rank"] for item in document["data"]] == [1, 1, 3, None, None, None, None]
+    assert document["data"][-1]["evidence"]["last_value"] == "Infinity"
+    assert document["data"][-1]["evidence"]["reasons"] == ["non_finite_value"]
+
+
+def test_cli_autoresearch_leaderboard_paginates_after_ranking(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("research", project_id="project-1")
+    for index, value in enumerate((4.0, 3.0, 2.0, 1.0)):
+        run = client.create_run(project.project_id, str(index), run_id=f"run-{index}")
+        run.log("score", 0, value)
+        client.finish_run(run.run_id)
+    client.shutdown()
+    base = [
+        "--path", str(root_path), "--format", "json", "autoresearch",
+        "leaderboard", "project-1", "--metric", "score", "--direction", "maximize",
+    ]
+
+    assert cli.main([*base, "--limit", "1", "--offset", "2"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["data"][0]["rank"] == 3
+    assert document["data"][0]["evidence"]["run_id"] == "run-2"
+    assert document["page"] == {
+        "offset": 2, "limit": 1, "returned": 1, "has_more": True,
+    }
+
+    assert cli.main(base) == 0
+    assert json.loads(capsys.readouterr().out)["page"]["limit"] == 50
+
+
 def test_cli_comparison_reports_partial_and_per_metric_evidence(
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture[str],
