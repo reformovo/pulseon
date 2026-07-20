@@ -380,7 +380,18 @@ def _run_autoresearch_compare(
             direction=args.direction,
         )
         if incumbent is None:
-            return _render_insufficient_comparison(args.candidate_run_id, args.format)
+            primary = client._objective_evidence(args.candidate_run_id, args.metric)
+            secondary = [
+                (metric_key, client._objective_evidence(args.candidate_run_id, metric_key))
+                for metric_key in args.secondary
+            ]
+            return _render_insufficient_comparison(
+                primary,
+                secondary,
+                args.metric,
+                args.direction,
+                args.format,
+            )
     reports = client._comparison_reports(
         [args.candidate_run_id],
         incumbent,
@@ -393,22 +404,94 @@ def _run_autoresearch_compare(
     )
 
 
-def _render_insufficient_comparison(candidate_run_id: str, output_format: str) -> str:
+def _unresolved_metric_document(
+    metric_key: str,
+    candidate: _pulseon.ObjectiveEvidence,
+) -> dict[str, object]:
+    return {
+        "metric_key": metric_key,
+        "candidate": _evidence_document(candidate),
+        "reference": None,
+        "completeness": "unavailable",
+        "raw_delta": None,
+        "relative_delta": None,
+    }
+
+
+def _render_insufficient_comparison(
+    primary: _pulseon.ObjectiveEvidence,
+    secondary: Sequence[tuple[str, _pulseon.ObjectiveEvidence]],
+    metric_key: str,
+    direction: str,
+    output_format: str,
+) -> str:
     reason = "no_eligible_incumbent"
     if output_format == "table":
-        return _render_table(
-            ("CANDIDATE", "INCUMBENT", "COMPLETENESS", "REASONS", "PREFERENCE"),
-            ((candidate_run_id, "-", "unavailable", reason, "inconclusive"),),
+        rows: list[tuple[object, ...]] = [
+            (
+                "primary",
+                primary.run_id,
+                "-",
+                metric_key,
+                primary.last_value_f64,
+                primary.completeness,
+                ",".join(primary.reasons) or "-",
+                "unavailable",
+                reason,
+                "inconclusive",
+            )
+        ]
+        rows.extend(
+            (
+                "secondary",
+                evidence.run_id,
+                "-",
+                key,
+                evidence.last_value_f64,
+                evidence.completeness,
+                ",".join(evidence.reasons) or "-",
+                "unavailable",
+                reason,
+                "inconclusive",
+            )
+            for key, evidence in secondary
         )
+        return _render_table(
+            (
+                "KIND",
+                "CANDIDATE",
+                "INCUMBENT",
+                "METRIC",
+                "CANDIDATE_LAST",
+                "EVIDENCE",
+                "EVIDENCE_REASONS",
+                "COMPLETENESS",
+                "REPORT_REASONS",
+                "PREFERENCE",
+            ),
+            rows,
+        )
+    primary_document = _unresolved_metric_document(metric_key, primary)
+    primary_document.update(
+        {
+            "direction": direction,
+            "normalized_improvement": None,
+            "outcome": None,
+            "preference": "inconclusive",
+        }
+    )
     return _dump_json(
         {
             "schema_version": _JSON_SCHEMA_VERSION,
             "kind": "comparison_reports",
             "data": [
                 {
-                    "candidate_run_id": candidate_run_id,
-                    "primary": None,
-                    "secondary": [],
+                    "candidate_run_id": primary.run_id,
+                    "primary": primary_document,
+                    "secondary": [
+                        _unresolved_metric_document(key, evidence)
+                        for key, evidence in secondary
+                    ],
                     "completeness": "unavailable",
                     "reasons": [reason],
                     "preference": "inconclusive",

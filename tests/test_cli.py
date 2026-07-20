@@ -222,25 +222,39 @@ def test_cli_autoresearch_compare_reports_no_eligible_incumbent(
     project = client.create_project("research", project_id="project-1")
     candidate = client.create_run(project.project_id, "candidate", "candidate")
     candidate.log("loss", 0, 1.0)
-    client.finish_run(candidate.run_id)
+    candidate.log("memory", 0, 2.0)
+    helpers.wait_for_metric_points(client, candidate.run_id, "memory", expected_count=1)
     running = client.create_run(project.project_id, "running", "running")
     running.log("loss", 0, 0.5)
     helpers.wait_for_metric_points(client, running.run_id, "loss", expected_count=1)
     client.shutdown()
 
-    status = cli.main(
-        [
-            "--path", str(root_path), "--format", "json", "autoresearch",
-            "compare", "candidate", "--metric", "loss", "--direction", "minimize",
-            "--comparator", "running",
-        ]
-    )
+    command = [
+        "--path", str(root_path), "autoresearch", "compare", "candidate",
+        "--metric", "loss", "--direction", "minimize", "--comparator",
+        "running", "--secondary", "memory",
+    ]
+    status = cli.main(["--format", "json", *command])
 
     assert status == 0
     document = json.loads(capsys.readouterr().out)
-    assert document["data"][0]["primary"] is None
-    assert document["data"][0]["reasons"] == ["no_eligible_incumbent"]
-    assert document["data"][0]["preference"] == "inconclusive"
+    report = document["data"][0]
+    assert report["primary"]["candidate"]["last_value"] == 1.0
+    assert report["primary"]["candidate"]["completeness"] == "partial"
+    assert report["primary"]["candidate"]["reasons"] == ["run_running"]
+    assert report["primary"]["reference"] is None
+    assert report["primary"]["completeness"] == "unavailable"
+    assert report["secondary"][0]["candidate"]["last_value"] == 2.0
+    assert report["secondary"][0]["candidate"]["completeness"] == "partial"
+    assert report["secondary"][0]["reference"] is None
+    assert report["reasons"] == ["no_eligible_incumbent"]
+    assert report["preference"] == "inconclusive"
+
+    assert cli.main(command) == 0
+    table = capsys.readouterr().out
+    assert "run_running" in table
+    assert "no_eligible_incumbent" in table
+    assert "memory" in table
 
 
 def test_cli_autoresearch_compare_rejects_candidate_in_pool(

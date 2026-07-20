@@ -238,6 +238,9 @@ class Client:
         metric_key: str,
         direction: Literal["minimize", "maximize"],
     ) -> ComparisonResult: ...
+    def _objective_evidence(
+        self, run_id: str, metric_key: str
+    ) -> ObjectiveEvidence: ...
     def _comparison_reports(
         self,
         candidate_run_ids: list[str],

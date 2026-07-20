@@ -13,7 +13,9 @@ use crate::model::run::{RunId, RunStatus};
 use crate::model::types::{Project, ProjectId};
 use crate::sdk::alignment::{PyAlignedMetricResult, alignment_query};
 use crate::sdk::arrow::PyArrowTable;
-use crate::sdk::comparison::{PyComparisonReport, PyComparisonResult, PyRankingResult, objective};
+use crate::sdk::comparison::{
+    PyComparisonReport, PyComparisonResult, PyObjectiveEvidence, PyRankingResult, objective,
+};
 use pulseon_core::config::{InitConfigError, S3ConnectionOverrides, resolve_init_config};
 
 create_exception!(
@@ -269,6 +271,18 @@ impl PyClient {
                 &objective,
             )
             .map(PyComparisonResult::from)
+            .map_err(runtime_error)
+    }
+
+    pub fn _objective_evidence(
+        &self,
+        run_id: &str,
+        metric_key: &str,
+    ) -> PyResult<PyObjectiveEvidence> {
+        let objective = objective(metric_key, "maximize")?;
+        self._inner
+            .objective_evidence(&RunId::from_string(run_id), &objective)
+            .map(PyObjectiveEvidence::from)
             .map_err(runtime_error)
     }
 
