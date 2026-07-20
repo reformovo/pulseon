@@ -287,14 +287,12 @@ def test_cli_comparison_reports_partial_and_per_metric_evidence(
     client.finish_run("invalid-secondary")
     client.shutdown()
 
-    status = cli.main(
-        [
-            "--path", str(root_path), "--format", "json", "metrics", "compare",
-            "loss", "running", "baseline", "failed", "missing",
-            "invalid-secondary", "--baseline", "baseline", "--direction",
-            "minimize", "--secondary", "memory",
-        ]
-    )
+    command = [
+        "--path", str(root_path), "metrics", "compare", "loss", "running",
+        "baseline", "failed", "missing", "invalid-secondary", "--baseline",
+        "baseline", "--direction", "minimize", "--secondary", "memory",
+    ]
+    status = cli.main(["--format", "json", *command])
 
     assert status == 0
     data = json.loads(capsys.readouterr().out)["data"]
@@ -318,6 +316,11 @@ def test_cli_comparison_reports_partial_and_per_metric_evidence(
     assert invalid["secondary"][0]["candidate"]["reasons"] == [
         "non_finite_value"
     ]
+
+    assert cli.main(command) == 0
+    table = capsys.readouterr().out
+    assert "run_running" in table
+    assert "non_finite_value" in table
 
 
 def test_cli_comparison_reports_reject_unknown_run(

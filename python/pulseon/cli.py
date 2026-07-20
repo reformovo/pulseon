@@ -463,6 +463,9 @@ def _comparison_rows(
     report: _pulseon._ComparisonReport,
 ) -> list[tuple[object, ...]]:
     primary = report.primary
+    primary_reasons = ",".join(
+        (*primary.candidate.reasons, *primary.reference.reasons)
+    )
     rows: list[tuple[object, ...]] = [
         (
             "primary",
@@ -475,6 +478,7 @@ def _comparison_rows(
             primary.relative_delta,
             primary.normalized_improvement,
             primary.completeness,
+            primary_reasons or "-",
             primary.outcome,
             primary.preference,
         )
@@ -491,6 +495,7 @@ def _comparison_rows(
             item.relative_delta,
             "-",
             item.completeness,
+            ",".join((*item.candidate.reasons, *item.reference.reasons)) or "-",
             "-",
             "-",
         )
@@ -517,6 +522,7 @@ def _render_comparison_reports(
             "RELATIVE_DELTA",
             "IMPROVEMENT",
             "COMPLETENESS",
+            "REASONS",
             "OUTCOME",
             "PREFERENCE",
         )
