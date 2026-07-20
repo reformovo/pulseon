@@ -245,6 +245,7 @@ class Client:
         *,
         metric_key: str,
         direction: Literal["minimize", "maximize"],
+        secondary_metric_keys: list[str],
     ) -> list[_ComparisonReport]: ...
     def rank_runs(
         self,

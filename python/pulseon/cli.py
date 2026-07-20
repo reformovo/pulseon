@@ -95,6 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     metrics_compare.add_argument(
         "--direction", choices=("minimize", "maximize"), required=True
     )
+    metrics_compare.add_argument("--secondary", action="append", default=[])
     return parser
 
 
@@ -334,6 +335,7 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
         args.baseline,
         metric_key=args.metric_key,
         direction=args.direction,
+        secondary_metric_keys=args.secondary,
     )
     return _render_comparison_reports(reports, args.format, reference_role="baseline")
 
@@ -364,6 +366,59 @@ def _primary_document(result: _pulseon.ComparisonResult) -> dict[str, object]:
     }
 
 
+def _secondary_document(
+    result: _pulseon._MetricComparisonResult,
+) -> dict[str, object]:
+    return {
+        "metric_key": result.metric_key,
+        "candidate": _evidence_document(result.candidate),
+        "reference": _evidence_document(result.reference),
+        "completeness": result.completeness,
+        "raw_delta": result.raw_delta,
+        "relative_delta": result.relative_delta,
+    }
+
+
+def _comparison_rows(
+    report: _pulseon._ComparisonReport,
+) -> list[tuple[object, ...]]:
+    primary = report.primary
+    rows: list[tuple[object, ...]] = [
+        (
+            "primary",
+            primary.candidate.run_id,
+            primary.reference.run_id,
+            primary.objective.metric_key,
+            primary.candidate.last_value_f64,
+            primary.reference.last_value_f64,
+            primary.raw_delta,
+            primary.relative_delta,
+            primary.normalized_improvement,
+            primary.completeness,
+            primary.outcome,
+            primary.preference,
+        )
+    ]
+    rows.extend(
+        (
+            "secondary",
+            item.candidate.run_id,
+            item.reference.run_id,
+            item.metric_key,
+            item.candidate.last_value_f64,
+            item.reference.last_value_f64,
+            item.raw_delta,
+            item.relative_delta,
+            "-",
+            item.completeness,
+            "-",
+            "-",
+        )
+        for item in report.secondary
+    )
+    return rows
+
+
 def _render_comparison_reports(
     reports: Sequence[_pulseon._ComparisonReport],
     output_format: str,
@@ -372,6 +427,7 @@ def _render_comparison_reports(
 ) -> str:
     if output_format == "table":
         headers = (
+            "KIND",
             "CANDIDATE",
             reference_role.upper(),
             "METRIC",
@@ -384,22 +440,7 @@ def _render_comparison_reports(
             "OUTCOME",
             "PREFERENCE",
         )
-        rows = [
-            (
-                report.primary.candidate.run_id,
-                report.primary.reference.run_id,
-                report.primary.objective.metric_key,
-                report.primary.candidate.last_value_f64,
-                report.primary.reference.last_value_f64,
-                report.primary.raw_delta,
-                report.primary.relative_delta,
-                report.primary.normalized_improvement,
-                report.primary.completeness,
-                report.primary.outcome,
-                report.primary.preference,
-            )
-            for report in reports
-        ]
+        rows = [row for report in reports for row in _comparison_rows(report)]
         return _render_table(headers, rows)
     return _dump_json(
         {
@@ -408,7 +449,9 @@ def _render_comparison_reports(
             "data": [
                 {
                     "primary": _primary_document(report.primary),
-                    "secondary": [],
+                    "secondary": [
+                        _secondary_document(item) for item in report.secondary
+                    ],
                 }
                 for report in reports
             ],

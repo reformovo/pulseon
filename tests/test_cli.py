@@ -104,6 +104,7 @@ def test_cli_comparison_reports_require_baseline_and_preserve_candidate_order(
     candidate_a = client.create_run(second_id, "candidate-a", "candidate-a")
     for run, value in ((baseline, 3.0), (candidate_b, 1.0), (candidate_a, 2.0)):
         run.log("loss", 0, value)
+        run.log("throughput", 0, value * 10)
         client.finish_run(run.run_id)
     client.shutdown()
 
@@ -111,11 +112,14 @@ def test_cli_comparison_reports_require_baseline_and_preserve_candidate_order(
         "--path", str(root_path), "metrics", "compare", "loss",
         "candidate-b", "baseline", "candidate-a",
         "--baseline", "baseline", "--direction", "minimize",
+        "--secondary", "throughput",
     ]
     assert cli.main(command) == 0
     table = capsys.readouterr().out
     assert table.index("candidate-b") < table.index("candidate-a")
     assert "baseline" in table
+    assert "secondary" in table
+    assert "throughput" in table
 
     assert cli.main(["--format", "json", *command]) == 0
     document = json.loads(capsys.readouterr().out)
@@ -127,6 +131,11 @@ def test_cli_comparison_reports_require_baseline_and_preserve_candidate_order(
     assert candidate_ids == ["candidate-b", "candidate-a"]
     preferences = [item["primary"]["preference"] for item in document["data"]]
     assert preferences == ["candidate", "candidate"]
+    assert [item["secondary"][0]["metric_key"] for item in document["data"]] == [
+        "throughput",
+        "throughput",
+    ]
+    assert document["data"][0]["secondary"][0]["raw_delta"] == -20.0
 
 
 @pytest.mark.parametrize(

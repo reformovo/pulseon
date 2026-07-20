@@ -272,25 +272,37 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
-    #[pyo3(signature = (candidate_run_ids, reference_run_id, *, metric_key, direction))]
+    #[pyo3(signature = (
+        candidate_run_ids,
+        reference_run_id,
+        *,
+        metric_key,
+        direction,
+        secondary_metric_keys
+    ))]
     pub fn _comparison_reports(
         &self,
         candidate_run_ids: Vec<String>,
         reference_run_id: &str,
         metric_key: &str,
         direction: &str,
+        secondary_metric_keys: Vec<String>,
     ) -> PyResult<Vec<PyComparisonReport>> {
         let objective = objective(metric_key, direction)?;
         let candidate_run_ids = candidate_run_ids
             .into_iter()
             .map(RunId::from_string)
             .collect::<Vec<_>>();
+        let secondary_metric_keys = secondary_metric_keys
+            .into_iter()
+            .map(MetricKey::from_string)
+            .collect::<Vec<_>>();
         self._inner
             .comparison_reports(
                 &candidate_run_ids,
                 &RunId::from_string(reference_run_id),
                 &objective,
-                &[],
+                &secondary_metric_keys,
             )
             .map(|reports| reports.into_iter().map(PyComparisonReport::from).collect())
             .map_err(runtime_error)
