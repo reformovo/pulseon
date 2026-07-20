@@ -63,13 +63,12 @@ def test_cli_discovers_running_metric_points_through_all_read_commands(
             ],
             "0.5",
         ),
-        (["metrics", "compare", "train/loss", "run-1"], "run-1"),
     )
     for argv, expected in commands:
         assert cli.main(argv) == 0
         assert expected in capsys.readouterr().out
 
-    kinds = ("projects", "runs", "metrics", "metric_points", "metric_summaries")
+    kinds = ("projects", "runs", "metrics", "metric_points")
     for (argv, _), kind in zip(commands, kinds, strict=True):
         assert cli.main(["--format", "json", *argv]) == 0
         document = json.loads(capsys.readouterr().out)
@@ -87,6 +86,78 @@ def test_cli_discovers_running_metric_points_through_all_read_commands(
             }
         if kind == "metric_points":
             assert [point["step"] for point in document["data"]] == [0]
+
+
+def test_cli_comparison_reports_require_baseline_and_preserve_candidate_order(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    first_project = client.create_project("first", project_id="project-1")
+    second_project = client.create_project("second", project_id="project-2")
+    baseline = client.create_run(first_project.project_id, "baseline", "baseline")
+    second_id = second_project.project_id
+    candidate_b = client.create_run(second_id, "candidate-b", "candidate-b")
+    candidate_a = client.create_run(second_id, "candidate-a", "candidate-a")
+    for run, value in ((baseline, 3.0), (candidate_b, 1.0), (candidate_a, 2.0)):
+        run.log("loss", 0, value)
+        client.finish_run(run.run_id)
+    client.shutdown()
+
+    command = [
+        "--path", str(root_path), "metrics", "compare", "loss",
+        "candidate-b", "baseline", "candidate-a",
+        "--baseline", "baseline", "--direction", "minimize",
+    ]
+    assert cli.main(command) == 0
+    table = capsys.readouterr().out
+    assert table.index("candidate-b") < table.index("candidate-a")
+    assert "baseline" in table
+
+    assert cli.main(["--format", "json", *command]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["kind"] == "comparison_reports"
+    assert document["meta"] == {"reference_role": "baseline"}
+    candidate_ids = [
+        item["primary"]["candidate"]["run_id"] for item in document["data"]
+    ]
+    assert candidate_ids == ["candidate-b", "candidate-a"]
+    preferences = [item["primary"]["preference"] for item in document["data"]]
+    assert preferences == ["candidate", "candidate"]
+
+
+@pytest.mark.parametrize(
+    ("run_ids", "baseline", "message"),
+    (
+        (["candidate"], "baseline", "must be contained"),
+        (["candidate", "candidate"], "candidate", "must be unique"),
+    ),
+)
+def test_cli_comparison_rejects_invalid_run_sets(
+    run_ids: list[str],
+    baseline: str,
+    message: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as error_info:
+        cli.main(
+            [
+                "metrics",
+                "compare",
+                "loss",
+                *run_ids,
+                "--baseline",
+                baseline,
+                "--direction",
+                "minimize",
+            ]
+        )
+
+    assert error_info.value.code == 2
+    assert message in capsys.readouterr().err
 
 
 def test_cli_missing_store_fails_without_creating_it(
