@@ -2,9 +2,16 @@ use crate::engine::EngineError;
 use crate::engine::client::NativeClient;
 use crate::model::comparison::{
     ComparisonOutcome, ComparisonPreference, ComparisonReport, ComparisonResult,
-    EvidenceCompleteness, ObjectiveEvidence, ObjectiveMetric,
+    EvidenceCompleteness, MetricComparisonResult, ObjectiveEvidence, ObjectiveMetric,
 };
+use crate::model::metric::MetricKey;
 use crate::model::run::RunId;
+
+struct SecondaryEvidenceSet {
+    metric_key: MetricKey,
+    reference: ObjectiveEvidence,
+    candidates: Vec<ObjectiveEvidence>,
+}
 
 impl NativeClient {
     /// Builds primary comparison reports in candidate request order.
@@ -19,6 +26,7 @@ impl NativeClient {
         candidate_run_ids: &[RunId],
         reference_run_id: &RunId,
         objective: &ObjectiveMetric,
+        secondary_metric_keys: &[MetricKey],
     ) -> Result<Vec<ComparisonReport>, EngineError> {
         let mut request_run_ids = Vec::with_capacity(candidate_run_ids.len() + 1);
         request_run_ids.push(reference_run_id.clone());
@@ -31,10 +39,34 @@ impl NativeClient {
         let Some((_, reference)) = evidence.next() else {
             return Ok(Vec::new());
         };
+        let secondary = secondary_metric_keys
+            .iter()
+            .map(|metric_key| {
+                let metric = ObjectiveMetric {
+                    metric_key: metric_key.clone(),
+                    direction: objective.direction,
+                };
+                let mut evidence = self
+                    .ranking_evidence(&request_run_ids, &metric)?
+                    .into_iter();
+                let Some((_, reference)) = evidence.next() else {
+                    return Ok(None);
+                };
+                Ok(Some(SecondaryEvidenceSet {
+                    metric_key: metric_key.clone(),
+                    reference,
+                    candidates: evidence.map(|(_, candidate)| candidate).collect(),
+                }))
+            })
+            .collect::<Result<Vec<_>, EngineError>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
         Ok(build_reports(
             objective,
             reference,
-            evidence.map(|(_, candidate)| candidate),
+            evidence.map(|(_, candidate)| candidate).collect(),
+            &secondary,
         ))
     }
 
@@ -64,15 +96,52 @@ impl NativeClient {
 fn build_reports(
     objective: &ObjectiveMetric,
     reference: ObjectiveEvidence,
-    candidates: impl IntoIterator<Item = ObjectiveEvidence>,
+    candidates: Vec<ObjectiveEvidence>,
+    secondary: &[SecondaryEvidenceSet],
 ) -> Vec<ComparisonReport> {
     candidates
         .into_iter()
-        .map(|candidate| ComparisonReport {
+        .enumerate()
+        .map(|(index, candidate)| ComparisonReport {
             primary: compare_evidence(objective, candidate, reference.clone()),
-            secondary: Vec::new(),
+            secondary: secondary
+                .iter()
+                .map(|set| {
+                    compare_metric_evidence(
+                        &set.metric_key,
+                        set.candidates[index].clone(),
+                        set.reference.clone(),
+                    )
+                })
+                .collect(),
         })
         .collect()
+}
+
+fn compare_metric_evidence(
+    metric_key: &MetricKey,
+    candidate: ObjectiveEvidence,
+    reference: ObjectiveEvidence,
+) -> MetricComparisonResult {
+    let completeness = candidate.completeness.max(reference.completeness);
+    let (raw_delta, relative_delta) = candidate
+        .usable_value()
+        .zip(reference.usable_value())
+        .map_or((None, None), |(candidate, reference)| {
+            let raw = candidate - reference;
+            (
+                Some(raw),
+                (reference != 0.0).then_some(raw / reference.abs()),
+            )
+        });
+    MetricComparisonResult {
+        metric_key: metric_key.clone(),
+        candidate,
+        reference,
+        completeness,
+        raw_delta,
+        relative_delta,
+    }
 }
 
 fn reject_duplicate_run_ids(run_ids: &[RunId]) -> Result<(), EngineError> {
@@ -207,10 +276,11 @@ mod tests {
         let reports = build_reports(
             &objective(ObjectiveDirection::Minimize),
             evidence("reference", 4.0, EvidenceCompleteness::Complete),
-            [
+            vec![
                 evidence("candidate-b", 2.0, EvidenceCompleteness::Complete),
                 evidence("candidate-a", 3.0, EvidenceCompleteness::Complete),
             ],
+            &[],
         );
 
         assert_eq!(
@@ -221,6 +291,32 @@ mod tests {
             vec!["candidate-b", "candidate-a"]
         );
         assert!(reports.iter().all(|report| report.secondary.is_empty()));
+    }
+
+    #[test]
+    fn secondary_metrics_preserve_order_without_affecting_preference() {
+        let secondary = [SecondaryEvidenceSet {
+            metric_key: MetricKey::from_string("memory"),
+            reference: evidence("reference", 4.0, EvidenceCompleteness::Complete),
+            candidates: vec![evidence("candidate", 5.0, EvidenceCompleteness::Partial)],
+        }];
+        let reports = build_reports(
+            &objective(ObjectiveDirection::Minimize),
+            evidence("reference", 2.0, EvidenceCompleteness::Complete),
+            vec![evidence("candidate", 1.0, EvidenceCompleteness::Complete)],
+            &secondary,
+        );
+
+        assert_eq!(
+            reports[0].primary.preference,
+            ComparisonPreference::Candidate
+        );
+        assert_eq!(reports[0].secondary[0].metric_key.as_str(), "memory");
+        assert_eq!(
+            reports[0].secondary[0].completeness,
+            EvidenceCompleteness::Partial
+        );
+        assert_eq!(reports[0].secondary[0].raw_delta, Some(1.0));
     }
 
     #[test]

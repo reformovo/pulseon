@@ -290,6 +290,7 @@ impl PyClient {
                 &candidate_run_ids,
                 &RunId::from_string(reference_run_id),
                 &objective,
+                &[],
             )
             .map(|reports| reports.into_iter().map(PyComparisonReport::from).collect())
             .map_err(runtime_error)
