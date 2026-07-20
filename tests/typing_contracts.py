@@ -1,4 +1,4 @@
-"""Pyright coverage for typed comparison read APIs."""
+"""Static type contracts for the public Python read APIs."""
 
 from __future__ import annotations
 
@@ -7,7 +7,28 @@ from typing import Literal, assert_type
 import pulseon
 
 
-def accepts_typed_comparison_reads(client: pulseon.Client) -> None:
+def check_arrow_table_queries(client: pulseon.Client) -> None:
+    points = client.query_metric_table(
+        "run-1",
+        "train/loss",
+        start_step=10,
+        end_step=20,
+        max_points=5,
+    )
+    summaries = client.query_metric_summaries_table(
+        ["run-1", "run-2"], "train/loss"
+    )
+
+    assert_type(points, pulseon.ArrowTable)
+    assert_type(summaries, pulseon.ArrowTable)
+    assert_type(points.row_count, int)
+    assert_type(points.source_row_count, int)
+    assert_type(points.downsampled, bool)
+    assert_type(points.column_names, list[str])
+    assert_type(points.__arrow_c_stream__(), object)
+
+
+def check_comparison_reads(client: pulseon.Client) -> None:
     aligned = client.query_aligned_metric(
         "run-1",
         "loss",
@@ -51,7 +72,7 @@ def accepts_typed_comparison_reads(client: pulseon.Client) -> None:
     assert_type(ranking.entries[0].rank, int | None)
 
 
-def rejects_invalid_literals_and_read_only_writes(client: pulseon.Client) -> None:
+def check_rejected_comparison_calls(client: pulseon.Client) -> None:
     client.query_aligned_metric(
         "run-1",
         "loss",

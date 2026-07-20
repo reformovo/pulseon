@@ -65,7 +65,7 @@ def test_aligned_metric_queries_step_and_elapsed_evidence(
     assert elapsed_result.points[0].axis_value >= 0
     assert elapsed_result.source_row_count == 4
     with pytest.raises(AttributeError):
-        step_result.completeness = "complete"  # type: ignore[misc]
+        step_result.completeness = "complete"  # type: ignore[reportAttributeAccessIssue]
 
 
 def test_aligned_metric_rejects_invalid_public_arguments(
@@ -75,7 +75,11 @@ def test_aligned_metric_rejects_invalid_public_arguments(
 
     with pytest.raises(ValueError, match="axis must be"):
         client.query_aligned_metric(
-            "run-1", "loss", axis="epoch", start=0, end=1  # type: ignore[arg-type]
+            "run-1",
+            "loss",
+            axis="epoch",  # type: ignore[reportArgumentType]
+            start=0,
+            end=1,
         )
     with pytest.raises(ValueError, match="provided together"):
         client.query_aligned_metric(

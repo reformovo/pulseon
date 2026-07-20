@@ -20,7 +20,7 @@ def test_v2_api_contract_requires_explicit_step_and_reports_diagnostics(
 
     run.log("train/loss", 0, 0.25)
     with pytest.raises(TypeError):
-        run.log("train/loss", 0.125)  # type: ignore[call-arg]
+        run.log("train/loss", 0.125)  # type: ignore[reportCallIssue]
     diagnostics = client.diagnostics()
 
     assert isinstance(diagnostics, pulseon.Diagnostics)

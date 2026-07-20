@@ -73,5 +73,5 @@ trusted-publishing = true
 publishing-environment = "release"
 
 [tool.pyright]
-include = ["python", "tests/typecheck"]
+include = ["python", "scripts", "tests"]
 reportUnnecessaryTypeIgnoreComment = true

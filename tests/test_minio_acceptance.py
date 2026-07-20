@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import os
 import pathlib
+from typing import Literal
 import urllib.parse
 import urllib.request
 import uuid
@@ -16,7 +17,8 @@ import pytest
 
 from tests import helpers
 
-_CATALOG_BACKENDS = ("duckdb", "sqlite")
+_CatalogBackend = Literal["duckdb", "sqlite"]
+_CATALOG_BACKENDS: tuple[_CatalogBackend, ...] = ("duckdb", "sqlite")
 _REQUIRED_ENV = (
     "PULSEON_MINIO_ENDPOINT",
     "PULSEON_MINIO_BUCKET",
@@ -40,7 +42,7 @@ class MinioConfig:
 @pytest.mark.parametrize("catalog_backend", _CATALOG_BACKENDS)
 def test_minio_s3_data_path_round_trips_catalog_backend(
     tmp_path: pathlib.Path,
-    catalog_backend: str,
+    catalog_backend: _CatalogBackend,
 ) -> None:
     config = _require_minio_config()
     root_path = tmp_path / catalog_backend / "pulseon"
@@ -115,7 +117,10 @@ def test_minio_s3_data_path_round_trips_catalog_backend(
 
 
 def _open_minio_client(
-    root_path: pathlib.Path, config: MinioConfig, prefix: str, catalog_backend: str
+    root_path: pathlib.Path,
+    config: MinioConfig,
+    prefix: str,
+    catalog_backend: _CatalogBackend,
 ):
     import pulseon
 

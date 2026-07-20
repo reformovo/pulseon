@@ -605,7 +605,13 @@ def test_cli_enables_lttb_auto_install_only_during_metric_query(
         ["metrics", "query", "run-1", "loss"]
     )
 
-    cli._run(typing.cast(cli._pulseon.Client, client), args)
+    cli._run(
+        typing.cast(
+            cli._pulseon.Client,  # type: ignore[reportPrivateImportUsage]
+            client,
+        ),
+        args,
+    )
 
     assert os.environ["PULSEON_LTTB_AUTO_INSTALL"] == "disabled"
 

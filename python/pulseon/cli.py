@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 import contextlib
 import io
 import json
@@ -44,7 +44,7 @@ def _non_negative_int(value: str) -> int:
 
 
 @contextlib.contextmanager
-def _enable_lttb_auto_install() -> Iterator[None]:
+def _enable_lttb_auto_install() -> Generator[None, None, None]:
     """Enables LTTB downloads only for one CLI metric query."""
     previous = os.environ.get(_LTTB_AUTO_INSTALL_ENV)
     os.environ[_LTTB_AUTO_INSTALL_ENV] = "1"
