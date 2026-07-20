@@ -254,6 +254,13 @@ class Client:
         metric_key: str,
         direction: Literal["minimize", "maximize"],
     ) -> RankingResult: ...
+    def _best_eligible_run(
+        self,
+        run_ids: list[str],
+        *,
+        metric_key: str,
+        direction: Literal["minimize", "maximize"],
+    ) -> str | None: ...
     def query_metric(
         self,
         run_id: str,

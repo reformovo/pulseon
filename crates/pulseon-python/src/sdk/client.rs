@@ -326,6 +326,24 @@ impl PyClient {
             .map_err(runtime_error)
     }
 
+    #[pyo3(signature = (run_ids, *, metric_key, direction))]
+    pub fn _best_eligible_run(
+        &self,
+        run_ids: Vec<String>,
+        metric_key: &str,
+        direction: &str,
+    ) -> PyResult<Option<String>> {
+        let objective = objective(metric_key, direction)?;
+        let run_ids = run_ids
+            .into_iter()
+            .map(RunId::from_string)
+            .collect::<Vec<_>>();
+        self._inner
+            .best_eligible_run(&run_ids, &objective)
+            .map(|run_id| run_id.map(|value| value.as_str().to_owned()))
+            .map_err(runtime_error)
+    }
+
     #[pyo3(signature = (run_id, metric_key, start_step=None, end_step=None, max_points=None))]
     pub fn query_metric(
         &self,
