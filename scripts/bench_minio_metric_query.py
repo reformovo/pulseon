@@ -14,9 +14,10 @@ import tempfile
 import time
 import urllib.parse
 import uuid
-from typing import Any
+from typing import Any, Literal
 
-_BACKENDS = ("duckdb", "sqlite")
+_CatalogBackend = Literal["duckdb", "sqlite"]
+_BACKENDS: tuple[_CatalogBackend, ...] = ("duckdb", "sqlite")
 _LOGICAL_POINT_BYTES = 24
 _REQUIRED_ENV = (
     "PULSEON_MINIO_ENDPOINT",
@@ -59,7 +60,7 @@ def main() -> int:
 
 def run_backend(
     config: MinioConfig,
-    catalog_backend: str,
+    catalog_backend: _CatalogBackend,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     if min(args.run_count, args.metric_key_count, args.steps, args.repeats) <= 0:
@@ -108,13 +109,16 @@ def _populate_and_query(
     root: pathlib.Path,
     config: MinioConfig,
     prefix: str,
-    catalog_backend: str,
+    catalog_backend: _CatalogBackend,
     args: argparse.Namespace,
     target_run_id: str,
     target_metric_key: str,
 ) -> tuple[list[float], int, dict[str, Any]]:
     import pulseon
 
+    latencies: list[float] = []
+    points: list[pulseon.MetricPoint] = []
+    events: list[dict[str, Any]] = []
     with pulseon.init(
         root,
         data_path=f"s3://{config.bucket}/{prefix}",
@@ -136,8 +140,6 @@ def _populate_and_query(
         trace = _start_trace(config, prefix)
         time.sleep(0.25)
         try:
-            latencies = []
-            points = []
             for _ in range(args.repeats):
                 started = time.perf_counter()
                 points = client.query_metric(

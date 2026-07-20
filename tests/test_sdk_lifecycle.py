@@ -585,7 +585,10 @@ def test_client_list_runs_rejects_unknown_status(tmp_path: pathlib.Path) -> None
     project = client.create_project("local training", project_id="project-1")
 
     with pytest.raises(ValueError, match="status must be one of"):
-        client.list_runs(project.project_id, status="paused")
+        client.list_runs(
+            project.project_id,
+            status="paused",  # type: ignore[reportArgumentType]
+        )
 
 
 def test_client_detects_orphan_running_runs(tmp_path: pathlib.Path) -> None:

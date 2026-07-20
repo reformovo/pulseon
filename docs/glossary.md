@@ -45,6 +45,10 @@ release.
 - **Objective metric**: Primary metric and direction used to compare Runs.
 - **Comparison evidence**: Derived facts and qualifications supporting a Run
   comparison.
+- **Comparison report**: One candidate/reference primary comparison plus
+  ordered secondary metric evidence.
+- **Secondary metric**: Supporting comparison evidence that does not affect
+  objective outcome, preference, ranking, or tie-breaking.
 - **Completeness**: Whether comparison evidence is complete, partial,
   unavailable, or invalid.
 - **Outcome**: Numeric relationship between a candidate and its reference.

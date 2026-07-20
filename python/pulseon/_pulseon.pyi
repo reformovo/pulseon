@@ -121,6 +121,28 @@ class ComparisonResult:
         self,
     ) -> Literal["candidate", "reference", "no_preference", "inconclusive"]: ...
 
+class _MetricComparisonResult:
+    @property
+    def metric_key(self) -> str: ...
+    @property
+    def candidate(self) -> ObjectiveEvidence: ...
+    @property
+    def reference(self) -> ObjectiveEvidence: ...
+    @property
+    def completeness(
+        self,
+    ) -> Literal["complete", "partial", "unavailable", "invalid"]: ...
+    @property
+    def raw_delta(self) -> float | None: ...
+    @property
+    def relative_delta(self) -> float | None: ...
+
+class _ComparisonReport:
+    @property
+    def primary(self) -> ComparisonResult: ...
+    @property
+    def secondary(self) -> list[_MetricComparisonResult]: ...
+
 class RankingEntry:
     @property
     def evidence(self) -> ObjectiveEvidence: ...
@@ -216,6 +238,18 @@ class Client:
         metric_key: str,
         direction: Literal["minimize", "maximize"],
     ) -> ComparisonResult: ...
+    def _objective_evidence(
+        self, run_id: str, metric_key: str
+    ) -> ObjectiveEvidence: ...
+    def _comparison_reports(
+        self,
+        candidate_run_ids: list[str],
+        reference_run_id: str,
+        *,
+        metric_key: str,
+        direction: Literal["minimize", "maximize"],
+        secondary_metric_keys: list[str],
+    ) -> list[_ComparisonReport]: ...
     def rank_runs(
         self,
         run_ids: list[str],
@@ -223,6 +257,13 @@ class Client:
         metric_key: str,
         direction: Literal["minimize", "maximize"],
     ) -> RankingResult: ...
+    def _best_eligible_run(
+        self,
+        run_ids: list[str],
+        *,
+        metric_key: str,
+        direction: Literal["minimize", "maximize"],
+    ) -> str | None: ...
     def query_metric(
         self,
         run_id: str,

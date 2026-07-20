@@ -98,18 +98,18 @@ the pre-1.0 CLI JSON envelope with version 2.
 
 #### Phase 2D: Generic and Autoresearch Comparison Reports
 
-- [ ] Upgrade `metrics compare` to require an explicit baseline contained in
+- [x] Upgrade `metrics compare` to require an explicit baseline contained in
   the requested Run set and an explicit `minimize` or `maximize` direction.
   Permit cross-Project comparison. Preserve input order for candidate reports.
-- [ ] Add `autoresearch compare` as a role-oriented view over the same Core
+- [x] Add `autoresearch compare` as a role-oriented view over the same Core
   report. Its incumbent is either explicit or the direction-aware best eligible
   Run from an explicit comparator pool; it is never inferred from project
   history. No eligible incumbent yields insufficient evidence, not mutation.
-- [ ] Report primary and secondary last values, raw and relative deltas,
+- [x] Report primary and secondary last values, raw and relative deltas,
   normalized improvement, structured completeness/reasons, numeric outcome,
   and compute-only preference. Secondary metrics never affect outcome,
   preference, ranking, or tie-breaking in 0.2.x.
-- [ ] Allow running and failed Runs to expose available numeric evidence but
+- [x] Allow running and failed Runs to expose available numeric evidence but
   mark their report partial and preference inconclusive. Unknown or duplicate
   Run identities are request errors; missing metrics and non-finite values are
   per-item unavailable/invalid evidence.

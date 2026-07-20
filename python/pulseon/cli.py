@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 import contextlib
 import io
 import json
@@ -44,7 +44,7 @@ def _non_negative_int(value: str) -> int:
 
 
 @contextlib.contextmanager
-def _enable_lttb_auto_install() -> Iterator[None]:
+def _enable_lttb_auto_install() -> Generator[None, None, None]:
     """Enables LTTB downloads only for one CLI metric query."""
     previous = os.environ.get(_LTTB_AUTO_INSTALL_ENV)
     os.environ[_LTTB_AUTO_INSTALL_ENV] = "1"
@@ -91,14 +91,35 @@ def _build_parser() -> argparse.ArgumentParser:
     metrics_compare = metric_actions.add_parser("compare")
     metrics_compare.add_argument("metric_key")
     metrics_compare.add_argument("run_ids", nargs="+")
+    metrics_compare.add_argument("--baseline", required=True)
+    metrics_compare.add_argument(
+        "--direction", choices=("minimize", "maximize"), required=True
+    )
+    metrics_compare.add_argument("--secondary", action="append", default=[])
+
+    autoresearch = resources.add_parser("autoresearch")
+    autoresearch_actions = autoresearch.add_subparsers(dest="action", required=True)
+    autoresearch_compare = autoresearch_actions.add_parser("compare")
+    autoresearch_compare.add_argument("candidate_run_id")
+    autoresearch_compare.add_argument("--metric", required=True)
+    autoresearch_compare.add_argument(
+        "--direction", choices=("minimize", "maximize"), required=True
+    )
+    reference = autoresearch_compare.add_mutually_exclusive_group(required=True)
+    reference.add_argument("--against")
+    reference.add_argument("--comparator", action="append")
+    autoresearch_compare.add_argument("--secondary", action="append", default=[])
     return parser
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     error_output = io.StringIO()
+    parser = _build_parser()
     try:
         with contextlib.redirect_stderr(error_output):
-            return _build_parser().parse_args(argv)
+            args = parser.parse_args(argv)
+            _validate_args(parser, args)
+            return args
     except SystemExit as error:
         if error.code == 2 and _json_requested(argv):
             print(
@@ -108,6 +129,30 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         else:
             print(error_output.getvalue(), end="", file=sys.stderr)
         raise
+
+
+def _validate_args(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    if args.action != "compare":
+        return
+    if args.resource == "metrics":
+        _validate_metrics_compare(parser, args)
+        return
+    references = [args.against] if args.against is not None else args.comparator
+    if len(set(references)) != len(references):
+        parser.error("autoresearch comparator Run IDs must be unique")
+    if args.candidate_run_id in references:
+        parser.error("autoresearch candidate must not be a comparator")
+
+
+def _validate_metrics_compare(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    if len(set(args.run_ids)) != len(args.run_ids):
+        parser.error("metrics compare Run IDs must be unique")
+    if args.baseline not in args.run_ids:
+        parser.error("--baseline must be contained in the requested Run IDs")
 
 
 def _json_requested(argv: Sequence[str] | None) -> bool:
@@ -164,7 +209,7 @@ def _operation_error_details(
 
 def _dump_json(document: object) -> str:
     return json.dumps(
-        document,
+        _json_value(document),
         allow_nan=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -178,6 +223,14 @@ def _json_scalar(value: object) -> object:
     if math.isnan(value):
         return "NaN"
     return "Infinity" if value > 0 else "-Infinity"
+
+
+def _json_value(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in value]
+    return _json_scalar(value)
 
 
 def _render_table(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> str:
@@ -258,6 +311,8 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
                 "has_more": has_more,
             },
         )
+    if args.resource == "autoresearch":
+        return _run_autoresearch_compare(client, args)
     if args.action == "list":
         metrics = client.list_metrics(args.run_id)
         return _render_summaries(
@@ -300,12 +355,278 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
             kind="metric_points",
             meta=meta,
         )
-    summaries = client.query_metric_summaries(args.run_ids, args.metric_key)
-    return _render_summaries(
-        summaries,
-        include_metric_key=False,
-        output_format=args.format,
-        kind="metric_summaries",
+    candidate_run_ids = [
+        run_id for run_id in args.run_ids if run_id != args.baseline
+    ]
+    reports = client._comparison_reports(
+        candidate_run_ids,
+        args.baseline,
+        metric_key=args.metric_key,
+        direction=args.direction,
+        secondary_metric_keys=args.secondary,
+    )
+    return _render_comparison_reports(reports, args.format, reference_role="baseline")
+
+
+def _run_autoresearch_compare(
+    client: _pulseon.Client, args: argparse.Namespace
+) -> str:
+    incumbent = args.against
+    if incumbent is None:
+        client.get_run(args.candidate_run_id)
+        incumbent = client._best_eligible_run(
+            args.comparator,
+            metric_key=args.metric,
+            direction=args.direction,
+        )
+        if incumbent is None:
+            primary = client._objective_evidence(args.candidate_run_id, args.metric)
+            secondary = [
+                (metric_key, client._objective_evidence(args.candidate_run_id, metric_key))
+                for metric_key in args.secondary
+            ]
+            return _render_insufficient_comparison(
+                primary,
+                secondary,
+                args.metric,
+                args.direction,
+                args.format,
+            )
+    reports = client._comparison_reports(
+        [args.candidate_run_id],
+        incumbent,
+        metric_key=args.metric,
+        direction=args.direction,
+        secondary_metric_keys=args.secondary,
+    )
+    return _render_comparison_reports(
+        reports, args.format, reference_role="incumbent"
+    )
+
+
+def _unresolved_metric_document(
+    metric_key: str,
+    candidate: _pulseon.ObjectiveEvidence,
+) -> dict[str, object]:
+    return {
+        "metric_key": metric_key,
+        "candidate": _evidence_document(candidate),
+        "reference": None,
+        "completeness": "unavailable",
+        "raw_delta": None,
+        "relative_delta": None,
+    }
+
+
+def _render_insufficient_comparison(
+    primary: _pulseon.ObjectiveEvidence,
+    secondary: Sequence[tuple[str, _pulseon.ObjectiveEvidence]],
+    metric_key: str,
+    direction: str,
+    output_format: str,
+) -> str:
+    reason = "no_eligible_incumbent"
+    if output_format == "table":
+        rows: list[tuple[object, ...]] = [
+            (
+                "primary",
+                primary.run_id,
+                "-",
+                metric_key,
+                primary.last_value_f64,
+                primary.completeness,
+                ",".join(primary.reasons) or "-",
+                "unavailable",
+                reason,
+                "inconclusive",
+            )
+        ]
+        rows.extend(
+            (
+                "secondary",
+                evidence.run_id,
+                "-",
+                key,
+                evidence.last_value_f64,
+                evidence.completeness,
+                ",".join(evidence.reasons) or "-",
+                "unavailable",
+                reason,
+                "inconclusive",
+            )
+            for key, evidence in secondary
+        )
+        return _render_table(
+            (
+                "KIND",
+                "CANDIDATE",
+                "INCUMBENT",
+                "METRIC",
+                "CANDIDATE_LAST",
+                "EVIDENCE",
+                "EVIDENCE_REASONS",
+                "COMPLETENESS",
+                "REPORT_REASONS",
+                "PREFERENCE",
+            ),
+            rows,
+        )
+    primary_document = _unresolved_metric_document(metric_key, primary)
+    primary_document.update(
+        {
+            "direction": direction,
+            "normalized_improvement": None,
+            "outcome": None,
+            "preference": "inconclusive",
+        }
+    )
+    return _dump_json(
+        {
+            "schema_version": _JSON_SCHEMA_VERSION,
+            "kind": "comparison_reports",
+            "data": [
+                {
+                    "candidate_run_id": primary.run_id,
+                    "primary": primary_document,
+                    "secondary": [
+                        _unresolved_metric_document(key, evidence)
+                        for key, evidence in secondary
+                    ],
+                    "completeness": "unavailable",
+                    "reasons": [reason],
+                    "preference": "inconclusive",
+                }
+            ],
+            "page": None,
+            "meta": {"reference_role": "incumbent"},
+        }
+    )
+
+
+def _evidence_document(evidence: _pulseon.ObjectiveEvidence) -> dict[str, object]:
+    return {
+        "run_id": evidence.run_id,
+        "run_status": evidence.run_status,
+        "last_step": evidence.last_step,
+        "last_value": evidence.last_value_f64,
+        "completeness": evidence.completeness,
+        "reasons": evidence.reasons,
+    }
+
+
+def _primary_document(result: _pulseon.ComparisonResult) -> dict[str, object]:
+    return {
+        "metric_key": result.objective.metric_key,
+        "direction": result.objective.direction,
+        "candidate": _evidence_document(result.candidate),
+        "reference": _evidence_document(result.reference),
+        "completeness": result.completeness,
+        "raw_delta": result.raw_delta,
+        "relative_delta": result.relative_delta,
+        "normalized_improvement": result.normalized_improvement,
+        "outcome": result.outcome,
+        "preference": result.preference,
+    }
+
+
+def _secondary_document(
+    result: _pulseon._MetricComparisonResult,
+) -> dict[str, object]:
+    return {
+        "metric_key": result.metric_key,
+        "candidate": _evidence_document(result.candidate),
+        "reference": _evidence_document(result.reference),
+        "completeness": result.completeness,
+        "raw_delta": result.raw_delta,
+        "relative_delta": result.relative_delta,
+    }
+
+
+def _comparison_rows(
+    report: _pulseon._ComparisonReport,
+) -> list[tuple[object, ...]]:
+    primary = report.primary
+    primary_reasons = ",".join(
+        (*primary.candidate.reasons, *primary.reference.reasons)
+    )
+    rows: list[tuple[object, ...]] = [
+        (
+            "primary",
+            primary.candidate.run_id,
+            primary.reference.run_id,
+            primary.objective.metric_key,
+            primary.candidate.last_value_f64,
+            primary.reference.last_value_f64,
+            primary.raw_delta,
+            primary.relative_delta,
+            primary.normalized_improvement,
+            primary.completeness,
+            primary_reasons or "-",
+            primary.outcome,
+            primary.preference,
+        )
+    ]
+    rows.extend(
+        (
+            "secondary",
+            item.candidate.run_id,
+            item.reference.run_id,
+            item.metric_key,
+            item.candidate.last_value_f64,
+            item.reference.last_value_f64,
+            item.raw_delta,
+            item.relative_delta,
+            "-",
+            item.completeness,
+            ",".join((*item.candidate.reasons, *item.reference.reasons)) or "-",
+            "-",
+            "-",
+        )
+        for item in report.secondary
+    )
+    return rows
+
+
+def _render_comparison_reports(
+    reports: Sequence[_pulseon._ComparisonReport],
+    output_format: str,
+    *,
+    reference_role: str,
+) -> str:
+    if output_format == "table":
+        headers = (
+            "KIND",
+            "CANDIDATE",
+            reference_role.upper(),
+            "METRIC",
+            "CANDIDATE_LAST",
+            "REFERENCE_LAST",
+            "RAW_DELTA",
+            "RELATIVE_DELTA",
+            "IMPROVEMENT",
+            "COMPLETENESS",
+            "REASONS",
+            "OUTCOME",
+            "PREFERENCE",
+        )
+        rows = [row for report in reports for row in _comparison_rows(report)]
+        return _render_table(headers, rows)
+    return _dump_json(
+        {
+            "schema_version": _JSON_SCHEMA_VERSION,
+            "kind": "comparison_reports",
+            "data": [
+                {
+                    "primary": _primary_document(report.primary),
+                    "secondary": [
+                        _secondary_document(item) for item in report.secondary
+                    ],
+                }
+                for report in reports
+            ],
+            "page": None,
+            "meta": {"reference_role": reference_role},
+        }
     )
 
 

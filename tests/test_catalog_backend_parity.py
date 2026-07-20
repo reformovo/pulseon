@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
+from typing import Literal
 
 import pytest
 
 from tests import helpers
 
-_CATALOG_BACKENDS = ("duckdb", "sqlite")
+_CatalogBackend = Literal["duckdb", "sqlite"]
+_CATALOG_BACKENDS: tuple[_CatalogBackend, ...] = ("duckdb", "sqlite")
 
 
 @pytest.mark.parametrize("catalog_backend", _CATALOG_BACKENDS)
 def test_catalog_backend_round_trips_native_storage_workflow(
     tmp_path: pathlib.Path,
-    catalog_backend: str,
+    catalog_backend: _CatalogBackend,
 ) -> None:
     import pulseon
 
@@ -115,7 +117,7 @@ def test_catalog_backend_round_trips_native_storage_workflow(
 @pytest.mark.parametrize("terminal_method", ["finish_run", "fail_run"])
 def test_short_run_metrics_flush_from_inline_to_parquet(
     tmp_path: pathlib.Path,
-    catalog_backend: str,
+    catalog_backend: _CatalogBackend,
     terminal_method: str,
 ) -> None:
     import pulseon
@@ -161,26 +163,22 @@ def test_short_run_metrics_flush_from_inline_to_parquet(
 @pytest.mark.parametrize("catalog_backend", _CATALOG_BACKENDS)
 def test_catalog_backend_rejects_invalid_local_storage_configuration(
     tmp_path: pathlib.Path,
-    catalog_backend: str,
+    catalog_backend: _CatalogBackend,
 ) -> None:
     import pulseon
 
-    invalid_kwargs = [
-        {"data_path": "http://bucket/pulseon"},
-    ]
-    for index, kwargs in enumerate(invalid_kwargs):
-        with pytest.raises(pulseon.InvalidConfigurationError):
-            pulseon.init(
-                tmp_path / catalog_backend / f"pulseon-{index}",
-                catalog_backend=catalog_backend,
-                **kwargs,
-            )
+    with pytest.raises(pulseon.InvalidConfigurationError):
+        pulseon.init(
+            tmp_path / catalog_backend / "pulseon",
+            catalog_backend=catalog_backend,
+            data_path="http://bucket/pulseon",
+        )
 
 
 @pytest.mark.parametrize("catalog_backend", _CATALOG_BACKENDS)
 def test_catalog_backend_rejects_s3_catalog_path(
     tmp_path: pathlib.Path,
-    catalog_backend: str,
+    catalog_backend: _CatalogBackend,
 ) -> None:
     import pulseon
 
@@ -239,7 +237,10 @@ def test_unknown_catalog_backend_is_rejected(tmp_path: pathlib.Path) -> None:
     import pulseon
 
     with pytest.raises(pulseon.InvalidConfigurationError, match="postgres"):
-        pulseon.init(tmp_path / "pulseon", catalog_backend="postgres")
+        pulseon.init(
+            tmp_path / "pulseon",
+            catalog_backend="postgres",  # type: ignore[reportArgumentType]
+        )
 
 
 def _sqlite_table_names(catalog_path: pathlib.Path) -> set[str]:

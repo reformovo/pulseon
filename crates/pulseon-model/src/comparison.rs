@@ -105,6 +105,24 @@ pub struct ComparisonResult {
     pub preference: ComparisonPreference,
 }
 
+/// One candidate's primary comparison plus ordered secondary evidence.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComparisonReport {
+    pub primary: ComparisonResult,
+    pub secondary: Vec<MetricComparisonResult>,
+}
+
+/// Direction-free scalar comparison for a secondary metric.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetricComparisonResult {
+    pub metric_key: MetricKey,
+    pub candidate: ObjectiveEvidence,
+    pub reference: ObjectiveEvidence,
+    pub completeness: EvidenceCompleteness,
+    pub raw_delta: Option<f64>,
+    pub relative_delta: Option<f64>,
+}
+
 /// One Run's objective evidence and optional competition rank.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RankingEntry {

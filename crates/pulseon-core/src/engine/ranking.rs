@@ -18,6 +18,25 @@ struct RankingCandidate {
 }
 
 impl NativeClient {
+    /// Selects the direction-aware best eligible Run from an explicit pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::DuplicateRunIdentity`] for repeated Run IDs or a
+    /// lookup/storage error when pool evidence cannot be read.
+    pub fn best_eligible_run(
+        &self,
+        run_ids: &[RunId],
+        objective: &ObjectiveMetric,
+    ) -> Result<Option<RunId>, EngineError> {
+        Ok(self
+            .rank_runs(run_ids, objective)?
+            .entries
+            .into_iter()
+            .find(|entry| entry.rank == Some(1))
+            .map(|entry| entry.evidence.run_id))
+    }
+
     /// Ranks Runs by a request-scoped objective while retaining ineligible Runs.
     ///
     /// # Errors
@@ -197,5 +216,25 @@ mod tests {
                 ("missing", None)
             ]
         );
+    }
+
+    #[test]
+    fn best_selection_returns_none_without_eligible_evidence() {
+        let objective = ObjectiveMetric {
+            metric_key: MetricKey::from_string("loss"),
+            direction: ObjectiveDirection::Minimize,
+        };
+        let result = rank_candidates(
+            &objective,
+            vec![candidate(
+                "failed",
+                Some(0.5),
+                EvidenceCompleteness::Partial,
+                Utc::now(),
+                0,
+            )],
+        );
+
+        assert!(result.entries.iter().all(|entry| entry.rank.is_none()));
     }
 }
