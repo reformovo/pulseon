@@ -258,6 +258,95 @@ def test_cli_autoresearch_compare_rejects_candidate_in_pool(
     assert "candidate must not be a comparator" in capsys.readouterr().err
 
 
+def test_cli_comparison_reports_partial_and_per_metric_evidence(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("evidence", project_id="project-1")
+    run_ids = ("baseline", "running", "failed", "missing", "invalid-secondary")
+    runs = {
+        run_id: client.create_run(project.project_id, run_id, run_id)
+        for run_id in run_ids
+    }
+    runs["baseline"].log("loss", 0, 2.0)
+    runs["baseline"].log("memory", 0, 10.0)
+    client.finish_run("baseline")
+    runs["running"].log("loss", 0, 1.0)
+    runs["running"].log("memory", 0, 5.0)
+    helpers.wait_for_metric_points(client, "running", "memory", expected_count=1)
+    runs["failed"].log("loss", 0, 3.0)
+    client.fail_run("failed")
+    runs["missing"].log("memory", 0, 20.0)
+    client.finish_run("missing")
+    runs["invalid-secondary"].log("loss", 0, 4.0)
+    runs["invalid-secondary"].log("memory", 0, math.inf)
+    client.finish_run("invalid-secondary")
+    client.shutdown()
+
+    status = cli.main(
+        [
+            "--path", str(root_path), "--format", "json", "metrics", "compare",
+            "loss", "running", "baseline", "failed", "missing",
+            "invalid-secondary", "--baseline", "baseline", "--direction",
+            "minimize", "--secondary", "memory",
+        ]
+    )
+
+    assert status == 0
+    data = json.loads(capsys.readouterr().out)["data"]
+    reports = {item["primary"]["candidate"]["run_id"]: item for item in data}
+    running = reports["running"]["primary"]
+    assert running["completeness"] == "partial"
+    assert running["outcome"] == "improved"
+    assert running["preference"] == "inconclusive"
+    assert running["candidate"]["reasons"] == ["run_running"]
+    failed = reports["failed"]["primary"]
+    assert failed["completeness"] == "partial"
+    assert failed["outcome"] == "regressed"
+    assert failed["candidate"]["reasons"] == ["run_failed"]
+    missing = reports["missing"]["primary"]
+    assert missing["completeness"] == "unavailable"
+    assert missing["candidate"]["reasons"] == ["missing_metric"]
+    invalid = reports["invalid-secondary"]
+    assert invalid["primary"]["preference"] == "reference"
+    assert invalid["secondary"][0]["completeness"] == "invalid"
+    assert invalid["secondary"][0]["candidate"]["last_value"] == "Infinity"
+    assert invalid["secondary"][0]["candidate"]["reasons"] == [
+        "non_finite_value"
+    ]
+
+
+def test_cli_comparison_reports_reject_unknown_run(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("evidence", project_id="project-1")
+    baseline = client.create_run(project.project_id, "baseline", "baseline")
+    baseline.log("loss", 0, 1.0)
+    client.finish_run("baseline")
+    client.shutdown()
+
+    status = cli.main(
+        [
+            "--path", str(root_path), "--format", "json", "metrics", "compare",
+            "loss", "unknown", "baseline", "--baseline", "baseline",
+            "--direction", "minimize",
+        ]
+    )
+
+    assert status == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error == {"code": "storage_error", "message": "run not found: unknown"}
+
+
 def test_cli_missing_store_fails_without_creating_it(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
