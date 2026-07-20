@@ -1,12 +1,43 @@
 use crate::engine::EngineError;
 use crate::engine::client::NativeClient;
 use crate::model::comparison::{
-    ComparisonOutcome, ComparisonPreference, ComparisonResult, EvidenceCompleteness,
-    ObjectiveEvidence, ObjectiveMetric,
+    ComparisonOutcome, ComparisonPreference, ComparisonReport, ComparisonResult,
+    EvidenceCompleteness, ObjectiveEvidence, ObjectiveMetric,
 };
 use crate::model::run::RunId;
 
 impl NativeClient {
+    /// Builds primary comparison reports in candidate request order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::DuplicateRunIdentity`] for repeated candidate
+    /// IDs or when the reference is also a candidate. Unknown Run IDs and
+    /// storage failures are returned from the shared evidence query.
+    pub fn comparison_reports(
+        &self,
+        candidate_run_ids: &[RunId],
+        reference_run_id: &RunId,
+        objective: &ObjectiveMetric,
+    ) -> Result<Vec<ComparisonReport>, EngineError> {
+        let mut request_run_ids = Vec::with_capacity(candidate_run_ids.len() + 1);
+        request_run_ids.push(reference_run_id.clone());
+        request_run_ids.extend_from_slice(candidate_run_ids);
+        reject_duplicate_run_ids(&request_run_ids)?;
+
+        let mut evidence = self
+            .ranking_evidence(&request_run_ids, objective)?
+            .into_iter();
+        let Some((_, reference)) = evidence.next() else {
+            return Ok(Vec::new());
+        };
+        Ok(build_reports(
+            objective,
+            reference,
+            evidence.map(|(_, candidate)| candidate),
+        ))
+    }
+
     /// Compares two Runs using their last effective objective values.
     ///
     /// # Errors
@@ -28,6 +59,32 @@ impl NativeClient {
         let reference = self.objective_evidence(reference_run_id, objective)?;
         Ok(compare_evidence(objective, candidate, reference))
     }
+}
+
+fn build_reports(
+    objective: &ObjectiveMetric,
+    reference: ObjectiveEvidence,
+    candidates: impl IntoIterator<Item = ObjectiveEvidence>,
+) -> Vec<ComparisonReport> {
+    candidates
+        .into_iter()
+        .map(|candidate| ComparisonReport {
+            primary: compare_evidence(objective, candidate, reference.clone()),
+            secondary: Vec::new(),
+        })
+        .collect()
+}
+
+fn reject_duplicate_run_ids(run_ids: &[RunId]) -> Result<(), EngineError> {
+    let mut seen = std::collections::HashSet::with_capacity(run_ids.len());
+    for run_id in run_ids {
+        if !seen.insert(run_id) {
+            return Err(EngineError::DuplicateRunIdentity {
+                run_id: run_id.as_str().to_owned(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn compare_evidence(
@@ -143,5 +200,37 @@ mod tests {
 
         assert_eq!(result.outcome, Some(ComparisonOutcome::Improved));
         assert_eq!(result.preference, ComparisonPreference::Inconclusive);
+    }
+
+    #[test]
+    fn reports_preserve_candidate_order() {
+        let reports = build_reports(
+            &objective(ObjectiveDirection::Minimize),
+            evidence("reference", 4.0, EvidenceCompleteness::Complete),
+            [
+                evidence("candidate-b", 2.0, EvidenceCompleteness::Complete),
+                evidence("candidate-a", 3.0, EvidenceCompleteness::Complete),
+            ],
+        );
+
+        assert_eq!(
+            reports
+                .iter()
+                .map(|report| report.primary.candidate.run_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["candidate-b", "candidate-a"]
+        );
+        assert!(reports.iter().all(|report| report.secondary.is_empty()));
+    }
+
+    #[test]
+    fn report_request_rejects_reference_as_candidate() {
+        let run_id = RunId::from_string("same");
+        let error = reject_duplicate_run_ids(&[run_id.clone(), run_id]).unwrap_err();
+
+        assert!(
+            matches!(error, EngineError::DuplicateRunIdentity { ref run_id } if run_id == "same"),
+            "expected duplicate Run error, got {error:?}",
+        );
     }
 }

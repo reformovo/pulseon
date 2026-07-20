@@ -18,6 +18,8 @@ Ordinary metric queries remain half-open. Aligned metric queries use a closed vi
 | Completeness | The four-state assessment `complete`, `partial`, `unavailable`, or `invalid`. |
 | Outcome | The numeric objective relationship `improved`, `regressed`, or `equal`. |
 | Preference | Compute-only advice: `candidate`, `reference`, `no_preference`, or `inconclusive`. |
+| Comparison report | One candidate/reference primary comparison plus ordered secondary metric evidence. |
+| Secondary metric | A requested metric reported as supporting evidence without affecting objective outcome or preference. |
 
 Candidate and reference are request roles. Baseline is an explicitly requested reference; incumbent is the reference role in an autoresearch view.
 None is a stored Run identity or lifecycle state, and one Run may occupy different roles in different requests.
@@ -55,6 +57,15 @@ Direction-normalized improvement is `raw` for maximize and `-raw` for minimize; 
 
 With complete evidence from two finished Runs, those outcomes prefer candidate, reference, and `no_preference`, respectively.
 Partial, unavailable, invalid, running, or failed evidence is `inconclusive`; available partial values may still produce a numeric outcome. Secondary metrics never affect outcome or preference.
+
+A generic report uses an explicitly requested reference and preserves candidate
+request order. An autoresearch view calls that reference the incumbent, which
+is either explicit or selected from an explicit comparator pool. Roles are not
+inferred from Project history. Reported secondary metrics preserve request
+order and expose last values, raw and relative deltas, completeness, and
+reasons, but have no objective direction, normalized improvement, outcome, or
+preference. Each metric item owns its completeness; unavailable or invalid
+secondary evidence does not downgrade the primary comparison preference.
 
 | Scenario | Result |
 | --- | --- |
