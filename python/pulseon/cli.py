@@ -96,6 +96,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--direction", choices=("minimize", "maximize"), required=True
     )
     metrics_compare.add_argument("--secondary", action="append", default=[])
+
+    autoresearch = resources.add_parser("autoresearch")
+    autoresearch_actions = autoresearch.add_subparsers(dest="action", required=True)
+    autoresearch_compare = autoresearch_actions.add_parser("compare")
+    autoresearch_compare.add_argument("candidate_run_id")
+    autoresearch_compare.add_argument("--metric", required=True)
+    autoresearch_compare.add_argument(
+        "--direction", choices=("minimize", "maximize"), required=True
+    )
+    reference = autoresearch_compare.add_mutually_exclusive_group(required=True)
+    reference.add_argument("--against")
+    reference.add_argument("--comparator", action="append")
+    autoresearch_compare.add_argument("--secondary", action="append", default=[])
     return parser
 
 
@@ -121,8 +134,21 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def _validate_args(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> None:
-    if args.resource != "metrics" or args.action != "compare":
+    if args.action != "compare":
         return
+    if args.resource == "metrics":
+        _validate_metrics_compare(parser, args)
+        return
+    references = [args.against] if args.against is not None else args.comparator
+    if len(set(references)) != len(references):
+        parser.error("autoresearch comparator Run IDs must be unique")
+    if args.candidate_run_id in references:
+        parser.error("autoresearch candidate must not be a comparator")
+
+
+def _validate_metrics_compare(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
     if len(set(args.run_ids)) != len(args.run_ids):
         parser.error("metrics compare Run IDs must be unique")
     if args.baseline not in args.run_ids:
@@ -285,6 +311,8 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
                 "has_more": has_more,
             },
         )
+    if args.resource == "autoresearch":
+        return _run_autoresearch_compare(client, args)
     if args.action == "list":
         metrics = client.list_metrics(args.run_id)
         return _render_summaries(
@@ -338,6 +366,58 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
         secondary_metric_keys=args.secondary,
     )
     return _render_comparison_reports(reports, args.format, reference_role="baseline")
+
+
+def _run_autoresearch_compare(
+    client: _pulseon.Client, args: argparse.Namespace
+) -> str:
+    incumbent = args.against
+    if incumbent is None:
+        client.get_run(args.candidate_run_id)
+        incumbent = client._best_eligible_run(
+            args.comparator,
+            metric_key=args.metric,
+            direction=args.direction,
+        )
+        if incumbent is None:
+            return _render_insufficient_comparison(args.candidate_run_id, args.format)
+    reports = client._comparison_reports(
+        [args.candidate_run_id],
+        incumbent,
+        metric_key=args.metric,
+        direction=args.direction,
+        secondary_metric_keys=args.secondary,
+    )
+    return _render_comparison_reports(
+        reports, args.format, reference_role="incumbent"
+    )
+
+
+def _render_insufficient_comparison(candidate_run_id: str, output_format: str) -> str:
+    reason = "no_eligible_incumbent"
+    if output_format == "table":
+        return _render_table(
+            ("CANDIDATE", "INCUMBENT", "COMPLETENESS", "REASONS", "PREFERENCE"),
+            ((candidate_run_id, "-", "unavailable", reason, "inconclusive"),),
+        )
+    return _dump_json(
+        {
+            "schema_version": _JSON_SCHEMA_VERSION,
+            "kind": "comparison_reports",
+            "data": [
+                {
+                    "candidate_run_id": candidate_run_id,
+                    "primary": None,
+                    "secondary": [],
+                    "completeness": "unavailable",
+                    "reasons": [reason],
+                    "preference": "inconclusive",
+                }
+            ],
+            "page": None,
+            "meta": {"reference_role": "incumbent"},
+        }
+    )
 
 
 def _evidence_document(evidence: _pulseon.ObjectiveEvidence) -> dict[str, object]:

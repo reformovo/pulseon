@@ -169,6 +169,95 @@ def test_cli_comparison_rejects_invalid_run_sets(
     assert message in capsys.readouterr().err
 
 
+def test_cli_autoresearch_compare_uses_explicit_or_best_incumbent(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("research", project_id="project-1")
+    runs = [
+        client.create_run(project.project_id, name, run_id=name)
+        for name in ("candidate", "best", "worse")
+    ]
+    for run, value in zip(runs, (2.0, 1.0, 3.0), strict=True):
+        run.log("loss", 0, value)
+        client.finish_run(run.run_id)
+    client.shutdown()
+    base = ["--path", str(root_path), "--format", "json", "autoresearch", "compare"]
+
+    explicit = [
+        *base, "candidate", "--metric", "loss", "--direction", "minimize",
+        "--against", "worse",
+    ]
+    assert cli.main(explicit) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["data"][0]["primary"]["reference"]["run_id"] == "worse"
+
+    pooled = [
+        *base, "candidate", "--metric", "loss", "--direction", "minimize",
+        "--comparator", "worse", "--comparator", "best",
+    ]
+    assert cli.main(pooled) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["data"][0]["primary"]["reference"]["run_id"] == "best"
+    assert document["meta"] == {"reference_role": "incumbent"}
+
+    pooled[pooled.index("minimize")] = "maximize"
+    assert cli.main(pooled) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["data"][0]["primary"]["reference"]["run_id"] == "worse"
+
+
+def test_cli_autoresearch_compare_reports_no_eligible_incumbent(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("research", project_id="project-1")
+    candidate = client.create_run(project.project_id, "candidate", "candidate")
+    candidate.log("loss", 0, 1.0)
+    client.finish_run(candidate.run_id)
+    running = client.create_run(project.project_id, "running", "running")
+    running.log("loss", 0, 0.5)
+    helpers.wait_for_metric_points(client, running.run_id, "loss", expected_count=1)
+    client.shutdown()
+
+    status = cli.main(
+        [
+            "--path", str(root_path), "--format", "json", "autoresearch",
+            "compare", "candidate", "--metric", "loss", "--direction", "minimize",
+            "--comparator", "running",
+        ]
+    )
+
+    assert status == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["data"][0]["primary"] is None
+    assert document["data"][0]["reasons"] == ["no_eligible_incumbent"]
+    assert document["data"][0]["preference"] == "inconclusive"
+
+
+def test_cli_autoresearch_compare_rejects_candidate_in_pool(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as error_info:
+        cli.main(
+            [
+                "autoresearch", "compare", "candidate", "--metric", "loss",
+                "--direction", "minimize", "--comparator", "candidate",
+            ]
+        )
+
+    assert error_info.value.code == 2
+    assert "candidate must not be a comparator" in capsys.readouterr().err
+
+
 def test_cli_missing_store_fails_without_creating_it(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
