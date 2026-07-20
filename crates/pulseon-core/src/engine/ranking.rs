@@ -219,6 +219,32 @@ mod tests {
     }
 
     #[test]
+    fn ranking_maximizes_and_breaks_exact_ties_by_run_id() {
+        let now = Utc::now();
+        let objective = ObjectiveMetric {
+            metric_key: MetricKey::from_string("accuracy"),
+            direction: ObjectiveDirection::Maximize,
+        };
+        let result = rank_candidates(
+            &objective,
+            vec![
+                candidate("zeta", Some(2.0), EvidenceCompleteness::Complete, now, 0),
+                candidate("lower", Some(1.0), EvidenceCompleteness::Complete, now, 1),
+                candidate("alpha", Some(2.0), EvidenceCompleteness::Complete, now, 2),
+            ],
+        );
+
+        assert_eq!(
+            result
+                .entries
+                .iter()
+                .map(|entry| (entry.evidence.run_id.as_str(), entry.rank))
+                .collect::<Vec<_>>(),
+            vec![("alpha", Some(1)), ("zeta", Some(1)), ("lower", Some(3))]
+        );
+    }
+
+    #[test]
     fn best_selection_returns_none_without_eligible_evidence() {
         let objective = ObjectiveMetric {
             metric_key: MetricKey::from_string("loss"),

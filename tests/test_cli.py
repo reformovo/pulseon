@@ -72,7 +72,7 @@ def test_cli_discovers_running_metric_points_through_all_read_commands(
     for (argv, _), kind in zip(commands, kinds, strict=True):
         assert cli.main(["--format", "json", *argv]) == 0
         document = json.loads(capsys.readouterr().out)
-        assert document["schema_version"] == 1
+        assert document["schema_version"] == 2
         assert document["kind"] == kind
         assert isinstance(document["data"], list)
         assert "page" in document
@@ -396,7 +396,7 @@ def test_cli_json_operation_errors_are_structured(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert json.loads(captured.err) == {
-        "schema_version": 1,
+        "schema_version": 2,
         "error": {
             "code": "storage_error",
             "message": "catalog not found: catalog.ducklake",
@@ -441,7 +441,7 @@ def test_cli_resolves_global_path_overrides_against_project(
 
     assert status == 0
     assert json.loads(capsys.readouterr().out) == {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "projects",
         "data": [
             {
@@ -477,7 +477,7 @@ def test_cli_json_includes_pagination_and_metric_query_metadata(
         [*global_args, "runs", "list", "project-1", "--limit", "1"]
     ) == 0
     runs_document = json.loads(capsys.readouterr().out)
-    assert runs_document["schema_version"] == 1
+    assert runs_document["schema_version"] == 2
     assert runs_document["kind"] == "runs"
     assert len(runs_document["data"]) == 1
     assert runs_document["page"] == {
@@ -492,7 +492,7 @@ def test_cli_json_includes_pagination_and_metric_query_metadata(
         [*global_args, "metrics", "query", "run-1", "loss"]
     ) == 0
     query_document = json.loads(capsys.readouterr().out)
-    assert query_document["schema_version"] == 1
+    assert query_document["schema_version"] == 2
     assert query_document["kind"] == "metric_points"
     assert query_document["page"] is None
     assert query_document["meta"] == {
@@ -664,7 +664,7 @@ def test_cli_json_usage_errors_are_structured(
     captured = capsys.readouterr()
     assert captured.out == ""
     document = json.loads(captured.err)
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == 2
     assert document["error"]["code"] == "cli_usage_error"
     assert "expected a non-negative integer" in document["error"]["message"]
     assert "usage:" not in captured.err
@@ -677,6 +677,16 @@ def test_cli_table_output_is_deterministic_and_uncolored() -> None:
     assert first == "STEP  VALUE\n----  -----\n0     0.5\n10    0.25"
     assert second == first
     assert "\x1b" not in first
+
+
+def test_cli_json_output_is_deterministic() -> None:
+    document = {"schema_version": 2, "data": [{"run_id": "run-1"}]}
+
+    first = cli._dump_json(document)
+    second = cli._dump_json(document)
+
+    assert first == second
+    assert first == '{"data":[{"run_id":"run-1"}],"schema_version":2}'
 
 
 def test_cli_keeps_s3_credentials_out_of_arguments() -> None:

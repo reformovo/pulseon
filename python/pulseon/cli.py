@@ -14,7 +14,7 @@ import sys
 
 from pulseon import _pulseon
 
-_JSON_SCHEMA_VERSION = 1
+_JSON_SCHEMA_VERSION = 2
 _LTTB_AUTO_INSTALL_ENV = "PULSEON_LTTB_AUTO_INSTALL"
 _LTTB_ERROR_PREFIX = "DuckDB LTTB extension is unavailable:"
 _OPERATION_ERROR_CODES = {
