@@ -70,6 +70,22 @@ When an explicit comparator pool contains no eligible incumbent, the
 autoresearch view returns unavailable evidence with `no_eligible_incumbent`
 and an inconclusive preference. It does not infer another Run or mutate state.
 
+## Ranking and Machine Output
+
+Ranking is scoped to a required Project and optionally to an explicit Run
+subset. Only finished Runs with complete, finite objective evidence are
+eligible. Direction-aware competition ranks use `1, 1, 3`; exact ties share a
+rank, while selecting one best Run prefers earlier `created_at` and then
+lexical `run_id`. Ineligible Runs remain visible with a null rank and their
+structured evidence reasons. An empty eligible set successfully returns no
+best Run.
+
+Leaderboard ranks are computed over the full selected set before limit/offset
+pagination. CLI machine output uses JSON schema version 2 with deterministic
+kinds and ordering. Non-finite values are represented as JSON strings, and a
+relative delta remains null when its reference is zero. Aligned curve points
+remain available only through the typed Rust and Python read APIs.
+
 | Scenario | Result |
 | --- | --- |
 | Steps `0,1,2` / `-1,0,1` | Valid raw-step axis / invalid negative axis. |

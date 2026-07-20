@@ -136,6 +136,7 @@ def test_cli_comparison_reports_require_baseline_and_preserve_candidate_order(
         "throughput",
     ]
     assert document["data"][0]["secondary"][0]["raw_delta"] == -20.0
+    assert "points" not in json.dumps(document)
 
 
 @pytest.mark.parametrize(
@@ -333,9 +334,9 @@ def test_cli_autoresearch_leaderboard_paginates_after_ranking(
     root_path = tmp_path / "project"
     client = pulseon.init(root_path)
     project = client.create_project("research", project_id="project-1")
-    for index, value in enumerate((4.0, 3.0, 2.0, 1.0)):
+    for index in range(51):
         run = client.create_run(project.project_id, str(index), run_id=f"run-{index}")
-        run.log("score", 0, value)
+        run.log("score", 0, float(51 - index))
         client.finish_run(run.run_id)
     client.shutdown()
     base = [
@@ -352,7 +353,88 @@ def test_cli_autoresearch_leaderboard_paginates_after_ranking(
     }
 
     assert cli.main(base) == 0
-    assert json.loads(capsys.readouterr().out)["page"]["limit"] == 50
+    document = json.loads(capsys.readouterr().out)
+    assert len(document["data"]) == 50
+    assert document["page"]["limit"] == 50
+    assert document["page"]["has_more"] is True
+
+
+def test_cli_autoresearch_best_uses_stable_tie_break_and_returns_null(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("research", project_id="project-1")
+    for run_id, value in (("zeta", 1.0), ("alpha", 1.0), ("worse", 2.0)):
+        run = client.create_run(project.project_id, run_id, run_id=run_id)
+        run.log("loss", 0, value)
+        client.finish_run(run_id)
+    failed = client.create_run(project.project_id, "failed", run_id="failed")
+    failed.log("loss", 0, 0.5)
+    client.fail_run(failed.run_id)
+    client.create_project("empty", project_id="project-2")
+    client.shutdown()
+    base = [
+        "--path", str(root_path), "--format", "json", "autoresearch", "best",
+        "project-1", "--metric", "loss", "--direction", "minimize",
+    ]
+
+    assert cli.main(base) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["kind"] == "autoresearch_best"
+    assert document["data"]["best"]["evidence"]["run_id"] == "zeta"
+
+    assert cli.main([*base, "--run", "failed"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["data"] == {"best": None}
+    assert document["meta"]["eligible_entries"] == 0
+
+    empty = [*base]
+    empty[empty.index("project-1")] = "project-2"
+    assert cli.main(empty) == 0
+    assert json.loads(capsys.readouterr().out)["data"] == {"best": None}
+    table_command = [*empty]
+    format_index = table_command.index("--format")
+    del table_command[format_index : format_index + 2]
+    assert cli.main(table_command) == 0
+    assert capsys.readouterr().out == "No eligible Run.\n"
+
+
+def test_cli_autoresearch_ranking_rejects_invalid_run_scopes(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    client.create_project("first", project_id="project-1")
+    second = client.create_project("second", project_id="project-2")
+    client.create_run(second.project_id, "foreign", run_id="foreign")
+    client.shutdown()
+    base = [
+        "--path", str(root_path), "--format", "json", "autoresearch",
+        "leaderboard", "project-1", "--metric", "loss", "--direction", "minimize",
+    ]
+
+    assert cli.main([*base, "--run", "foreign"]) == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["code"] == "run_project_mismatch"
+    assert cli.main([*base, "--run", "unknown"]) == 1
+    assert json.loads(capsys.readouterr().err)["error"]["code"] == "storage_error"
+
+    with pytest.raises(SystemExit) as error_info:
+        cli.main([*base, "--run", "foreign", "--run", "foreign"])
+    assert error_info.value.code == 2
+    assert json.loads(capsys.readouterr().err)["error"]["code"] == "cli_usage_error"
+
+    with pytest.raises(SystemExit) as error_info:
+        cli.main([*base, "--all", "--offset", "1"])
+    assert error_info.value.code == 2
+    assert "--all cannot be combined" in capsys.readouterr().err
 
 
 def test_cli_comparison_reports_partial_and_per_metric_evidence(
@@ -763,13 +845,19 @@ def test_cli_table_output_is_deterministic_and_uncolored() -> None:
 
 
 def test_cli_json_output_is_deterministic() -> None:
-    document = {"schema_version": 2, "data": [{"run_id": "run-1"}]}
+    document = {
+        "schema_version": 2,
+        "data": [{"run_id": "run-1", "relative_delta": None}],
+    }
 
     first = cli._dump_json(document)
     second = cli._dump_json(document)
 
     assert first == second
-    assert first == '{"data":[{"run_id":"run-1"}],"schema_version":2}'
+    assert first == (
+        '{"data":[{"relative_delta":null,"run_id":"run-1"}],'
+        '"schema_version":2}'
+    )
 
 
 def test_cli_keeps_s3_credentials_out_of_arguments() -> None:

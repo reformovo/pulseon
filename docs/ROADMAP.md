@@ -116,17 +116,17 @@ the pre-1.0 CLI JSON envelope with version 2.
 
 #### Phase 2E: Ranking and Machine Output
 
-- [ ] Add `autoresearch leaderboard` and `autoresearch best` over a required
+- [x] Add `autoresearch leaderboard` and `autoresearch best` over a required
   Project with an optional explicit Run subset. Only finished Runs with a
   finite primary objective are eligible; other Runs remain visible with a null
   rank and structured reason.
-- [ ] Use direction-aware competition ranking (`1, 1, 3`). Exact ties share a
+- [x] Use direction-aware competition ranking (`1, 1, 3`). Exact ties share a
   rank; selecting one best/incumbent prefers the earlier `created_at`, then
   lexical `run_id`. An empty eligible set is a successful `best = null` result.
-- [ ] Default leaderboard output to 50 entries with limit/offset pagination and
+- [x] Default leaderboard output to 50 entries with limit/offset pagination and
   an explicit all-results option. Compute ranks over the full eligible set
   before pagination.
-- [ ] Bump every CLI success and error JSON envelope to schema version 2. Keep
+- [x] Bump every CLI success and error JSON envelope to schema version 2. Keep
   deterministic kinds, ordering, reason codes, pagination metadata, standard
   JSON encoding for non-finite metric values, and null relative deltas when the
   reference is zero. CLI comparison output stays bounded evidence; aligned
@@ -134,15 +134,15 @@ the pre-1.0 CLI JSON envelope with version 2.
 
 #### Phase 2 Validation Gates
 
-- [ ] Preserve the native storage and crate dependency boundaries, effective
+- [x] Preserve the native storage and crate dependency boundaries, effective
   last-write-wins series, half-open ordinary step queries, Parquet schema, and
   non-blocking metric-reporting contract.
-- [ ] Cover native/Parquet alignment parity, negative and decreasing elapsed
+- [x] Cover native/Parquet alignment parity, negative and decreasing elapsed
   axes, missing Run starts, viewport neighbors, screen budgets, both objective
   directions, zero/non-finite values, partial Runs, cross-Project pairs,
   incumbent pools, ranking ties, empty best, pagination, typed Python use, and
   deterministic JSON.
-- [ ] Pass `cargo check`, `cargo test`, `uv run maturin develop --uv`,
+- [x] Pass `cargo check`, `cargo test`, `uv run maturin develop --uv`,
   `uv run pyright`, and `uv run pytest`; run the logging throughput benchmark
   after moving timestamp capture and document any measurable regression.
 

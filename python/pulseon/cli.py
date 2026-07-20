@@ -128,6 +128,13 @@ def _build_parser() -> argparse.ArgumentParser:
     page_size.add_argument("--limit", type=_non_negative_int, default=50)
     page_size.add_argument("--all", action="store_true")
     leaderboard.add_argument("--offset", type=_non_negative_int, default=0)
+    best = autoresearch_actions.add_parser("best")
+    best.add_argument("project_id")
+    best.add_argument("--metric", required=True)
+    best.add_argument(
+        "--direction", choices=("minimize", "maximize"), required=True
+    )
+    best.add_argument("--run", dest="run_ids", action="append", default=[])
     return parser
 
 
@@ -153,10 +160,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def _validate_args(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> None:
-    if args.resource == "autoresearch" and args.action == "leaderboard":
+    if args.resource == "autoresearch" and args.action in ("leaderboard", "best"):
         if len(set(args.run_ids)) != len(args.run_ids):
             parser.error("autoresearch Run IDs must be unique")
-        if args.all and args.offset != 0:
+        if args.action == "leaderboard" and args.all and args.offset != 0:
             parser.error("--all cannot be combined with a non-zero --offset")
         return
     if args.action != "compare":
@@ -339,6 +346,8 @@ def _run(client: _pulseon.Client, args: argparse.Namespace) -> str:
     if args.resource == "autoresearch":
         if args.action == "leaderboard":
             return _run_autoresearch_leaderboard(client, args)
+        if args.action == "best":
+            return _run_autoresearch_best(client, args)
         return _run_autoresearch_compare(client, args)
     if args.action == "list":
         metrics = client.list_metrics(args.run_id)
@@ -474,6 +483,37 @@ def _run_autoresearch_leaderboard(
                 "returned": len(entries),
                 "has_more": args.offset + len(entries) < len(result.entries),
             },
+            "meta": _ranking_meta(args.project_id, result),
+        }
+    )
+
+
+def _run_autoresearch_best(
+    client: _pulseon.Client, args: argparse.Namespace
+) -> str:
+    run_ids = _ranking_run_ids(client, args.project_id, args.run_ids)
+    result = client.rank_runs(
+        run_ids, metric_key=args.metric, direction=args.direction
+    )
+    best = next((entry for entry in result.entries if entry.rank == 1), None)
+    if args.format == "table":
+        if best is None:
+            return "No eligible Run."
+        return _render_table(
+            (
+                "RANK", "RUN_ID", "STATUS", "LAST_STEP", "LAST_VALUE",
+                "EVIDENCE", "REASONS",
+            ),
+            _ranking_rows([best]),
+        )
+    return _dump_json(
+        {
+            "schema_version": _JSON_SCHEMA_VERSION,
+            "kind": "autoresearch_best",
+            "data": {
+                "best": None if best is None else _ranking_entry_document(best)
+            },
+            "page": None,
             "meta": _ranking_meta(args.project_id, result),
         }
     )
