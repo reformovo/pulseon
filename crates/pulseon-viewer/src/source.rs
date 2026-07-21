@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use pulseon_model::types::Project;
 use pulseon_storage::bootstrap::{
     NativeStorageConfig, is_s3_data_path, open_existing_native_connection_with_config,
 };
@@ -49,15 +48,6 @@ impl ReadSession {
         Ok(Self {
             connection: ProjectConnection::new(connection),
         })
-    }
-
-    /// Lists Projects stored in the opened catalog.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SourceError`] when the catalog query fails.
-    pub fn list_projects(&self) -> Result<Vec<Project>, SourceError> {
-        Ok(self.connection.list_projects()?)
     }
 
     /// Discovers Projects, Runs, and the selected Runs' metric union.

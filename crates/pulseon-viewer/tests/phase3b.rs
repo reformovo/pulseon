@@ -1,0 +1,358 @@
+use std::error::Error;
+use std::fs;
+use std::path::Path;
+use std::time::Duration;
+
+use pulseon_core::engine::client::NativeClient;
+use pulseon_model::alignment::{AlignmentAxis, AlignmentViewport};
+use pulseon_model::comparison::EvidenceCompleteness;
+use pulseon_model::metric::MetricKey;
+use pulseon_model::run::RunId;
+use pulseon_model::types::ProjectId;
+use pulseon_storage::StorageError;
+use pulseon_storage::bootstrap::CatalogBackend;
+use pulseon_viewer::SourceError;
+use pulseon_viewer::core::{ApplyOutcome, ViewerCore, ViewerSelection};
+use pulseon_viewer::model::{CatalogSnapshot, DiscoveryRequest};
+use pulseon_viewer::query::{CurveSelection, DetailRequest, OverviewRequest};
+use pulseon_viewer::worker::{
+    Generation, ReadEvent, ReadKind, ReadRequest, ReadSnapshot, ReadWorker, WorkerError,
+};
+
+const SOURCE_POINTS: i64 = 2_100;
+const EVENT_TIMEOUT: Duration = Duration::from_secs(20);
+
+struct Fixture {
+    root: tempfile::TempDir,
+    project_id: ProjectId,
+    complete_run_id: RunId,
+    running_run_id: RunId,
+    invalid_run_id: RunId,
+    unavailable_run_id: RunId,
+}
+
+impl Fixture {
+    fn root_path(&self) -> &Path {
+        self.root.path()
+    }
+
+    fn selection(&self) -> CurveSelection {
+        CurveSelection {
+            run_ids: vec![
+                self.complete_run_id.clone(),
+                self.running_run_id.clone(),
+                self.invalid_run_id.clone(),
+                self.unavailable_run_id.clone(),
+            ],
+            metric_key: MetricKey::from_string("loss"),
+            axis: AlignmentAxis::Step,
+        }
+    }
+}
+
+fn fixture(backend: CatalogBackend, absolute_paths: bool) -> Result<Fixture, Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let config_dir = root.path().join(".pulseon");
+    fs::create_dir(&config_dir)?;
+    let backend_name = match backend {
+        CatalogBackend::DuckDb => "duckdb",
+        CatalogBackend::Sqlite => "sqlite",
+    };
+    let catalog_name = match backend {
+        CatalogBackend::DuckDb => "catalog.ducklake",
+        CatalogBackend::Sqlite => "catalog.sqlite",
+    };
+    let catalog_relative = Path::new("custom").join(catalog_name);
+    let data_relative = Path::new("custom").join("data");
+    let catalog_path = root.path().join(&catalog_relative);
+    let data_path = root.path().join(&data_relative);
+    let configured_catalog = if absolute_paths {
+        catalog_path.to_string_lossy().into_owned()
+    } else {
+        catalog_relative.to_string_lossy().into_owned()
+    };
+    let configured_data = if absolute_paths {
+        data_path.to_string_lossy().into_owned()
+    } else {
+        data_relative.to_string_lossy().into_owned()
+    };
+    fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            "catalog_backend = \"{backend_name}\"\ncatalog_path = \"{configured_catalog}\"\n\
+             data_path = \"{configured_data}\"\n"
+        ),
+    )?;
+
+    let client = NativeClient::open_with_catalog_backend_storage_config(
+        root.path(),
+        backend,
+        Some(catalog_path),
+        Some(data_path),
+        None,
+        65_536,
+    )?;
+    let project_id = ProjectId::from_string("project-1");
+    let project = client.create_project("viewer", Some(project_id.clone()))?;
+    let complete_run_id = RunId::from_string("complete");
+    let complete = client.create_run(
+        &project.project_id,
+        "complete",
+        Some(complete_run_id.clone()),
+    )?;
+    let complete_handle = client.run_handle(complete);
+    for step in 0..SOURCE_POINTS {
+        complete_handle.log_metric_at_step("loss", step, step as f64)?;
+    }
+    client.finish_run(&complete_run_id)?;
+
+    let invalid_run_id = RunId::from_string("invalid");
+    let invalid =
+        client.create_run(&project.project_id, "invalid", Some(invalid_run_id.clone()))?;
+    client
+        .run_handle(invalid)
+        .log_metric_at_step("loss", -1, 0.25)?;
+    client.fail_run(&invalid_run_id)?;
+
+    let unavailable_run_id = RunId::from_string("unavailable");
+    client.create_run(
+        &project.project_id,
+        "unavailable",
+        Some(unavailable_run_id.clone()),
+    )?;
+    client.finish_run(&unavailable_run_id)?;
+
+    let running_run_id = RunId::from_string("running");
+    let running =
+        client.create_run(&project.project_id, "running", Some(running_run_id.clone()))?;
+    client
+        .run_handle(running)
+        .log_metric_at_step("loss", 0, 0.5)?;
+    client.shutdown(None)?;
+    Ok(Fixture {
+        root,
+        project_id,
+        complete_run_id,
+        running_run_id,
+        invalid_run_id,
+        unavailable_run_id,
+    })
+}
+
+fn read(
+    worker: &ReadWorker,
+    generation: u64,
+    request: ReadRequest,
+) -> Result<ReadSnapshot, Box<dyn Error>> {
+    let expected_kind = request.kind();
+    worker.submit(Generation(generation), request)?;
+    let event = worker.recv_timeout(EVENT_TIMEOUT)?;
+    assert_eq!(event.generation, Generation(generation));
+    assert_eq!(event.kind, expected_kind);
+    Ok(event.result?)
+}
+
+fn assert_backend_contract(fixture: &Fixture, exercise_core: bool) -> Result<(), Box<dyn Error>> {
+    let worker = ReadWorker::spawn(fixture.root_path())?;
+    let discovery_request = DiscoveryRequest {
+        project_id: Some(fixture.project_id.clone()),
+        selected_run_ids: fixture.selection().run_ids,
+    };
+    let catalog = match read(&worker, 1, ReadRequest::Discover(discovery_request.clone()))? {
+        ReadSnapshot::Catalog(snapshot) => snapshot,
+        other => return Err(format!("unexpected discovery snapshot: {other:?}").into()),
+    };
+    assert_eq!(catalog.projects.len(), 1);
+    assert_eq!(catalog.runs.len(), 4);
+    assert_eq!(
+        catalog
+            .metric_keys
+            .iter()
+            .map(MetricKey::as_str)
+            .collect::<Vec<_>>(),
+        ["loss"]
+    );
+
+    let overview_request = OverviewRequest {
+        selection: fixture.selection(),
+        physical_width: 1,
+    };
+    let overview = match read(&worker, 2, ReadRequest::Overview(overview_request))? {
+        ReadSnapshot::Overview(snapshot) => snapshot,
+        other => return Err(format!("unexpected overview snapshot: {other:?}").into()),
+    };
+    assert_eq!(overview.point_budget, 500);
+    assert_eq!(
+        overview
+            .real_range
+            .map(|range| (range.start(), range.end())),
+        Some((0, SOURCE_POINTS - 1))
+    );
+    assert_eq!(
+        overview.series[0].evidence.source_row_count,
+        SOURCE_POINTS as u64
+    );
+    assert!(overview.series[0].evidence.points.len() <= 502);
+    assert!(overview.series[0].evidence.downsampled());
+    assert_eq!(
+        overview
+            .series
+            .iter()
+            .map(|series| series.evidence.completeness)
+            .collect::<Vec<_>>(),
+        [
+            EvidenceCompleteness::Complete,
+            EvidenceCompleteness::Partial,
+            EvidenceCompleteness::Invalid,
+            EvidenceCompleteness::Unavailable,
+        ]
+    );
+    assert_eq!(
+        overview
+            .series
+            .iter()
+            .map(|series| series.chart_series.is_some())
+            .collect::<Vec<_>>(),
+        [true, true, false, false]
+    );
+
+    let detail_selection = CurveSelection {
+        run_ids: vec![fixture.complete_run_id.clone()],
+        metric_key: MetricKey::from_string("loss"),
+        axis: AlignmentAxis::Step,
+    };
+    let full_detail = match read(
+        &worker,
+        3,
+        ReadRequest::Detail(DetailRequest {
+            selection: detail_selection.clone(),
+            viewport: AlignmentViewport::new(0, SOURCE_POINTS - 1)?,
+            physical_width: 1,
+        }),
+    )? {
+        ReadSnapshot::Detail(snapshot) => snapshot,
+        other => return Err(format!("unexpected detail snapshot: {other:?}").into()),
+    };
+    assert_eq!(full_detail.point_budget, 2_000);
+    assert!(full_detail.series[0].evidence.points.len() <= 2_002);
+    assert!(full_detail.series[0].evidence.downsampled());
+
+    let detail_request = DetailRequest {
+        selection: detail_selection,
+        viewport: AlignmentViewport::new(500, 1_500)?,
+        physical_width: 1,
+    };
+    let detail = match read(&worker, 4, ReadRequest::Detail(detail_request.clone()))? {
+        ReadSnapshot::Detail(snapshot) => snapshot,
+        other => return Err(format!("unexpected detail snapshot: {other:?}").into()),
+    };
+    assert_eq!(detail.point_budget, full_detail.point_budget);
+    assert_eq!(detail.series[0].evidence.source_row_count, 1_003);
+    assert_eq!(detail.series[0].evidence.points.len(), 1_003);
+    assert_eq!(
+        detail.series[0]
+            .evidence
+            .points
+            .first()
+            .map(|point| point.axis_value),
+        Some(499)
+    );
+    assert_eq!(
+        detail.series[0]
+            .evidence
+            .points
+            .last()
+            .map(|point| point.axis_value),
+        Some(1_501)
+    );
+
+    if exercise_core {
+        assert_core_contract(fixture, catalog, detail_request, detail)?;
+    }
+    Ok(())
+}
+
+fn assert_core_contract(
+    fixture: &Fixture,
+    catalog: CatalogSnapshot,
+    detail_request: DetailRequest,
+    detail: pulseon_viewer::query::CurveSnapshot,
+) -> Result<(), Box<dyn Error>> {
+    let selection = ViewerSelection {
+        project_id: Some(fixture.project_id.clone()),
+        run_ids: vec![fixture.complete_run_id.clone()],
+        metric_key: Some(MetricKey::from_string("loss")),
+    };
+    let mut core = ViewerCore::new(selection.clone());
+    let discovery = ReadRequest::Discover(DiscoveryRequest {
+        project_id: selection.project_id.clone(),
+        selected_run_ids: selection.run_ids.clone(),
+    });
+    core.begin(Generation(10), &discovery);
+    assert_eq!(
+        core.apply(ReadEvent {
+            generation: Generation(10),
+            kind: ReadKind::Catalog,
+            result: Ok(ReadSnapshot::Catalog(catalog)),
+        }),
+        ApplyOutcome::Applied
+    );
+    assert_eq!(core.selection(), &selection);
+
+    let detail_read = ReadRequest::Detail(detail_request);
+    core.begin(Generation(11), &detail_read);
+    assert_eq!(
+        core.apply(ReadEvent {
+            generation: Generation(11),
+            kind: ReadKind::Detail,
+            result: Ok(ReadSnapshot::Detail(detail)),
+        }),
+        ApplyOutcome::Applied
+    );
+    core.begin(Generation(12), &detail_read);
+    assert!(core.detail().is_some() && core.is_pending(ReadKind::Detail));
+    assert_eq!(
+        core.apply(ReadEvent {
+            generation: Generation(12),
+            kind: ReadKind::Detail,
+            result: Err(WorkerError::Source(SourceError::UnsupportedS3)),
+        }),
+        ApplyOutcome::Applied
+    );
+    assert!(core.detail().is_some() && !core.is_pending(ReadKind::Detail));
+    assert_eq!(
+        core.last_error(),
+        Some("S3 data paths are unsupported by pulseon-viewer")
+    );
+    Ok(())
+}
+
+#[test]
+fn both_catalog_backends_preserve_query_and_refresh_contracts() -> Result<(), Box<dyn Error>> {
+    let duckdb = fixture(CatalogBackend::DuckDb, false)?;
+    assert_backend_contract(&duckdb, true)?;
+    let sqlite = fixture(CatalogBackend::Sqlite, true)?;
+    assert_backend_contract(&sqlite, false)?;
+    Ok(())
+}
+
+#[test]
+fn worker_reports_a_missing_catalog_without_creating_it() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let worker = ReadWorker::spawn(root.path())?;
+    worker.submit(
+        Generation(1),
+        ReadRequest::Discover(DiscoveryRequest::default()),
+    )?;
+
+    let event = worker.recv_timeout(EVENT_TIMEOUT)?;
+
+    assert!(matches!(
+        event.result,
+        Err(WorkerError::Source(SourceError::Storage(
+            StorageError::CatalogNotFound { .. }
+        )))
+    ));
+    assert!(!root.path().join(".pulseon").exists());
+    Ok(())
+}

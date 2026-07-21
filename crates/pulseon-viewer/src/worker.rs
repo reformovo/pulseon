@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use crate::model::{CatalogSnapshot, DiscoveryRequest};
 use crate::query::{CurveSnapshot, DetailRequest, OverviewRequest, QueryError};
@@ -134,6 +135,15 @@ impl ReadWorker {
 
     pub fn try_event(&self) -> Option<ReadEvent> {
         self.events.try_recv().ok()
+    }
+
+    /// Waits for an event from background coordination or test code.
+    ///
+    /// # Errors
+    ///
+    /// Returns a receive error if the timeout expires or the worker stops.
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<ReadEvent, mpsc::RecvTimeoutError> {
+        self.events.recv_timeout(timeout)
     }
 }
 

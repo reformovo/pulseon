@@ -5,5 +5,7 @@
 pub mod core;
 pub mod model;
 pub mod query;
-pub mod source;
+mod source;
 pub mod worker;
+
+pub use source::SourceError;

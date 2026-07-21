@@ -26,18 +26,18 @@ pub(crate) fn query_aligned_metric(
 ) -> Result<AlignmentQueryResult, StorageError> {
     validate_alignment_identity(query)?;
 
-    let bucket_count = match query.reduction {
+    let screen_limits = match query.reduction {
         AlignmentReduction::Full => None,
         AlignmentReduction::ScreenBudget(_) => {
             let max_points = query
                 .reduction
                 .max_points()
                 .expect("screen budgets always have a point limit");
-            Some((max_points / EXTREMA_PER_BUCKET).max(1))
+            Some(((max_points / EXTREMA_PER_BUCKET).max(1), max_points))
         }
     };
-    let sql = aligned_points_sql(source, query.axis, bucket_count.is_some());
-    let values = query_values(source, query, run_start_millis, bucket_count)?;
+    let sql = aligned_points_sql(source, query.axis, screen_limits.is_some());
+    let values = query_values(source, query, run_start_millis, screen_limits)?;
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         duckdb::params_from_iter(values.iter().map(|value| value.as_ref())),
@@ -105,7 +105,8 @@ fn aligned_points_sql(
          selected AS (
              SELECT * EXCLUDE (ordinal, inside_count, bucket, first_rank, last_rank, min_rank, max_rank)
              FROM inside_candidates
-             WHERE first_rank = 1 OR last_rank = 1 OR min_rank = 1 OR max_rank = 1
+             WHERE inside_count <= ? OR first_rank = 1 OR last_rank = 1
+                   OR min_rank = 1 OR max_rank = 1
              UNION ALL SELECT * FROM left_neighbor
              UNION ALL SELECT * FROM right_neighbor
          )"
@@ -214,7 +215,7 @@ fn query_values(
     source: AlignmentSource<'_>,
     query: &AlignmentQuery,
     run_start_millis: Option<i64>,
-    bucket_count: Option<usize>,
+    screen_limits: Option<(usize, usize)>,
 ) -> Result<Vec<Box<dyn duckdb::ToSql>>, StorageError> {
     let mut values = base_values(source, query, run_start_millis);
     values.extend([
@@ -223,12 +224,16 @@ fn query_values(
         Box::new(query.viewport.start()),
         Box::new(query.viewport.end()),
     ]);
-    if let Some(bucket_count) = bucket_count {
+    if let Some((bucket_count, max_points)) = screen_limits {
         values.push(Box::new(i64::try_from(bucket_count).map_err(|_| {
             StorageError::QueryMaxPointsTooLarge {
                 max_points: bucket_count.saturating_mul(EXTREMA_PER_BUCKET),
             }
         })?));
+        values
+            .push(Box::new(i64::try_from(max_points).map_err(|_| {
+                StorageError::QueryMaxPointsTooLarge { max_points }
+            })?));
     }
     Ok(values)
 }
@@ -403,6 +408,23 @@ mod tests {
                 .iter()
                 .any(|point| point.point.value_f64 == -1.0)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn screen_query_returns_all_points_when_inside_count_fits_budget() -> Result<(), Box<dyn Error>>
+    {
+        let connection = connection()?;
+        let mut screen = query(
+            AlignmentAxis::Step,
+            AlignmentReduction::screen_budget(100, 1)?,
+        );
+        screen.viewport = AlignmentViewport::new(1, 5)?;
+
+        let result = ProjectMetricReader::new(&connection).query_aligned_metric(&screen)?;
+
+        assert_eq!(result.points.len(), 7);
+        assert!(!result.downsampled());
         Ok(())
     }
 
