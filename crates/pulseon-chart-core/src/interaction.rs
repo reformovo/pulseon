@@ -233,6 +233,24 @@ impl SelectionState {
 
 const MIN_BRUSH_SPAN: f64 = 1.0;
 
+fn maximum_start_for_minimum_span(end: f64) -> f64 {
+    let start = end - MIN_BRUSH_SPAN;
+    if end - start >= MIN_BRUSH_SPAN {
+        start
+    } else {
+        end.next_down()
+    }
+}
+
+fn minimum_end_for_minimum_span(start: f64) -> f64 {
+    let end = start + MIN_BRUSH_SPAN;
+    if end - start >= MIN_BRUSH_SPAN {
+        end
+    } else {
+        start.next_up()
+    }
+}
+
 /// Canonical horizontal viewport constrained to a fixed home range.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrushState {
@@ -274,7 +292,10 @@ impl BrushState {
         if !position.is_finite() {
             return Err(ChartError::InvalidTransform);
         }
-        let start = position.clamp(self.home.start(), self.selected.end() - MIN_BRUSH_SPAN);
+        let start = position.clamp(
+            self.home.start(),
+            maximum_start_for_minimum_span(self.selected.end()),
+        );
         self.selected = AxisRange::new(start, self.selected.end())?;
         Ok(())
     }
@@ -288,7 +309,10 @@ impl BrushState {
         if !position.is_finite() {
             return Err(ChartError::InvalidTransform);
         }
-        let end = position.clamp(self.selected.start() + MIN_BRUSH_SPAN, self.home.end());
+        let end = position.clamp(
+            minimum_end_for_minimum_span(self.selected.start()),
+            self.home.end(),
+        );
         self.selected = AxisRange::new(self.selected.start(), end)?;
         Ok(())
     }
@@ -306,7 +330,16 @@ impl BrushState {
             self.home.start() - self.selected.start(),
             self.home.end() - self.selected.end(),
         );
-        self.selected = AxisRange::new(self.selected.start() + delta, self.selected.end() + delta)?;
+        let mut start = self.selected.start() + delta;
+        let mut end = self.selected.end() + delta;
+        if end - start < MIN_BRUSH_SPAN {
+            if delta.is_sign_negative() {
+                end = minimum_end_for_minimum_span(start).min(self.home.end());
+            } else {
+                start = maximum_start_for_minimum_span(end).max(self.home.start());
+            }
+        }
+        self.selected = AxisRange::new(start, end)?;
         Ok(())
     }
 
@@ -338,8 +371,13 @@ impl BrushState {
             return Ok(());
         }
         let anchor_ratio = (anchor - self.selected.start()) / self.selected.span();
-        let start = (anchor - anchor_ratio * span).clamp(self.home.start(), self.home.end() - span);
-        self.selected = AxisRange::new(start, start + span)?;
+        let latest_start =
+            (self.home.end() - span).min(maximum_start_for_minimum_span(self.home.end()));
+        let start = (anchor - anchor_ratio * span).clamp(self.home.start(), latest_start);
+        let end = (start + span)
+            .max(minimum_end_for_minimum_span(start))
+            .min(self.home.end());
+        self.selected = AxisRange::new(start, end)?;
         Ok(())
     }
 
@@ -649,6 +687,35 @@ mod tests {
         assert_eq!(brush.zoom_at(20.0, 2.0), Err(ChartError::InvalidTransform));
         assert_eq!(brush.zoom_at(5.0, 0.0), Err(ChartError::InvalidTransform));
         assert_eq!(brush, initial);
+    }
+
+    #[test]
+    fn brush_keeps_minimum_span_representable_at_large_coordinates() {
+        let start = 2_f64.powi(53);
+        let home = range(start, start + 4.0);
+        let mut brush = BrushState::new(home).expect("brush should be valid");
+
+        brush.resize_start(home.end()).expect("resize should clamp");
+        assert_eq!(brush.selected(), range(start + 2.0, start + 4.0));
+        brush.reset();
+        brush
+            .zoom_at(home.start(), f64::MAX)
+            .expect("zoom should clamp");
+        assert_eq!(brush.selected(), range(start, start + 2.0));
+    }
+
+    #[test]
+    fn brush_pan_does_not_collapse_a_narrow_range_during_rounding() {
+        let end = 2_f64.powi(53);
+        let mut brush = BrushState::new(range(end - 4.0, end)).expect("brush should be valid");
+        brush
+            .resize_start(end - 3.0)
+            .expect("resize should succeed");
+        brush.resize_end(end - 2.0).expect("resize should succeed");
+
+        brush.pan_by(0.5).expect("pan should remain valid");
+
+        assert!(brush.selected().span() >= MIN_BRUSH_SPAN);
     }
 
     #[test]
