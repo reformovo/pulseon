@@ -182,7 +182,19 @@ pub fn visible_y_range(
     } else {
         (maximum - minimum) * Y_RANGE_PADDING_FRACTION
     };
-    AxisRange::new(minimum - padding, maximum + padding).map(Some)
+    let padded_minimum = minimum - padding;
+    let padded_maximum = maximum + padding;
+    let padded_minimum = if padded_minimum < minimum {
+        padded_minimum
+    } else {
+        minimum.next_down()
+    };
+    let padded_maximum = if padded_maximum > maximum {
+        padded_maximum
+    } else {
+        maximum.next_up()
+    };
+    AxisRange::new(padded_minimum, padded_maximum).map(Some)
 }
 
 /// A finite, increasing range on one data axis.
@@ -476,6 +488,22 @@ mod tests {
         assert_eq!(
             visible_y_range(&[series], range(1.0, 2.0)),
             Err(ChartError::InvalidRange)
+        );
+    }
+
+    #[test]
+    fn visible_y_range_rounds_small_padding_outward_at_large_offsets() {
+        let minimum = 1e16;
+        let maximum = minimum + 2.0;
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![DataPoint::new(1.0, minimum), DataPoint::new(2.0, maximum)],
+        )
+        .expect("test series should be valid");
+
+        assert_eq!(
+            visible_y_range(&[series], range(1.0, 2.0)),
+            Ok(Some(range(minimum.next_down(), maximum.next_up())))
         );
     }
 
