@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use pulseon_model::types::Project;
@@ -5,7 +6,9 @@ use pulseon_storage::bootstrap::{
     NativeStorageConfig, is_s3_data_path, open_existing_native_connection_with_config,
 };
 use pulseon_storage::config::{InitConfigError, resolve_storage_config};
-use pulseon_storage::{ProjectConnection, StorageError};
+use pulseon_storage::{ProjectConnection, ProjectMetricReader, StorageError};
+
+use crate::model::{CatalogSnapshot, DiscoveryRequest};
 
 /// Failures while opening an existing viewer source.
 #[derive(Debug, thiserror::Error)]
@@ -56,11 +59,58 @@ impl ReadSession {
     pub fn list_projects(&self) -> Result<Vec<Project>, SourceError> {
         Ok(self.connection.list_projects()?)
     }
+
+    /// Discovers Projects, Runs, and the selected Runs' metric union.
+    ///
+    /// Runs are newest-first. A Project or Run removed since the request was
+    /// created is reconciled to an empty or reduced result rather than an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError`] when a catalog query fails.
+    pub fn discover(&self, request: &DiscoveryRequest) -> Result<CatalogSnapshot, SourceError> {
+        let projects = self.connection.list_projects()?;
+        let Some(project_id) = request.project_id.as_ref().filter(|project_id| {
+            projects
+                .iter()
+                .any(|project| &project.project_id == *project_id)
+        }) else {
+            return Ok(CatalogSnapshot {
+                projects,
+                runs: Vec::new(),
+                metric_keys: Vec::new(),
+            });
+        };
+        let mut runs = self.connection.list_runs(project_id, None, None, 0)?;
+        runs.reverse();
+        let reader = ProjectMetricReader::new(&self.connection);
+        let mut metric_keys = BTreeMap::new();
+        for run_id in &request.selected_run_ids {
+            let Some(run) = runs.iter().find(|run| &run.run_id == run_id) else {
+                continue;
+            };
+            for aggregate in reader.list_metrics(&run.run_id, run.status)? {
+                metric_keys.insert(
+                    aggregate.metric_key.as_str().to_owned(),
+                    aggregate.metric_key,
+                );
+            }
+        }
+        Ok(CatalogSnapshot {
+            projects,
+            runs,
+            metric_keys: metric_keys.into_values().collect(),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+
+    use pulseon_core::engine::client::NativeClient;
+    use pulseon_model::run::RunId;
+    use pulseon_model::types::ProjectId;
 
     use super::*;
 
@@ -78,6 +128,57 @@ mod tests {
         let error = ReadSession::open_existing(root.path()).err();
 
         assert!(matches!(error, Some(SourceError::UnsupportedS3)));
+        Ok(())
+    }
+
+    #[test]
+    fn discovery_returns_newest_runs_and_selected_metric_union()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let client = NativeClient::open(root.path())?;
+        let project = client.create_project("viewer", Some(ProjectId::from_string("project-1")))?;
+        let first = client.create_run(
+            &project.project_id,
+            "first",
+            Some(RunId::from_string("run-1")),
+        )?;
+        client
+            .run_handle(first.clone())
+            .log_metric_at_step("loss", 0, 1.0)?;
+        client.finish_run(&first.run_id)?;
+        let second = client.create_run(
+            &project.project_id,
+            "second",
+            Some(RunId::from_string("run-2")),
+        )?;
+        client
+            .run_handle(second.clone())
+            .log_metric_at_step("accuracy", 0, 0.5)?;
+        client.finish_run(&second.run_id)?;
+        client.shutdown(None)?;
+
+        let session = ReadSession::open_existing(root.path())?;
+        let snapshot = session.discover(&DiscoveryRequest {
+            project_id: Some(project.project_id),
+            selected_run_ids: vec![first.run_id, RunId::from_string("removed")],
+        })?;
+
+        assert_eq!(
+            snapshot
+                .runs
+                .iter()
+                .map(|run| run.run_id.as_str())
+                .collect::<Vec<_>>(),
+            ["run-2", "run-1"]
+        );
+        assert_eq!(
+            snapshot
+                .metric_keys
+                .iter()
+                .map(|key| key.as_str())
+                .collect::<Vec<_>>(),
+            ["loss"]
+        );
         Ok(())
     }
 }
