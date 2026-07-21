@@ -148,16 +148,87 @@ the pre-1.0 CLI JSON envelope with version 2.
 
 ### Phase 3: GPUI Desktop Viewer
 
-- [ ] `crates/pulseon-viewer`: GPUI desktop shell, layout, file/directory
-  picking, panels and commands, rendering adapter. Consumes the Phase 2
-  comparison contract for multi-axis comparison support.
-- [ ] Spike validation gates from `docs/drafts/gpui-curve-viewer-spike.md`:
-  render 10 visible series smoothly after viewport downsampling; pan, zoom, and
-  hover remain responsive with million-point source series; chart-core is unit
-  testable without a GPUI window; replacing GPUI would require a renderer adapter
-  rewrite, not a data model rewrite.
-- [ ] Release artifacts: Python wheel (`maturin build`, unchanged) plus a native
-  desktop binary (`cargo build -p pulseon-viewer --release`, new).
+The decision-complete implementation and validation contract lives in
+[`docs/phase3-gpui-curve-viewer.md`](phase3-gpui-curve-viewer.md). A million
+points is a storage-source scale; GPUI renders only fixed-budget overview and
+detail reductions selected through a brush.
+
+#### Phase 3A: Renderer-Independent Brush Contract
+
+- [ ] Add a chart-core brush state with home and selected x ranges, one-axis-unit
+  minimum width, handle resize, selected-window pan, cursor-anchored zoom,
+  home clamping, and reset. Keep the existing zoom API intact.
+- [ ] Add nearest-rendered-real-point hit testing with stable point indexes and
+  screen-distance ties; keep the existing segment interpolation API intact.
+- [ ] Add visible finite y-range calculation with 5% padding and a defined
+  constant-value fallback. Do not add query, reduction, or renderer policy to
+  chart-core.
+- [ ] Cover brush transforms, invalid inputs, range boundaries, repeated x
+  values, hit-test ties, empty inputs, and constant y values with windowless
+  chart-core tests.
+
+#### Phase 3B: Native Read Session and Query Pipeline
+
+- [ ] Add `pulseon-viewer` as a workspace binary with model, storage, Core, and
+  chart-core dependencies. Pin GPUI 0.2.2 only for macOS; keep a non-macOS
+  unsupported entrypoint so Linux workspace checks continue to compile.
+- [ ] Open existing local native Projects through the shared configuration and
+  storage bootstrap. Support DuckDB/SQLite and custom local paths; reject S3
+  before credential resolution and do not construct a writable `NativeClient`.
+- [ ] Add one background worker that owns `ProjectConnection`, discovers
+  Projects/Runs/metrics, coalesces pending requests, and returns immutable
+  generation-tagged snapshots. The GPUI thread must never execute storage work.
+- [ ] Add separate overview and detail query requests. Overview uses the full
+  non-negative axis and a 500-2,000 point budget; detail uses the brush's closed
+  viewport and a 2,000-10,000 point budget. Both reuse Phase 2 aligned evidence
+  and storage-side extrema reduction without retaining raw full series.
+- [ ] Reconcile manual Refresh results, discard stale generations, retain the
+  current detail snapshot while a replacement is pending, and cover source
+  errors, both catalog backends, fixed budgets, neighbors, and evidence states.
+
+#### Phase 3C: GPUI Curve Comparison Experience
+
+- [ ] Add the macOS application shell, zero-or-one-path command-line contract,
+  native directory picker, Open/Refresh/Reset/Step/Elapsed commands, and clear
+  empty, loading, pending, and error states.
+- [ ] Add one-Project selection, a virtualized newest-first Run browser with
+  name/id/status filtering and a 10-Run hard limit, plus a one-metric selector
+  over the selected Runs' metric union.
+- [ ] Add the detail chart renderer with axes, grid, evidence-aware legend,
+  fixed series colors, path caching, automatic visible y range, and nearest
+  real-point tooltip. Draw partial evidence explicitly; do not draw invalid or
+  unavailable evidence.
+- [ ] Add the fixed-height overview renderer, selection shade, two handles,
+  selected-window drag, main-chart pan/zoom synchronization, and reset. Commit
+  drag queries on release and wheel/pinch queries after 100 ms idle.
+- [ ] Verify GPUI types stay inside the adapter and test selection transitions,
+  picker cancellation, command behavior, resize budgets, brush synchronization,
+  pending results, hover, and stale-result rejection.
+
+#### Phase 3D: Performance and Product Validation
+
+- [ ] Build a deterministic fixture with 10 Runs and 1,000,000 effective source
+  points per series. Assert that the viewer receives only the requested
+  overview/detail budgets plus contract-defined neighbors.
+- [ ] Validate that narrowing the brush keeps the detail budget fixed, narrows
+  the storage viewport, and never crops or resamples viewer-owned points.
+- [ ] Measure storage query latency separately from rendering. In a macOS ARM64
+  release build, verify cached brush, pan, zoom, path preparation, and hit
+  testing at p95 <= 8.33 ms with no sample above 16.7 ms; separately validate
+  stable 120 FPS on a 120 Hz ProMotion display after initial load.
+- [ ] Pass formatting, workspace Clippy, Rust tests, viewer release build,
+  maturin develop/build, Pyright, and pytest; document any exact environmental
+  blocker, including a missing Xcode Metal Toolchain.
+
+#### Phase 3E: macOS ARM64 Release
+
+- [ ] Add a macOS ARM64 viewer CI job that installs or verifies the Xcode Metal
+  Toolchain, runs viewer tests, and builds the unsigned release binary without
+  changing the Python wheel matrix or PyPI dependency graph.
+- [ ] On tags, produce `pulseon-viewer-macos-aarch64` and its SHA-256 checksum,
+  attest both artifacts, and attach them to the corresponding GitHub Release.
+- [ ] Preserve the existing Python wheel and sdist release behavior and verify
+  the release job cannot publish a viewer artifact to PyPI accidentally.
 
 ### Out of 0.2.x Scope
 
