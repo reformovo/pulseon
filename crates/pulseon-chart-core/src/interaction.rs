@@ -1,7 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use crate::{AxisRange, CanvasSize, ChartError, DataPoint, Series, SeriesId, Viewport, build_path};
+use crate::{
+    AxisRange, CanvasSize, ChartError, DataPoint, LinearScale, Series, SeriesId, Viewport,
+    build_path,
+};
 
 /// One point in top-left-origin screen coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -118,6 +121,58 @@ pub fn hit_test(path: &[ScreenPoint], cursor: ScreenPoint, radius: f64) -> Optio
         })
         .filter(|hit| hit.distance <= radius)
         .min_by(|left, right| left.distance.total_cmp(&right.distance))
+}
+
+/// Nearest rendered real point, identified by its index in the source series.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointHit {
+    pub point_index: usize,
+    pub position: ScreenPoint,
+    pub distance: f64,
+}
+
+/// Finds the closest real series point within a screen-space radius.
+///
+/// Only points inside the viewport's closed x range are candidates. Equal
+/// screen distances are resolved by the lower source-series point index.
+///
+/// # Errors
+///
+/// Returns an error when either projection scale is invalid.
+pub fn hit_test_point(
+    series: &Series,
+    viewport: Viewport,
+    canvas: CanvasSize,
+    cursor: ScreenPoint,
+    radius: f64,
+) -> Result<Option<PointHit>, ChartError> {
+    if !cursor.x.is_finite() || !cursor.y.is_finite() || !radius.is_finite() || radius < 0.0 {
+        return Ok(None);
+    }
+
+    let points = series.points();
+    let first = points.partition_point(|point| point.x < viewport.x.start());
+    let after = points.partition_point(|point| point.x <= viewport.x.end());
+    let x_scale = LinearScale::new(viewport.x, 0.0, canvas.width())?;
+    let y_scale = LinearScale::new(viewport.y, canvas.height(), 0.0)?;
+
+    Ok(points[first..after]
+        .iter()
+        .enumerate()
+        .map(|(offset, point)| {
+            let position = ScreenPoint::new(x_scale.map(point.x), y_scale.map(point.y));
+            PointHit {
+                point_index: first + offset,
+                position,
+                distance: distance(position, cursor),
+            }
+        })
+        .filter(|hit| hit.distance <= radius)
+        .min_by(|left, right| {
+            left.distance
+                .total_cmp(&right.distance)
+                .then_with(|| left.point_index.cmp(&right.point_index))
+        }))
 }
 
 fn closest_point(start: ScreenPoint, end: ScreenPoint, point: ScreenPoint) -> ScreenPoint {
@@ -415,6 +470,103 @@ mod tests {
                 position: ScreenPoint::new(4.0, 0.0),
                 distance: 3.0,
             })
+        );
+    }
+
+    #[test]
+    fn point_hit_returns_a_real_point_and_resolves_distance_ties_by_index() {
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![DataPoint::new(0.0, 0.0), DataPoint::new(10.0, 0.0)],
+        )
+        .expect("test series should be valid");
+        let viewport = Viewport::new(range(0.0, 10.0), range(-1.0, 1.0));
+        let canvas = CanvasSize::new(10.0, 10.0).expect("test canvas should be valid");
+
+        assert_eq!(
+            hit_test_point(&series, viewport, canvas, ScreenPoint::new(5.0, 5.0), 5.0)
+                .expect("hit test should succeed"),
+            Some(PointHit {
+                point_index: 0,
+                position: ScreenPoint::new(0.0, 5.0),
+                distance: 5.0,
+            })
+        );
+    }
+
+    #[test]
+    fn point_hit_preserves_source_indexes_for_repeated_x_values() {
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![
+                DataPoint::new(0.0, 0.0),
+                DataPoint::new(1.0, 0.0),
+                DataPoint::new(1.0, 0.0),
+                DataPoint::new(2.0, 0.0),
+            ],
+        )
+        .expect("test series should be valid");
+        let viewport = Viewport::new(range(1.0, 2.0), range(-1.0, 1.0));
+        let canvas = CanvasSize::new(100.0, 10.0).expect("test canvas should be valid");
+
+        let hit = hit_test_point(&series, viewport, canvas, ScreenPoint::new(0.0, 5.0), 0.0)
+            .expect("hit test should succeed")
+            .expect("point should be hit");
+
+        assert_eq!(hit.point_index, 1);
+    }
+
+    #[test]
+    fn point_hit_excludes_viewport_neighbors() {
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![DataPoint::new(0.99, 0.0), DataPoint::new(1.0, 0.0)],
+        )
+        .expect("test series should be valid");
+        let viewport = Viewport::new(range(1.0, 2.0), range(-1.0, 1.0));
+        let canvas = CanvasSize::new(100.0, 10.0).expect("test canvas should be valid");
+
+        assert_eq!(
+            hit_test_point(&series, viewport, canvas, ScreenPoint::new(-1.0, 5.0), 0.1),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn point_hit_ignores_invalid_inputs() {
+        let series = series();
+        let viewport = Viewport::new(range(0.0, 10.0), range(0.0, 10.0));
+        let canvas = CanvasSize::new(100.0, 10.0).expect("test canvas should be valid");
+
+        assert_eq!(
+            hit_test_point(
+                &series,
+                viewport,
+                canvas,
+                ScreenPoint::new(f64::NAN, 5.0),
+                8.0,
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            hit_test_point(&series, viewport, canvas, ScreenPoint::new(0.0, 5.0), -1.0),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn point_hit_returns_none_for_empty_input() {
+        let empty = Series::new(
+            SeriesId::new("empty").expect("test id should be valid"),
+            Vec::new(),
+        )
+        .expect("test series should be valid");
+        let viewport = Viewport::new(range(0.0, 10.0), range(0.0, 10.0));
+        let canvas = CanvasSize::new(100.0, 10.0).expect("test canvas should be valid");
+
+        assert_eq!(
+            hit_test_point(&empty, viewport, canvas, ScreenPoint::new(0.0, 5.0), 8.0),
+            Ok(None)
         );
     }
 

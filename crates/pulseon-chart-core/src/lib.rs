@@ -8,7 +8,8 @@ use std::error::Error;
 use std::fmt;
 
 pub use interaction::{
-    BrushState, Hit, PathCache, ScreenPoint, SelectionState, ZoomState, hit_test,
+    BrushState, Hit, PathCache, PointHit, ScreenPoint, SelectionState, ZoomState, hit_test,
+    hit_test_point,
 };
 
 /// Errors produced while constructing or transforming chart data.
