@@ -72,7 +72,7 @@ def test_cli_discovers_running_metric_points_through_all_read_commands(
     for (argv, _), kind in zip(commands, kinds, strict=True):
         assert cli.main(["--format", "json", *argv]) == 0
         document = json.loads(capsys.readouterr().out)
-        assert document["schema_version"] == 1
+        assert document["schema_version"] == 2
         assert document["kind"] == kind
         assert isinstance(document["data"], list)
         assert "page" in document
@@ -136,6 +136,7 @@ def test_cli_comparison_reports_require_baseline_and_preserve_candidate_order(
         "throughput",
     ]
     assert document["data"][0]["secondary"][0]["raw_delta"] == -20.0
+    assert "points" not in json.dumps(document)
 
 
 @pytest.mark.parametrize(
@@ -272,6 +273,170 @@ def test_cli_autoresearch_compare_rejects_candidate_in_pool(
     assert "candidate must not be a comparator" in capsys.readouterr().err
 
 
+def test_cli_autoresearch_leaderboard_keeps_structured_ineligible_evidence(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("research", project_id="project-1")
+    specifications = (
+        ("tied-a", 1.0, "finished"),
+        ("tied-b", 1.0, "finished"),
+        ("worse", 2.0, "finished"),
+        ("failed", 0.5, "failed"),
+        ("running", 0.25, "running"),
+        ("missing", None, "finished"),
+        ("invalid", math.inf, "finished"),
+    )
+    for run_id, value, status in specifications:
+        run = client.create_run(project.project_id, run_id, run_id=run_id)
+        if value is not None:
+            run.log("loss", 0, value)
+        if status == "finished":
+            client.finish_run(run_id)
+        elif status == "failed":
+            client.fail_run(run_id)
+    helpers.wait_for_metric_points(client, "running", "loss", expected_count=1)
+    client.shutdown()
+
+    command = [
+        "--path", str(root_path), "--format", "json", "autoresearch",
+        "leaderboard", "project-1", "--metric", "loss", "--direction",
+        "minimize", "--all",
+    ]
+    for run_id in ("worse", "failed", "tied-b", "tied-a", "running", "missing", "invalid"):
+        command.extend(("--run", run_id))
+    assert cli.main(command) == 0
+    document = json.loads(capsys.readouterr().out)
+
+    assert document["kind"] == "autoresearch_leaderboard"
+    assert document["meta"]["eligible_entries"] == 3
+    assert document["page"] == {
+        "offset": 0, "limit": None, "returned": 7, "has_more": False,
+    }
+    assert [item["evidence"]["run_id"] for item in document["data"]] == [
+        "tied-a", "tied-b", "worse", "failed", "running", "missing", "invalid",
+    ]
+    assert [item["rank"] for item in document["data"]] == [1, 1, 3, None, None, None, None]
+    assert document["data"][-1]["evidence"]["last_value"] == "Infinity"
+    assert document["data"][-1]["evidence"]["reasons"] == ["non_finite_value"]
+
+
+def test_cli_autoresearch_leaderboard_paginates_after_ranking(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("research", project_id="project-1")
+    for index in range(51):
+        run = client.create_run(project.project_id, str(index), run_id=f"run-{index}")
+        run.log("score", 0, float(51 - index))
+        client.finish_run(run.run_id)
+    client.shutdown()
+    base = [
+        "--path", str(root_path), "--format", "json", "autoresearch",
+        "leaderboard", "project-1", "--metric", "score", "--direction", "maximize",
+    ]
+
+    assert cli.main([*base, "--limit", "1", "--offset", "2"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["data"][0]["rank"] == 3
+    assert document["data"][0]["evidence"]["run_id"] == "run-2"
+    assert document["page"] == {
+        "offset": 2, "limit": 1, "returned": 1, "has_more": True,
+    }
+
+    assert cli.main(base) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert len(document["data"]) == 50
+    assert document["page"]["limit"] == 50
+    assert document["page"]["has_more"] is True
+
+
+def test_cli_autoresearch_best_uses_stable_tie_break_and_returns_null(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    project = client.create_project("research", project_id="project-1")
+    for run_id, value in (("zeta", 1.0), ("alpha", 1.0), ("worse", 2.0)):
+        run = client.create_run(project.project_id, run_id, run_id=run_id)
+        run.log("loss", 0, value)
+        client.finish_run(run_id)
+    failed = client.create_run(project.project_id, "failed", run_id="failed")
+    failed.log("loss", 0, 0.5)
+    client.fail_run(failed.run_id)
+    client.create_project("empty", project_id="project-2")
+    client.shutdown()
+    base = [
+        "--path", str(root_path), "--format", "json", "autoresearch", "best",
+        "project-1", "--metric", "loss", "--direction", "minimize",
+    ]
+
+    assert cli.main(base) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["kind"] == "autoresearch_best"
+    assert document["data"]["best"]["evidence"]["run_id"] == "zeta"
+
+    assert cli.main([*base, "--run", "failed"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["data"] == {"best": None}
+    assert document["meta"]["eligible_entries"] == 0
+
+    empty = [*base]
+    empty[empty.index("project-1")] = "project-2"
+    assert cli.main(empty) == 0
+    assert json.loads(capsys.readouterr().out)["data"] == {"best": None}
+    table_command = [*empty]
+    format_index = table_command.index("--format")
+    del table_command[format_index : format_index + 2]
+    assert cli.main(table_command) == 0
+    assert capsys.readouterr().out == "No eligible Run.\n"
+
+
+def test_cli_autoresearch_ranking_rejects_invalid_run_scopes(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import pulseon
+
+    root_path = tmp_path / "project"
+    client = pulseon.init(root_path)
+    client.create_project("first", project_id="project-1")
+    second = client.create_project("second", project_id="project-2")
+    client.create_run(second.project_id, "foreign", run_id="foreign")
+    client.shutdown()
+    base = [
+        "--path", str(root_path), "--format", "json", "autoresearch",
+        "leaderboard", "project-1", "--metric", "loss", "--direction", "minimize",
+    ]
+
+    assert cli.main([*base, "--run", "foreign"]) == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["code"] == "run_project_mismatch"
+    assert cli.main([*base, "--run", "unknown"]) == 1
+    assert json.loads(capsys.readouterr().err)["error"]["code"] == "storage_error"
+
+    with pytest.raises(SystemExit) as error_info:
+        cli.main([*base, "--run", "foreign", "--run", "foreign"])
+    assert error_info.value.code == 2
+    assert json.loads(capsys.readouterr().err)["error"]["code"] == "cli_usage_error"
+
+    with pytest.raises(SystemExit) as error_info:
+        cli.main([*base, "--all", "--offset", "1"])
+    assert error_info.value.code == 2
+    assert "--all cannot be combined" in capsys.readouterr().err
+
+
 def test_cli_comparison_reports_partial_and_per_metric_evidence(
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture[str],
@@ -396,7 +561,7 @@ def test_cli_json_operation_errors_are_structured(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert json.loads(captured.err) == {
-        "schema_version": 1,
+        "schema_version": 2,
         "error": {
             "code": "storage_error",
             "message": "catalog not found: catalog.ducklake",
@@ -441,7 +606,7 @@ def test_cli_resolves_global_path_overrides_against_project(
 
     assert status == 0
     assert json.loads(capsys.readouterr().out) == {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "projects",
         "data": [
             {
@@ -477,7 +642,7 @@ def test_cli_json_includes_pagination_and_metric_query_metadata(
         [*global_args, "runs", "list", "project-1", "--limit", "1"]
     ) == 0
     runs_document = json.loads(capsys.readouterr().out)
-    assert runs_document["schema_version"] == 1
+    assert runs_document["schema_version"] == 2
     assert runs_document["kind"] == "runs"
     assert len(runs_document["data"]) == 1
     assert runs_document["page"] == {
@@ -492,7 +657,7 @@ def test_cli_json_includes_pagination_and_metric_query_metadata(
         [*global_args, "metrics", "query", "run-1", "loss"]
     ) == 0
     query_document = json.loads(capsys.readouterr().out)
-    assert query_document["schema_version"] == 1
+    assert query_document["schema_version"] == 2
     assert query_document["kind"] == "metric_points"
     assert query_document["page"] is None
     assert query_document["meta"] == {
@@ -664,7 +829,7 @@ def test_cli_json_usage_errors_are_structured(
     captured = capsys.readouterr()
     assert captured.out == ""
     document = json.loads(captured.err)
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == 2
     assert document["error"]["code"] == "cli_usage_error"
     assert "expected a non-negative integer" in document["error"]["message"]
     assert "usage:" not in captured.err
@@ -677,6 +842,22 @@ def test_cli_table_output_is_deterministic_and_uncolored() -> None:
     assert first == "STEP  VALUE\n----  -----\n0     0.5\n10    0.25"
     assert second == first
     assert "\x1b" not in first
+
+
+def test_cli_json_output_is_deterministic() -> None:
+    document = {
+        "schema_version": 2,
+        "data": [{"run_id": "run-1", "relative_delta": None}],
+    }
+
+    first = cli._dump_json(document)
+    second = cli._dump_json(document)
+
+    assert first == second
+    assert first == (
+        '{"data":[{"relative_delta":null,"run_id":"run-1"}],'
+        '"schema_version":2}'
+    )
 
 
 def test_cli_keeps_s3_credentials_out_of_arguments() -> None:

@@ -60,7 +60,13 @@ pulseon --path runs projects list
 pulseon --path runs runs list <project-id> --status finished --limit 20
 pulseon --path runs metrics list <run-id>
 pulseon --path runs --format json metrics query <run-id> train/loss --all
+pulseon --path runs autoresearch leaderboard <project-id> --metric eval/loss --direction minimize
+pulseon --path runs --format json autoresearch best <project-id> --metric eval/loss --direction minimize
 ```
+
+Machine-readable CLI success and error output uses JSON schema version 2.
+Autoresearch rankings may be limited to a repeated `--run <run-id>` subset;
+leaderboards rank the full selection before applying pagination.
 
 By default, PulseOn stores local state under `./.pulseon`. Pass an explicit
 root path when a project should use a different local store:
