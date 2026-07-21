@@ -5,3 +5,4 @@
 pub mod model;
 pub mod query;
 pub mod source;
+pub mod worker;
