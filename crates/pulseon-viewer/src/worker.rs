@@ -10,6 +10,14 @@ use crate::source::{ReadSession, SourceError};
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Generation(pub u64);
 
+/// Independent result streams maintained by the viewer Core.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReadKind {
+    Catalog,
+    Overview,
+    Detail,
+}
+
 /// Storage work accepted by the native read worker.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReadRequest {
@@ -18,12 +26,32 @@ pub enum ReadRequest {
     Detail(DetailRequest),
 }
 
+impl ReadRequest {
+    pub const fn kind(&self) -> ReadKind {
+        match self {
+            Self::Discover(_) => ReadKind::Catalog,
+            Self::Overview(_) => ReadKind::Overview,
+            Self::Detail(_) => ReadKind::Detail,
+        }
+    }
+}
+
 /// Immutable result payload returned by the worker.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReadSnapshot {
     Catalog(CatalogSnapshot),
     Overview(CurveSnapshot),
     Detail(CurveSnapshot),
+}
+
+impl ReadSnapshot {
+    pub const fn kind(&self) -> ReadKind {
+        match self {
+            Self::Catalog(_) => ReadKind::Catalog,
+            Self::Overview(_) => ReadKind::Overview,
+            Self::Detail(_) => ReadKind::Detail,
+        }
+    }
 }
 
 /// Worker execution failures.
@@ -47,6 +75,7 @@ impl From<QueryError> for WorkerError {
 #[derive(Debug)]
 pub struct ReadEvent {
     pub generation: Generation,
+    pub kind: ReadKind,
     pub result: Result<ReadSnapshot, WorkerError>,
 }
 
@@ -172,6 +201,7 @@ fn execute(
     session: &mut Option<ReadSession>,
     tagged: TaggedRequest,
 ) -> ReadEvent {
+    let kind = tagged.request.kind();
     let result = (|| {
         if session.is_none() {
             *session = Some(ReadSession::open_existing(root_path)?);
@@ -187,6 +217,7 @@ fn execute(
     })();
     ReadEvent {
         generation: tagged.generation,
+        kind,
         result,
     }
 }
