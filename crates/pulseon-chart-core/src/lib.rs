@@ -143,6 +143,48 @@ impl Series {
     }
 }
 
+const Y_RANGE_PADDING_FRACTION: f64 = 0.05;
+const MIN_CONSTANT_Y_PADDING: f64 = 1e-9;
+
+/// Calculates a padded y range for points inside a closed x range.
+///
+/// Only real points satisfying `x_range.start() <= x <= x_range.end()` are
+/// included, so path-connection neighbors do not affect the result. The range
+/// receives 5% padding; constant values use
+/// `max(abs(value) * 5%, 1e-9)` instead.
+///
+/// # Errors
+///
+/// Returns [`ChartError::InvalidRange`] when padding would produce a
+/// non-finite range.
+pub fn visible_y_range(
+    series: &[Series],
+    x_range: AxisRange,
+) -> Result<Option<AxisRange>, ChartError> {
+    let mut bounds: Option<(f64, f64)> = None;
+    for series in series {
+        let points = series.points();
+        let first = points.partition_point(|point| point.x < x_range.start());
+        let after = points.partition_point(|point| point.x <= x_range.end());
+        for point in &points[first..after] {
+            bounds = Some(match bounds {
+                Some((minimum, maximum)) => (minimum.min(point.y), maximum.max(point.y)),
+                None => (point.y, point.y),
+            });
+        }
+    }
+
+    let Some((minimum, maximum)) = bounds else {
+        return Ok(None);
+    };
+    let padding = if minimum == maximum {
+        (minimum.abs() * Y_RANGE_PADDING_FRACTION).max(MIN_CONSTANT_Y_PADDING)
+    } else {
+        (maximum - minimum) * Y_RANGE_PADDING_FRACTION
+    };
+    AxisRange::new(minimum - padding, maximum + padding).map(Some)
+}
+
 /// A finite, increasing range on one data axis.
 ///
 /// The fields are private so callers must use [`AxisRange::new`].
@@ -356,6 +398,84 @@ mod tests {
         assert_eq!(
             series.visible_points(range(2.2, 3.2)),
             &series.points()[2..=4]
+        );
+    }
+
+    #[test]
+    fn visible_y_range_combines_series_and_excludes_neighbors() {
+        let loss = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![
+                DataPoint::new(0.0, -100.0),
+                DataPoint::new(1.0, 0.0),
+                DataPoint::new(2.0, 10.0),
+                DataPoint::new(3.0, 100.0),
+            ],
+        )
+        .expect("test series should be valid");
+        let accuracy = Series::new(
+            SeriesId::new("accuracy").expect("test id should be valid"),
+            vec![DataPoint::new(1.0, -10.0), DataPoint::new(2.0, 5.0)],
+        )
+        .expect("test series should be valid");
+
+        assert_eq!(
+            visible_y_range(&[loss, accuracy], range(1.0, 2.0)),
+            Ok(Some(range(-11.0, 11.0)))
+        );
+    }
+
+    #[test]
+    fn visible_y_range_pads_constant_values_by_magnitude() {
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![DataPoint::new(1.0, -20.0), DataPoint::new(2.0, -20.0)],
+        )
+        .expect("test series should be valid");
+
+        assert_eq!(
+            visible_y_range(&[series], range(1.0, 2.0)),
+            Ok(Some(range(-21.0, -19.0)))
+        );
+    }
+
+    #[test]
+    fn visible_y_range_uses_a_floor_when_constant_value_is_zero() {
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![DataPoint::new(1.0, 0.0)],
+        )
+        .expect("test series should be valid");
+
+        assert_eq!(
+            visible_y_range(&[series], range(1.0, 2.0)),
+            Ok(Some(range(-1e-9, 1e-9)))
+        );
+    }
+
+    #[test]
+    fn visible_y_range_returns_none_without_points_in_range() {
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![DataPoint::new(0.0, 1.0)],
+        )
+        .expect("test series should be valid");
+
+        assert_eq!(visible_y_range(&[], range(1.0, 2.0)), Ok(None));
+        assert_eq!(visible_y_range(&[series], range(1.0, 2.0)), Ok(None));
+    }
+
+    #[test]
+    fn visible_y_range_rejects_non_finite_padded_bounds() {
+        let series = Series::new(
+            SeriesId::new("loss").expect("test id should be valid"),
+            vec![DataPoint::new(1.0, f64::MAX)],
+        )
+        .expect("test series should be valid");
+
+        assert_eq!(
+            visible_y_range(&[series], range(1.0, 2.0)),
+            Err(ChartError::InvalidRange)
         );
     }
 
