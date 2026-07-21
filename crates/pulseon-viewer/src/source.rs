@@ -102,6 +102,10 @@ impl ReadSession {
             metric_keys: metric_keys.into_values().collect(),
         })
     }
+
+    pub(crate) const fn connection(&self) -> &ProjectConnection {
+        &self.connection
+    }
 }
 
 #[cfg(test)]

@@ -3,4 +3,5 @@
 #![forbid(unsafe_code)]
 
 pub mod model;
+pub mod query;
 pub mod source;
