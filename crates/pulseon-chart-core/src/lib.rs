@@ -7,7 +7,9 @@ mod interaction;
 use std::error::Error;
 use std::fmt;
 
-pub use interaction::{Hit, PathCache, ScreenPoint, SelectionState, ZoomState, hit_test};
+pub use interaction::{
+    BrushState, Hit, PathCache, ScreenPoint, SelectionState, ZoomState, hit_test,
+};
 
 /// Errors produced while constructing or transforming chart data.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +20,7 @@ pub enum ChartError {
     InvalidRange,
     InvalidOutputRange,
     InvalidCanvasSize,
+    InvalidBrushRange,
     InvalidTransform,
 }
 
@@ -38,6 +41,9 @@ impl fmt::Display for ChartError {
             }
             Self::InvalidCanvasSize => {
                 formatter.write_str("canvas dimensions must be finite and positive")
+            }
+            Self::InvalidBrushRange => {
+                formatter.write_str("brush home range must span at least one axis unit")
             }
             Self::InvalidTransform => formatter.write_str("chart transform inputs are invalid"),
         }

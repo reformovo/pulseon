@@ -176,6 +176,123 @@ impl SelectionState {
     }
 }
 
+const MIN_BRUSH_SPAN: f64 = 1.0;
+
+/// Canonical horizontal viewport constrained to a fixed home range.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrushState {
+    home: AxisRange,
+    selected: AxisRange,
+}
+
+impl BrushState {
+    /// Creates a brush selecting its complete home range.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChartError::InvalidBrushRange`] when the home range is
+    /// narrower than one axis unit.
+    pub fn new(home: AxisRange) -> Result<Self, ChartError> {
+        if home.span() < MIN_BRUSH_SPAN {
+            return Err(ChartError::InvalidBrushRange);
+        }
+        Ok(Self {
+            home,
+            selected: home,
+        })
+    }
+
+    pub const fn home(self) -> AxisRange {
+        self.home
+    }
+
+    pub const fn selected(self) -> AxisRange {
+        self.selected
+    }
+
+    /// Moves the selection's left handle, clamped before its right handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChartError::InvalidTransform`] for a non-finite position.
+    pub fn resize_start(&mut self, position: f64) -> Result<(), ChartError> {
+        if !position.is_finite() {
+            return Err(ChartError::InvalidTransform);
+        }
+        let start = position.clamp(self.home.start(), self.selected.end() - MIN_BRUSH_SPAN);
+        self.selected = AxisRange::new(start, self.selected.end())?;
+        Ok(())
+    }
+
+    /// Moves the selection's right handle, clamped after its left handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChartError::InvalidTransform`] for a non-finite position.
+    pub fn resize_end(&mut self, position: f64) -> Result<(), ChartError> {
+        if !position.is_finite() {
+            return Err(ChartError::InvalidTransform);
+        }
+        let end = position.clamp(self.selected.start() + MIN_BRUSH_SPAN, self.home.end());
+        self.selected = AxisRange::new(self.selected.start(), end)?;
+        Ok(())
+    }
+
+    /// Pans the selected range without changing its width.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChartError::InvalidTransform`] for a non-finite delta.
+    pub fn pan_by(&mut self, delta: f64) -> Result<(), ChartError> {
+        if !delta.is_finite() {
+            return Err(ChartError::InvalidTransform);
+        }
+        let delta = delta.clamp(
+            self.home.start() - self.selected.start(),
+            self.home.end() - self.selected.end(),
+        );
+        self.selected = AxisRange::new(self.selected.start() + delta, self.selected.end() + delta)?;
+        Ok(())
+    }
+
+    /// Zooms around an anchor inside the selected range.
+    ///
+    /// A factor above one zooms in; a factor below one zooms out. The resulting
+    /// range is clamped between one axis unit and the complete home range.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChartError::InvalidTransform`] for an invalid factor or an
+    /// anchor outside the selected range.
+    pub fn zoom_at(&mut self, anchor: f64, factor: f64) -> Result<(), ChartError> {
+        if !anchor.is_finite()
+            || !factor.is_finite()
+            || factor <= 0.0
+            || anchor < self.selected.start()
+            || anchor > self.selected.end()
+        {
+            return Err(ChartError::InvalidTransform);
+        }
+        if factor == 1.0 {
+            return Ok(());
+        }
+
+        let span = (self.selected.span() / factor).clamp(MIN_BRUSH_SPAN, self.home.span());
+        if span == self.home.span() {
+            self.selected = self.home;
+            return Ok(());
+        }
+        let anchor_ratio = (anchor - self.selected.start()) / self.selected.span();
+        let start = (anchor - anchor_ratio * span).clamp(self.home.start(), self.home.end() - span);
+        self.selected = AxisRange::new(start, start + span)?;
+        Ok(())
+    }
+
+    pub fn reset(&mut self) {
+        self.selected = self.home;
+    }
+}
+
 /// Current viewport with pan, anchor zoom, and reset behavior.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ZoomState {
@@ -311,6 +428,75 @@ mod tests {
         assert!(selection.toggle(accuracy));
         assert!(!selection.toggle(loss));
         assert_eq!(selection.selected().len(), 1);
+    }
+
+    #[test]
+    fn brush_rejects_a_home_range_narrower_than_one_axis_unit() {
+        assert_eq!(
+            BrushState::new(range(0.0, 0.5)),
+            Err(ChartError::InvalidBrushRange)
+        );
+        assert!(BrushState::new(range(0.0, 1.0)).is_ok());
+    }
+
+    #[test]
+    fn brush_resizes_handles_without_crossing_or_leaving_home() {
+        let mut brush = BrushState::new(range(0.0, 10.0)).expect("brush should be valid");
+
+        brush.resize_start(4.0).expect("resize should succeed");
+        brush.resize_end(8.0).expect("resize should succeed");
+        brush.resize_start(20.0).expect("resize should clamp");
+        assert_eq!(brush.selected(), range(7.0, 8.0));
+        brush.resize_start(-20.0).expect("resize should clamp");
+        brush.resize_end(20.0).expect("resize should clamp");
+        assert_eq!(brush.selected(), brush.home());
+    }
+
+    #[test]
+    fn brush_pan_preserves_width_and_clamps_to_home() {
+        let mut brush = BrushState::new(range(0.0, 10.0)).expect("brush should be valid");
+        brush.resize_start(2.0).expect("resize should succeed");
+        brush.resize_end(6.0).expect("resize should succeed");
+
+        brush.pan_by(20.0).expect("pan should clamp");
+        assert_eq!(brush.selected(), range(6.0, 10.0));
+        brush.pan_by(-20.0).expect("pan should clamp");
+        assert_eq!(brush.selected(), range(0.0, 4.0));
+    }
+
+    #[test]
+    fn brush_zooms_around_anchor_clamps_and_resets() {
+        let mut brush = BrushState::new(range(0.0, 10.0)).expect("brush should be valid");
+
+        brush.zoom_at(2.0, 2.0).expect("zoom should succeed");
+        assert_eq!(brush.selected(), range(1.0, 6.0));
+        brush.zoom_at(1.0, f64::MAX).expect("zoom should clamp");
+        assert_eq!(brush.selected(), range(1.0, 2.0));
+        brush
+            .zoom_at(1.5, f64::MIN_POSITIVE)
+            .expect("zoom should clamp");
+        assert_eq!(brush.selected(), brush.home());
+        brush.resize_start(4.0).expect("resize should succeed");
+        brush.reset();
+        assert_eq!(brush.selected(), brush.home());
+    }
+
+    #[test]
+    fn brush_rejects_invalid_transforms_without_mutation() {
+        let mut brush = BrushState::new(range(0.0, 10.0)).expect("brush should be valid");
+        let initial = brush;
+
+        assert_eq!(
+            brush.resize_start(f64::NAN),
+            Err(ChartError::InvalidTransform)
+        );
+        assert_eq!(
+            brush.pan_by(f64::INFINITY),
+            Err(ChartError::InvalidTransform)
+        );
+        assert_eq!(brush.zoom_at(20.0, 2.0), Err(ChartError::InvalidTransform));
+        assert_eq!(brush.zoom_at(5.0, 0.0), Err(ChartError::InvalidTransform));
+        assert_eq!(brush, initial);
     }
 
     #[test]
