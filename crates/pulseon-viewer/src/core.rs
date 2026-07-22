@@ -1,7 +1,7 @@
 use pulseon_chart_core::{AxisRange, BrushState};
-use pulseon_model::alignment::AlignmentAxis;
+use pulseon_model::alignment::{AlignmentAxis, AlignmentViewport};
 use pulseon_model::metric::MetricKey;
-use pulseon_model::run::RunId;
+use pulseon_model::run::{Run, RunId, RunStatus};
 use pulseon_model::types::ProjectId;
 
 use crate::model::CatalogSnapshot;
@@ -9,6 +9,30 @@ use crate::query::CurveSnapshot;
 use crate::worker::{Generation, ReadEvent, ReadKind, ReadRequest, ReadSnapshot};
 
 pub const MAX_SELECTED_RUNS: usize = 10;
+
+/// Matches a Run by name, identifier, or lifecycle status.
+pub fn run_matches_filter(run: &Run, query: &str) -> bool {
+    run_fields_match_filter(
+        &run.name,
+        run.run_id.as_str(),
+        match run.status {
+            RunStatus::Running => "running",
+            RunStatus::Finished => "finished",
+            RunStatus::Failed => "failed",
+        },
+        query,
+    )
+}
+
+fn run_fields_match_filter(name: &str, run_id: &str, status: &str, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+    name.to_lowercase().contains(&query)
+        || run_id.to_lowercase().contains(&query)
+        || status.contains(&query)
+}
 
 /// Stable identities selected by the viewer independently of rendered widgets.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -82,6 +106,15 @@ impl ViewerCore {
 
     pub fn brush_mut(&mut self) -> Option<&mut BrushState> {
         self.brush.as_mut()
+    }
+
+    pub fn selected_viewport(&self) -> Option<AlignmentViewport> {
+        let selected = self.brush?.selected();
+        AlignmentViewport::new(
+            selected.start().floor() as i64,
+            selected.end().ceil() as i64,
+        )
+        .ok()
     }
 
     pub const fn catalog(&self) -> Option<&CatalogSnapshot> {
@@ -214,9 +247,12 @@ impl ViewerCore {
         if !project_exists {
             self.selection = ViewerSelection::default();
         } else {
-            self.selection
-                .run_ids
-                .retain(|run_id| snapshot.runs.iter().any(|run| &run.run_id == run_id));
+            self.selection.run_ids = snapshot
+                .runs
+                .iter()
+                .filter(|run| self.selection.run_ids.contains(&run.run_id))
+                .map(|run| run.run_id.clone())
+                .collect();
             if self
                 .selection
                 .metric_key
@@ -370,5 +406,20 @@ mod tests {
             Err(SelectionError::RunLimit)
         );
         assert_eq!(core.selection().run_ids.len(), MAX_SELECTED_RUNS);
+    }
+
+    #[test]
+    fn run_filter_matches_name_id_and_status_without_case() {
+        assert!(
+            ["loss", "run-42", "FAILED", ""]
+                .into_iter()
+                .all(|query| run_fields_match_filter("Loss Baseline", "RUN-42", "failed", query))
+        );
+        assert!(!run_fields_match_filter(
+            "Loss Baseline",
+            "RUN-42",
+            "failed",
+            "running"
+        ));
     }
 }
