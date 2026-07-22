@@ -1,3 +1,5 @@
+use pulseon_chart_core::{AxisRange, BrushState};
+use pulseon_model::alignment::AlignmentAxis;
 use pulseon_model::metric::MetricKey;
 use pulseon_model::run::RunId;
 use pulseon_model::types::ProjectId;
@@ -5,6 +7,8 @@ use pulseon_model::types::ProjectId;
 use crate::model::CatalogSnapshot;
 use crate::query::CurveSnapshot;
 use crate::worker::{Generation, ReadEvent, ReadKind, ReadRequest, ReadSnapshot};
+
+pub const MAX_SELECTED_RUNS: usize = 10;
 
 /// Stable identities selected by the viewer independently of rendered widgets.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -22,15 +26,38 @@ pub enum ApplyOutcome {
     IgnoredMismatched,
 }
 
+/// Invalid user selection transitions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum SelectionError {
+    #[error("at most {MAX_SELECTED_RUNS} Runs can be selected")]
+    RunLimit,
+}
+
 /// GPUI-independent state reconciler for native read snapshots.
-#[derive(Default)]
 pub struct ViewerCore {
     selection: ViewerSelection,
+    axis: AlignmentAxis,
+    brush: Option<BrushState>,
     catalog: Option<CatalogSnapshot>,
     overview: Option<CurveSnapshot>,
     detail: Option<CurveSnapshot>,
     expected: [Option<Generation>; 3],
     last_error: Option<String>,
+}
+
+impl Default for ViewerCore {
+    fn default() -> Self {
+        Self {
+            selection: ViewerSelection::default(),
+            axis: AlignmentAxis::Step,
+            brush: None,
+            catalog: None,
+            overview: None,
+            detail: None,
+            expected: [None; 3],
+            last_error: None,
+        }
+    }
 }
 
 impl ViewerCore {
@@ -43,6 +70,18 @@ impl ViewerCore {
 
     pub const fn selection(&self) -> &ViewerSelection {
         &self.selection
+    }
+
+    pub const fn axis(&self) -> AlignmentAxis {
+        self.axis
+    }
+
+    pub const fn brush(&self) -> Option<BrushState> {
+        self.brush
+    }
+
+    pub fn brush_mut(&mut self) -> Option<&mut BrushState> {
+        self.brush.as_mut()
     }
 
     pub const fn catalog(&self) -> Option<&CatalogSnapshot> {
@@ -59,6 +98,72 @@ impl ViewerCore {
 
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
+    }
+
+    /// Clears all state associated with the currently open source.
+    pub fn reset_source(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn select_project(&mut self, project_id: Option<ProjectId>) {
+        if self.selection.project_id == project_id {
+            return;
+        }
+        self.selection = ViewerSelection {
+            project_id,
+            ..ViewerSelection::default()
+        };
+        if let Some(catalog) = self.catalog.as_mut() {
+            catalog.runs.clear();
+            catalog.metric_keys.clear();
+        }
+        self.clear_curves();
+    }
+
+    /// Toggles one Run while enforcing the product's comparison limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SelectionError::RunLimit`] when adding an eleventh Run.
+    pub fn toggle_run(&mut self, run_id: RunId) -> Result<bool, SelectionError> {
+        if let Some(index) = self
+            .selection
+            .run_ids
+            .iter()
+            .position(|selected| selected == &run_id)
+        {
+            self.selection.run_ids.remove(index);
+            self.clear_curves();
+            return Ok(false);
+        }
+        if self.selection.run_ids.len() == MAX_SELECTED_RUNS {
+            return Err(SelectionError::RunLimit);
+        }
+        self.selection.run_ids.push(run_id);
+        self.clear_curves();
+        Ok(true)
+    }
+
+    pub fn select_metric(&mut self, metric_key: Option<MetricKey>) {
+        if self.selection.metric_key != metric_key {
+            self.selection.metric_key = metric_key;
+            self.clear_curves();
+        }
+    }
+
+    pub fn select_axis(&mut self, axis: AlignmentAxis) {
+        if self.axis != axis {
+            self.axis = axis;
+            self.clear_curves();
+        }
+    }
+
+    pub fn reset_view(&mut self) -> bool {
+        let Some(brush) = self.brush.as_mut() else {
+            return false;
+        };
+        brush.reset();
+        true
     }
 
     /// Marks one request stream pending without clearing its current snapshot.
@@ -87,7 +192,7 @@ impl ViewerCore {
         self.expected[index] = None;
         match event.result {
             Ok(ReadSnapshot::Catalog(snapshot)) => self.apply_catalog(snapshot),
-            Ok(ReadSnapshot::Overview(snapshot)) => self.overview = Some(snapshot),
+            Ok(ReadSnapshot::Overview(snapshot)) => self.apply_overview(snapshot),
             Ok(ReadSnapshot::Detail(snapshot)) => self.detail = Some(snapshot),
             Err(error) => self.last_error = Some(error.to_string()),
         }
@@ -128,6 +233,29 @@ impl ViewerCore {
             self.expected[kind_index(ReadKind::Detail)] = None;
         }
         self.catalog = Some(snapshot);
+    }
+
+    fn apply_overview(&mut self, snapshot: CurveSnapshot) {
+        self.brush = snapshot.real_range.and_then(|range| {
+            let home = AxisRange::new(range.start() as f64, range.end() as f64).ok()?;
+            let previous = self.brush.map(BrushState::selected);
+            let mut brush = BrushState::new(home).ok()?;
+            if let Some(selected) = previous {
+                brush.resize_start(selected.start()).ok()?;
+                brush.resize_end(selected.end()).ok()?;
+            }
+            Some(brush)
+        });
+        self.overview = Some(snapshot);
+    }
+
+    fn clear_curves(&mut self) {
+        self.brush = None;
+        self.overview = None;
+        self.detail = None;
+        self.expected[kind_index(ReadKind::Overview)] = None;
+        self.expected[kind_index(ReadKind::Detail)] = None;
+        self.last_error = None;
     }
 }
 
@@ -206,5 +334,41 @@ mod tests {
         assert_eq!(core.apply(event), ApplyOutcome::Applied);
         assert_eq!(core.selection(), &ViewerSelection::default());
         assert!(core.detail().is_none());
+    }
+
+    #[test]
+    fn selection_transitions_clear_only_dependent_state() {
+        let mut core = ViewerCore::default();
+        core.select_project(Some(ProjectId::from_string("project-1")));
+        assert!(
+            core.toggle_run(RunId::from_string("run-1"))
+                .expect("first Run should be selectable")
+        );
+        core.select_metric(Some(MetricKey::from_string("loss")));
+
+        core.select_axis(AlignmentAxis::ElapsedTime);
+
+        assert_eq!(core.axis(), AlignmentAxis::ElapsedTime);
+        assert_eq!(core.selection().run_ids.len(), 1);
+        assert_eq!(
+            core.selection().metric_key.as_ref().map(MetricKey::as_str),
+            Some("loss")
+        );
+        assert!(core.overview().is_none() && core.detail().is_none());
+    }
+
+    #[test]
+    fn run_selection_enforces_the_ten_run_limit() {
+        let mut core = ViewerCore::default();
+        for index in 0..MAX_SELECTED_RUNS {
+            core.toggle_run(RunId::from_string(format!("run-{index}")))
+                .expect("first ten Runs should be selectable");
+        }
+
+        assert_eq!(
+            core.toggle_run(RunId::from_string("run-10")),
+            Err(SelectionError::RunLimit)
+        );
+        assert_eq!(core.selection().run_ids.len(), MAX_SELECTED_RUNS);
     }
 }
