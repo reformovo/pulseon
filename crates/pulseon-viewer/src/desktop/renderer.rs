@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use gpui::{
     Bounds, Path, PathBuilder, Pixels, Point, Rgba, WindowAppearance, canvas, fill, point, px, rgb,
@@ -314,7 +315,7 @@ pub fn overview_viewport(snapshot: &CurveSnapshot, brush: BrushState) -> Option<
 
 pub fn detail_canvas(
     adapter: std::rc::Rc<std::cell::RefCell<ChartAdapter>>,
-    snapshot: CurveSnapshot,
+    snapshot: Arc<CurveSnapshot>,
     revision: u64,
     viewport: Viewport,
 ) -> impl gpui::Styled + gpui::IntoElement {
@@ -358,7 +359,7 @@ pub fn detail_canvas(
 
 pub fn overview_canvas(
     adapter: std::rc::Rc<std::cell::RefCell<ChartAdapter>>,
-    snapshot: CurveSnapshot,
+    snapshot: Arc<CurveSnapshot>,
     revision: u64,
     viewport: Viewport,
     brush: BrushState,

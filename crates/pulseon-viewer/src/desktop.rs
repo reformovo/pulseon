@@ -1,5 +1,6 @@
 use std::ops::Range;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use std::{cell::RefCell, rc::Rc};
 
@@ -500,8 +501,8 @@ impl ViewerApp {
     }
 
     fn render_detail(&mut self, cx: &mut Context<Self>) -> gpui::Div {
-        let Some(snapshot) = self.core.detail().cloned() else {
-            let overview = self.core.overview().cloned();
+        let Some(snapshot) = self.core.detail_shared() else {
+            let overview = self.core.overview_shared();
             let message =
                 empty_detail_message(overview.is_some(), self.core.is_pending(ReadKind::Detail));
             return div()
@@ -536,7 +537,7 @@ impl ViewerApp {
         let x_ticks = pulseon_chart_core::linear_ticks(viewport.x, 6);
         let y_ticks = pulseon_chart_core::linear_ticks(viewport.y, 6);
         let adapter = Rc::clone(&self.chart_adapter);
-        let hit_snapshot = snapshot.clone();
+        let hit_snapshot = Arc::clone(&snapshot);
         let hit_adapter = Rc::clone(&self.chart_adapter);
         let axis = self.core.axis();
         let interaction_range = self.core.brush().map(|brush| brush.selected());
@@ -580,7 +581,7 @@ impl ViewerApp {
                             .child(
                                 renderer::detail_canvas(
                                     adapter,
-                                    snapshot.clone(),
+                                    Arc::clone(&snapshot),
                                     self.detail_revision,
                                     viewport,
                                 )
@@ -713,7 +714,7 @@ impl ViewerApp {
     }
 
     fn render_overview(&mut self, cx: &mut Context<Self>) -> gpui::Div {
-        let Some(snapshot) = self.core.overview().cloned() else {
+        let Some(snapshot) = self.core.overview_shared() else {
             return div().h(px(96.));
         };
         let Some(brush) = self.core.brush() else {

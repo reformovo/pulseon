@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pulseon_chart_core::{AxisRange, BrushState};
 use pulseon_model::alignment::{AlignmentAxis, AlignmentViewport};
 use pulseon_model::metric::MetricKey;
@@ -63,8 +65,8 @@ pub struct ViewerCore {
     axis: AlignmentAxis,
     brush: Option<BrushState>,
     catalog: Option<CatalogSnapshot>,
-    overview: Option<CurveSnapshot>,
-    detail: Option<CurveSnapshot>,
+    overview: Option<Arc<CurveSnapshot>>,
+    detail: Option<Arc<CurveSnapshot>>,
     expected: [Option<Generation>; 3],
     last_error: Option<String>,
 }
@@ -121,12 +123,20 @@ impl ViewerCore {
         self.catalog.as_ref()
     }
 
-    pub const fn overview(&self) -> Option<&CurveSnapshot> {
-        self.overview.as_ref()
+    pub fn overview(&self) -> Option<&CurveSnapshot> {
+        self.overview.as_deref()
     }
 
-    pub const fn detail(&self) -> Option<&CurveSnapshot> {
-        self.detail.as_ref()
+    pub fn detail(&self) -> Option<&CurveSnapshot> {
+        self.detail.as_deref()
+    }
+
+    pub fn overview_shared(&self) -> Option<Arc<CurveSnapshot>> {
+        self.overview.as_ref().map(Arc::clone)
+    }
+
+    pub fn detail_shared(&self) -> Option<Arc<CurveSnapshot>> {
+        self.detail.as_ref().map(Arc::clone)
     }
 
     pub fn last_error(&self) -> Option<&str> {
@@ -226,7 +236,7 @@ impl ViewerCore {
         match event.result {
             Ok(ReadSnapshot::Catalog(snapshot)) => self.apply_catalog(snapshot),
             Ok(ReadSnapshot::Overview(snapshot)) => self.apply_overview(snapshot),
-            Ok(ReadSnapshot::Detail(snapshot)) => self.detail = Some(snapshot),
+            Ok(ReadSnapshot::Detail(snapshot)) => self.detail = Some(Arc::new(snapshot)),
             Err(error) => self.last_error = Some(error.to_string()),
         }
         ApplyOutcome::Applied
@@ -286,7 +296,7 @@ impl ViewerCore {
             self.detail = None;
             self.expected[kind_index(ReadKind::Detail)] = None;
         }
-        self.overview = Some(snapshot);
+        self.overview = Some(Arc::new(snapshot));
     }
 
     fn clear_curves(&mut self) {
@@ -352,13 +362,30 @@ mod tests {
     }
 
     #[test]
+    fn shared_detail_handles_reuse_the_snapshot_allocation() {
+        let core = ViewerCore {
+            detail: Some(Arc::new(curves())),
+            ..ViewerCore::default()
+        };
+
+        let first = core
+            .detail_shared()
+            .expect("detail snapshot should be available");
+        let second = core
+            .detail_shared()
+            .expect("detail snapshot should be available");
+
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
     fn refresh_removes_missing_selection_and_curve_snapshots() {
         let mut core = ViewerCore::new(ViewerSelection {
             project_id: Some(ProjectId::from_string("removed")),
             run_ids: vec![RunId::from_string("run-1")],
             metric_key: Some(MetricKey::from_string("loss")),
         });
-        core.detail = Some(curves());
+        core.detail = Some(Arc::new(curves()));
         let request = ReadRequest::Discover(crate::model::DiscoveryRequest::default());
         core.begin(Generation(1), &request);
         let event = ReadEvent {
@@ -430,7 +457,7 @@ mod tests {
     #[test]
     fn overview_without_a_real_range_removes_stale_detail() {
         let mut core = ViewerCore {
-            detail: Some(curves()),
+            detail: Some(Arc::new(curves())),
             ..ViewerCore::default()
         };
 
