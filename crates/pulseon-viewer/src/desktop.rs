@@ -148,7 +148,7 @@ struct ViewerApp {
     detail_width: u32,
     hover: Option<HoverPoint>,
     drag: Option<DragGesture>,
-    zoom_token: u64,
+    zoom_task: Option<Task<()>>,
 }
 
 impl ViewerApp {
@@ -173,7 +173,7 @@ impl ViewerApp {
             detail_width: 1_000,
             hover: None,
             drag: None,
-            zoom_token: 0,
+            zoom_task: None,
         };
         if let Some(path) = project_path {
             app.open_source(path, cx);
@@ -189,6 +189,7 @@ impl ViewerApp {
         self.chart_adapter.borrow_mut().clear();
         self.hover = None;
         self.drag = None;
+        self.zoom_task = None;
         self.local_error = None;
         self.source_path = Some(path.clone());
         match ReadWorker::spawn(&path) {
@@ -1059,18 +1060,13 @@ impl ViewerApp {
         {
             return;
         }
-        self.zoom_token = self.zoom_token.saturating_add(1);
-        let token = self.zoom_token;
-        cx.spawn(async move |this, cx| {
+        self.zoom_task = Some(cx.spawn(async move |this, cx| {
             Timer::after(Duration::from_millis(100)).await;
             let _ = this.update(cx, |this, cx| {
-                if this.zoom_token == token {
-                    this.request_detail();
-                    cx.notify();
-                }
+                this.request_detail();
+                cx.notify();
             });
-        })
-        .detach();
+        }));
         cx.stop_propagation();
         cx.notify();
     }
