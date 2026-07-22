@@ -59,8 +59,18 @@ impl RunListCache {
 
 actions!(
     pulseon_viewer,
-    [OpenProject, Refresh, ResetView, UseStep, UseElapsed, Quit]
+    [
+        OpenProject,
+        Refresh,
+        ResetView,
+        UseStep,
+        UseElapsed,
+        ActivateSelection,
+        Quit
+    ]
 );
+
+const SELECTABLE_CONTEXT: &str = "ViewerSelectable";
 
 pub fn run(project_path: Option<PathBuf>) {
     Application::new().run(move |cx: &mut App| {
@@ -69,6 +79,8 @@ pub fn run(project_path: Option<PathBuf>) {
             KeyBinding::new("cmd-r", Refresh, None),
             KeyBinding::new("cmd-0", ResetView, None),
             KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("enter", ActivateSelection, Some(SELECTABLE_CONTEXT)),
+            KeyBinding::new("space", ActivateSelection, Some(SELECTABLE_CONTEXT)),
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.set_menus(menus());
@@ -461,10 +473,13 @@ impl ViewerApp {
                                     })
                                     .map(|(index, project)| {
                                         let project_id = project.project_id.clone();
+                                        let action_project_id = project_id.clone();
                                         let selected = selected_project_id.as_ref()
                                             == Some(&project.project_id);
                                         div()
                                             .id(("project", index))
+                                            .key_context(SELECTABLE_CONTEXT)
+                                            .tab_index(0)
                                             .h(px(40.))
                                             .cursor_pointer()
                                             .px_3()
@@ -472,9 +487,18 @@ impl ViewerApp {
                                             .flex()
                                             .items_center()
                                             .when(selected, |row| row.bg(rgb(0xdbeafe)))
+                                            .focus(|style| style.bg(rgb(0xe0e7ff)))
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.select_project(project_id.clone(), cx);
                                             }))
+                                            .on_action(cx.listener(
+                                                move |this, _: &ActivateSelection, _, cx| {
+                                                    this.select_project(
+                                                        action_project_id.clone(),
+                                                        cx,
+                                                    );
+                                                },
+                                            ))
                                             .child(project.name.clone())
                                     })
                                     .collect::<Vec<_>>()
@@ -497,6 +521,7 @@ impl ViewerApp {
                                     .rounded_md()
                                     .border_1()
                                     .border_color(rgb(0xc7cbd1))
+                                    .focus(|style| style.border_color(rgb(0x2563eb)))
                                     .on_key_down(cx.listener(Self::on_filter_key))
                                     .on_click(move |_, window, _| filter_focus.focus(window))
                                     .child(if self.run_filter.is_empty() {
@@ -537,11 +562,32 @@ impl ViewerApp {
                                                     .when(selected, |row| row.bg(rgb(0xecfdf5)))
                                                     .when(!can_toggle, |row| row.opacity(0.45))
                                                     .when(can_toggle, |row| {
-                                                        row.cursor_pointer().on_click(cx.listener(
-                                                            move |this, _, _, cx| {
-                                                                this.toggle_run(run_id.clone(), cx);
-                                                            },
-                                                        ))
+                                                        let action_run_id = run_id.clone();
+                                                        row.key_context(SELECTABLE_CONTEXT)
+                                                            .tab_index(0)
+                                                            .cursor_pointer()
+                                                            .focus(|style| {
+                                                                style.bg(rgb(0xe0e7ff))
+                                                            })
+                                                            .on_click(cx.listener(
+                                                                move |this, _, _, cx| {
+                                                                    this.toggle_run(
+                                                                        run_id.clone(),
+                                                                        cx,
+                                                                    );
+                                                                },
+                                                            ))
+                                                            .on_action(cx.listener(
+                                                                move |this,
+                                                                      _: &ActivateSelection,
+                                                                      _,
+                                                                      cx| {
+                                                                    this.toggle_run(
+                                                                        action_run_id.clone(),
+                                                                        cx,
+                                                                    );
+                                                                },
+                                                            ))
                                                     })
                                                     .child(run.name.clone())
                                                     .child(
@@ -574,8 +620,11 @@ impl ViewerApp {
                                                 let selected =
                                                     selected_metric_key.as_ref() == Some(metric);
                                                 let selected_metric = metric.clone();
+                                                let action_metric = selected_metric.clone();
                                                 div()
                                                     .id(("metric", index))
+                                                    .key_context(SELECTABLE_CONTEXT)
+                                                    .tab_index(0)
                                                     .h(px(40.))
                                                     .cursor_pointer()
                                                     .px_3()
@@ -583,12 +632,24 @@ impl ViewerApp {
                                                     .flex()
                                                     .items_center()
                                                     .when(selected, |row| row.bg(rgb(0xdbeafe)))
+                                                    .focus(|style| style.bg(rgb(0xe0e7ff)))
                                                     .on_click(cx.listener(move |this, _, _, cx| {
                                                         this.select_metric(
                                                             selected_metric.clone(),
                                                             cx,
                                                         );
                                                     }))
+                                                    .on_action(cx.listener(
+                                                        move |this,
+                                                              _: &ActivateSelection,
+                                                              _,
+                                                            cx| {
+                                                            this.select_metric(
+                                                                action_metric.clone(),
+                                                                cx,
+                                                            );
+                                                        },
+                                                    ))
                                                     .child(metric.as_str().to_owned())
                                             })
                                             .collect::<Vec<_>>()
@@ -674,6 +735,7 @@ impl ViewerApp {
                     .child(
                         div()
                             .id("detail-chart")
+                            .focusable()
                             .relative()
                             .flex_1()
                             .h_full()
@@ -834,6 +896,7 @@ impl ViewerApp {
             .child(
                 div()
                     .id("overview-chart")
+                    .focusable()
                     .h(px(96.))
                     .w_full()
                     .relative()
@@ -1046,6 +1109,7 @@ impl Render for ViewerApp {
 
         div()
             .track_focus(&self.focus)
+            .tab_group()
             .on_action(cx.listener(Self::on_open))
             .on_action(cx.listener(Self::on_refresh))
             .on_action(cx.listener(Self::on_reset))
@@ -1087,13 +1151,19 @@ impl Render for ViewerApp {
                     .child(
                         div()
                             .id("open-project")
+                            .key_context(SELECTABLE_CONTEXT)
+                            .tab_index(0)
                             .cursor_pointer()
                             .px_4()
                             .py_2()
                             .rounded_md()
                             .bg(rgb(0x2563eb))
+                            .focus(|style| style.bg(rgb(0x1d4ed8)))
                             .text_color(rgb(0xffffff))
                             .on_click(cx.listener(|this, _, _, cx| this.open_picker(cx)))
+                            .on_action(cx.listener(|this, _: &ActivateSelection, _, cx| {
+                                this.open_picker(cx)
+                            }))
                             .child("Open Project…"),
                     )
             })
