@@ -52,6 +52,8 @@
 
 - Python code writing, reviewing, testing, or refactoring -> use `.agents/skills/python-best-practices/`.
 - Rust code writing, reviewing, testing, or refactoring -> use `.agents/skills/rust-best-practices/`.
+- GPUI application code, actions/keybindings, async tasks, contexts, elements,
+  focus, layout, element IDs, or GPUI tests -> use `.agents/skills/gpui/`.
 - Domain terminology, ubiquitous language, glossary, or ADR maintenance -> use `.agents/skills/domain-modeling/`.
 - Vibe coding workflow, AI coding constraints, scope lock, verification gates, or contract maintenance -> use `.agents/skills/reform/`.
 - Architecture grilling, ADRs, glossary, or plan hardening -> use `.agents/skills/grill-with-docs/`.
