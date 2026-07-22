@@ -150,9 +150,9 @@ impl ReadWorker {
 impl Drop for ReadWorker {
     fn drop(&mut self) {
         self.requests.take();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        // A native query cannot currently be cancelled. Detach it so dropping
+        // viewer state never blocks the UI thread while the query finishes.
+        drop(self.thread.take());
     }
 }
 
@@ -235,6 +235,37 @@ fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropping_worker_does_not_wait_for_running_thread() {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            let _ = release_rx.recv();
+            let _ = finished_tx.send(());
+        });
+        let worker = ReadWorker {
+            requests: Some(request_tx),
+            events: event_rx,
+            thread: Some(thread),
+        };
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let dropper = thread::spawn(move || {
+            drop(worker);
+            let _ = dropped_tx.send(());
+        });
+
+        let dropped = dropped_rx.recv_timeout(Duration::from_secs(1));
+        release_tx.send(()).expect("test worker should still exist");
+        finished_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("test worker should finish after release");
+        dropper.join().expect("dropper should not panic");
+
+        assert!(dropped.is_ok(), "worker drop waited for its running thread");
+    }
 
     #[test]
     fn pending_requests_keep_the_latest_generation_per_kind() {
