@@ -16,7 +16,7 @@ use pulseon_model::metric::MetricKey;
 use pulseon_model::run::{Run, RunId, RunStatus};
 use pulseon_model::types::ProjectId;
 use pulseon_viewer::core::{ApplyOutcome, MAX_SELECTED_RUNS, ViewerCore, run_matches_filter};
-use pulseon_viewer::model::DiscoveryRequest;
+use pulseon_viewer::model::{CatalogSnapshot, DiscoveryRequest};
 use pulseon_viewer::query::{CurveSelection, DetailRequest, OverviewRequest};
 use pulseon_viewer::worker::{Generation, ReadKind, ReadRequest, ReadWorker};
 
@@ -30,6 +30,29 @@ enum DragGesture {
     BrushEnd,
     BrushWindow { last_axis: f64 },
     Detail { last_x: f64 },
+}
+
+#[derive(Default)]
+struct RunListCache {
+    runs: Rc<[Run]>,
+}
+
+impl RunListCache {
+    fn rebuild(&mut self, catalog: Option<&CatalogSnapshot>, filter: &str) {
+        self.runs = catalog.map_or_else(Rc::default, |catalog| {
+            catalog
+                .runs
+                .iter()
+                .filter(|run| run_matches_filter(run, filter))
+                .cloned()
+                .collect::<Vec<_>>()
+                .into()
+        });
+    }
+
+    fn shared(&self) -> Rc<[Run]> {
+        Rc::clone(&self.runs)
+    }
 }
 
 actions!(
@@ -97,6 +120,7 @@ struct ViewerApp {
     focus: FocusHandle,
     filter_focus: FocusHandle,
     run_filter: String,
+    run_list: RunListCache,
     source_path: Option<PathBuf>,
     worker: Option<ReadWorker>,
     core: ViewerCore,
@@ -120,6 +144,7 @@ impl ViewerApp {
             focus,
             filter_focus: cx.focus_handle().tab_stop(true),
             run_filter: String::new(),
+            run_list: RunListCache::default(),
             source_path: None,
             worker: None,
             core: ViewerCore::default(),
@@ -143,6 +168,7 @@ impl ViewerApp {
     fn open_source(&mut self, path: PathBuf) {
         self.worker = None;
         self.core.reset_source();
+        self.run_list = RunListCache::default();
         self.chart_adapter.borrow_mut().clear();
         self.hover = None;
         self.drag = None;
@@ -184,6 +210,9 @@ impl ViewerApp {
             let succeeded = event.result.is_ok();
             if self.core.apply(event) != ApplyOutcome::Applied || !succeeded {
                 continue;
+            }
+            if kind == ReadKind::Catalog {
+                self.run_list.rebuild(self.core.catalog(), &self.run_filter);
             }
             match kind {
                 ReadKind::Catalog if self.curve_selection().is_some() => self.request_overview(),
@@ -313,6 +342,7 @@ impl ViewerApp {
     fn select_project(&mut self, project_id: ProjectId, cx: &mut Context<Self>) {
         self.core.select_project(Some(project_id));
         self.run_filter.clear();
+        self.run_list.rebuild(self.core.catalog(), &self.run_filter);
         self.refresh_catalog();
         cx.notify();
     }
@@ -349,6 +379,7 @@ impl ViewerApp {
             }
             _ => return,
         }
+        self.run_list.rebuild(self.core.catalog(), &self.run_filter);
         cx.stop_propagation();
         cx.notify();
     }
@@ -359,12 +390,7 @@ impl ViewerApp {
             .catalog()
             .expect("catalog checked before rendering");
         let projects = catalog.projects.clone();
-        let runs: Vec<Run> = catalog
-            .runs
-            .iter()
-            .filter(|run| run_matches_filter(run, &self.run_filter))
-            .cloned()
-            .collect();
+        let runs = self.run_list.shared();
         let metrics = catalog.metric_keys.clone();
         let selection = self.core.selection().clone();
         let filter_focus = self.filter_focus.clone();
@@ -1107,5 +1133,15 @@ mod tests {
             "Select Runs and one metric to draw curves."
         );
         assert_eq!(empty_detail_message(true, true), "Loading curves…");
+    }
+
+    #[test]
+    fn run_list_cache_shares_filtered_runs_between_renders() {
+        let cache = RunListCache::default();
+
+        let first = cache.shared();
+        let second = cache.shared();
+
+        assert!(Rc::ptr_eq(&first, &second));
     }
 }
