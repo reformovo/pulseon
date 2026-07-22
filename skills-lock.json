@@ -7,6 +7,12 @@
       "skillPath": "skills/engineering/domain-modeling/SKILL.md",
       "computedHash": "67343881f5def98487d56243155716110afbcbf22ec92421c882d532b941cb17"
     },
+    "gpui": {
+      "source": "reformovo/skills",
+      "sourceType": "github",
+      "skillPath": "skills/gpui/SKILL.md",
+      "computedHash": "ceb50b6587fdda7ab205dba1d77ec53c697a039abb3fb0bf9aad1378fcc76fc9"
+    },
     "grill-with-docs": {
       "source": "mattpocock/skills",
       "sourceType": "github",
