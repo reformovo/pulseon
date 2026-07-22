@@ -1,11 +1,13 @@
 use std::ops::Range;
 use std::path::PathBuf;
+use std::time::Duration;
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyBinding, KeyDownEvent, Menu, MenuItem,
-    MouseMoveEvent, PathPromptOptions, Render, SharedString, SystemMenuType, Window, WindowBounds,
-    WindowOptions, actions, div, prelude::*, px, rgb, size, uniform_list,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathPromptOptions, Render,
+    ScrollWheelEvent, SharedString, SystemMenuType, Timer, Window, WindowBounds, WindowOptions,
+    actions, div, prelude::*, px, rgb, size, uniform_list,
 };
 use pulseon_model::alignment::AlignmentAxis;
 use pulseon_model::comparison::{EvidenceCompleteness, EvidenceReason};
@@ -20,6 +22,14 @@ use pulseon_viewer::worker::{Generation, ReadKind, ReadRequest, ReadWorker};
 mod renderer;
 
 use renderer::{ChartAdapter, HoverPoint};
+
+#[derive(Clone, Copy, Debug)]
+enum DragGesture {
+    BrushStart,
+    BrushEnd,
+    BrushWindow { last_axis: f64 },
+    Detail { last_x: f64 },
+}
 
 actions!(
     pulseon_viewer,
@@ -92,8 +102,13 @@ struct ViewerApp {
     next_generation: u64,
     local_error: Option<String>,
     chart_adapter: Rc<RefCell<ChartAdapter>>,
+    overview_revision: u64,
     detail_revision: u64,
+    overview_width: u32,
+    detail_width: u32,
     hover: Option<HoverPoint>,
+    drag: Option<DragGesture>,
+    zoom_token: u64,
 }
 
 impl ViewerApp {
@@ -110,8 +125,13 @@ impl ViewerApp {
             next_generation: 1,
             local_error: None,
             chart_adapter: Rc::new(RefCell::new(ChartAdapter::default())),
+            overview_revision: 0,
             detail_revision: 0,
+            overview_width: 1_000,
+            detail_width: 1_000,
             hover: None,
+            drag: None,
+            zoom_token: 0,
         };
         if let Some(path) = project_path {
             app.open_source(path);
@@ -124,6 +144,7 @@ impl ViewerApp {
         self.core.reset_source();
         self.chart_adapter.borrow_mut().clear();
         self.hover = None;
+        self.drag = None;
         self.local_error = None;
         self.source_path = Some(path.clone());
         match ReadWorker::spawn(&path) {
@@ -165,7 +186,10 @@ impl ViewerApp {
             }
             match kind {
                 ReadKind::Catalog if self.curve_selection().is_some() => self.request_overview(),
-                ReadKind::Overview => self.request_detail(),
+                ReadKind::Overview => {
+                    self.overview_revision = revision;
+                    self.request_detail();
+                }
                 ReadKind::Detail => self.detail_revision = revision,
                 ReadKind::Catalog => {}
             }
@@ -190,7 +214,7 @@ impl ViewerApp {
         };
         self.submit(ReadRequest::Overview(OverviewRequest {
             selection,
-            physical_width: 1_000,
+            physical_width: self.overview_width,
         }));
     }
 
@@ -204,7 +228,7 @@ impl ViewerApp {
         self.submit(ReadRequest::Detail(DetailRequest {
             selection,
             viewport,
-            physical_width: 1_000,
+            physical_width: self.detail_width,
         }));
     }
 
@@ -504,7 +528,10 @@ impl ViewerApp {
         let hit_snapshot = snapshot.clone();
         let hit_adapter = Rc::clone(&self.chart_adapter);
         let axis = self.core.axis();
-        let pending = self.core.is_pending(ReadKind::Detail);
+        let interaction_range = self.core.brush().map(|brush| brush.selected());
+        let pending = self.core.is_pending(ReadKind::Detail)
+            || interaction_range
+                .is_some_and(|selected| !renderer::selection_covered(&snapshot, selected));
 
         div()
             .relative()
@@ -550,12 +577,39 @@ impl ViewerApp {
                             )
                             .on_mouse_move(cx.listener(
                                 move |this, event: &MouseMoveEvent, _, cx| {
-                                    this.hover = hit_adapter.borrow().hit_test(
-                                        &hit_snapshot,
-                                        viewport,
-                                        event.position,
-                                    );
+                                    if event.dragging() {
+                                        this.move_detail_drag(event, cx);
+                                    } else {
+                                        this.hover = hit_adapter.borrow().hit_test(
+                                            &hit_snapshot,
+                                            viewport,
+                                            event.position,
+                                        );
+                                    }
                                     cx.notify();
+                                },
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                                    this.begin_detail_drag(event, cx);
+                                }),
+                            )
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                                    this.finish_drag(cx);
+                                }),
+                            )
+                            .on_mouse_up_out(
+                                MouseButton::Left,
+                                cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                                    this.finish_drag(cx);
+                                }),
+                            )
+                            .on_scroll_wheel(cx.listener(
+                                |this, event: &ScrollWheelEvent, _, cx| {
+                                    this.zoom_detail(event, cx);
                                 },
                             ))
                             .on_hover(cx.listener(|this, hovered, _, cx| {
@@ -582,6 +636,7 @@ impl ViewerApp {
                     .text_sm()
                     .child(axis_label(axis)),
             )
+            .child(self.render_overview(cx))
             .children(pending.then(|| {
                 div()
                     .absolute()
@@ -645,11 +700,227 @@ impl ViewerApp {
                     .child(div().text_xs().text_color(rgb(0x6b7280)).child(evidence))
             }))
     }
+
+    fn render_overview(&mut self, cx: &mut Context<Self>) -> gpui::Div {
+        let Some(snapshot) = self.core.overview().cloned() else {
+            return div().h(px(96.));
+        };
+        let Some(brush) = self.core.brush() else {
+            return div().h(px(96.));
+        };
+        let Some(viewport) = renderer::overview_viewport(&snapshot, brush) else {
+            return div().h(px(96.));
+        };
+        let adapter = Rc::clone(&self.chart_adapter);
+        let selected = brush.selected();
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .id("overview-chart")
+                    .h(px(96.))
+                    .w_full()
+                    .relative()
+                    .cursor_pointer()
+                    .border_1()
+                    .border_color(rgb(0xd1d5db))
+                    .bg(rgb(0xffffff))
+                    .child(
+                        renderer::overview_canvas(
+                            adapter,
+                            snapshot,
+                            self.overview_revision,
+                            viewport,
+                            brush,
+                        )
+                        .size_full(),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                            this.begin_brush_drag(event, cx);
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                        if event.dragging() {
+                            this.move_brush_drag(event, cx);
+                        }
+                    }))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, _, cx| this.finish_drag(cx)),
+                    )
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, _, cx| this.finish_drag(cx)),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .text_xs()
+                    .text_color(rgb(0x6b7280))
+                    .child(format_tick(selected.start()))
+                    .child(format_tick(selected.end())),
+            )
+    }
+
+    fn begin_brush_drag(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let Some(brush) = self.core.brush() else {
+            return;
+        };
+        let adapter = self.chart_adapter.borrow();
+        self.drag = match adapter.brush_target(brush, event.position) {
+            Some(renderer::BrushDragTarget::Start) => Some(DragGesture::BrushStart),
+            Some(renderer::BrushDragTarget::End) => Some(DragGesture::BrushEnd),
+            Some(renderer::BrushDragTarget::Window) => adapter
+                .overview_axis_at(brush, event.position)
+                .map(|last_axis| DragGesture::BrushWindow { last_axis }),
+            None => None,
+        };
+        self.hover = None;
+        cx.notify();
+    }
+
+    fn move_brush_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(mut gesture) = self.drag else {
+            return;
+        };
+        let Some(brush) = self.core.brush() else {
+            return;
+        };
+        let Some(axis) = self
+            .chart_adapter
+            .borrow()
+            .overview_axis_at(brush, event.position)
+        else {
+            return;
+        };
+        if let Some(brush) = self.core.brush_mut() {
+            match &mut gesture {
+                DragGesture::BrushStart => {
+                    let _ = brush.resize_start(axis);
+                }
+                DragGesture::BrushEnd => {
+                    let _ = brush.resize_end(axis);
+                }
+                DragGesture::BrushWindow { last_axis } => {
+                    let _ = brush.pan_by(axis - *last_axis);
+                    *last_axis = axis;
+                }
+                DragGesture::Detail { .. } => return,
+            }
+        }
+        self.drag = Some(gesture);
+        cx.notify();
+    }
+
+    fn begin_detail_drag(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let Some(range) = self.core.brush().map(|brush| brush.selected()) else {
+            return;
+        };
+        self.drag = self
+            .chart_adapter
+            .borrow()
+            .detail_axis_at(range, event.position)
+            .map(|_| DragGesture::Detail {
+                last_x: f64::from(event.position.x),
+            });
+        self.hover = None;
+        cx.notify();
+    }
+
+    fn move_detail_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(DragGesture::Detail { mut last_x }) = self.drag else {
+            return;
+        };
+        let Some(range) = self.core.brush().map(|brush| brush.selected()) else {
+            return;
+        };
+        let Some(delta) =
+            self.chart_adapter
+                .borrow()
+                .detail_pan_delta(range, last_x, event.position)
+        else {
+            return;
+        };
+        if let Some(brush) = self.core.brush_mut() {
+            let _ = brush.pan_by(delta);
+        }
+        last_x = f64::from(event.position.x);
+        self.drag = Some(DragGesture::Detail { last_x });
+        cx.notify();
+    }
+
+    fn finish_drag(&mut self, cx: &mut Context<Self>) {
+        if self.drag.take().is_some() {
+            self.request_detail();
+            cx.notify();
+        }
+    }
+
+    fn zoom_detail(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let Some(range) = self.core.brush().map(|brush| brush.selected()) else {
+            return;
+        };
+        let Some(anchor) = self
+            .chart_adapter
+            .borrow()
+            .detail_axis_at(range, event.position)
+        else {
+            return;
+        };
+        let delta = f32::from(event.delta.pixel_delta(px(16.)).y);
+        let factor = f64::from((-delta / 240.).exp().clamp(0.5, 2.));
+        if self
+            .core
+            .brush_mut()
+            .is_none_or(|brush| brush.zoom_at(anchor, factor).is_err())
+        {
+            return;
+        }
+        self.zoom_token = self.zoom_token.saturating_add(1);
+        let token = self.zoom_token;
+        cx.spawn(async move |this, cx| {
+            Timer::after(Duration::from_millis(100)).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.zoom_token == token {
+                    this.request_detail();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn reconcile_canvas_widths(&mut self, scale_factor: f32) {
+        let (overview, detail) = self.chart_adapter.borrow().physical_widths(scale_factor);
+        let overview_changed = overview.is_some_and(|width| width != self.overview_width);
+        let detail_changed = detail.is_some_and(|width| width != self.detail_width);
+        if let Some(width) = overview {
+            self.overview_width = width;
+        }
+        if let Some(width) = detail {
+            self.detail_width = width;
+        }
+        if overview_changed {
+            self.request_overview();
+        }
+        if detail_changed {
+            self.request_detail();
+        }
+    }
 }
 
 impl Render for ViewerApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.drain_events();
+        self.reconcile_canvas_widths(window.scale_factor());
         if [ReadKind::Catalog, ReadKind::Overview, ReadKind::Detail]
             .into_iter()
             .any(|kind| self.core.is_pending(kind))

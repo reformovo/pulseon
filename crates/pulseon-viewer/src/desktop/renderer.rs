@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use gpui::{
     Bounds, Path, PathBuilder, Pixels, Point, Rgba, WindowAppearance, canvas, fill, point, px, rgb,
-    size,
+    rgba, size,
 };
 use pulseon_chart_core::{
-    AxisRange, CanvasSize, PathCache, ScreenPoint, Viewport, hit_test_point, visible_y_range_for,
+    AxisRange, BrushState, CanvasSize, LinearScale, PathCache, ScreenPoint, Viewport,
+    hit_test_point, visible_y_range_for,
 };
 use pulseon_model::alignment::AlignmentAxis;
 use pulseon_model::comparison::EvidenceCompleteness;
@@ -22,6 +23,7 @@ pub struct HoverPoint {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct GpuiPathKey {
+    kind: ChartKind,
     revision: u64,
     viewport: [u64; 4],
     bounds: [u32; 4],
@@ -29,11 +31,26 @@ struct GpuiPathKey {
     partial: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ChartKind {
+    Detail,
+    Overview,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrushDragTarget {
+    Start,
+    End,
+    Window,
+}
+
 #[derive(Default)]
 pub struct ChartAdapter {
-    projection_cache: PathCache,
-    gpui_paths: HashMap<String, (GpuiPathKey, Path<Pixels>)>,
+    detail_projection_cache: PathCache,
+    overview_projection_cache: PathCache,
+    gpui_paths: HashMap<(ChartKind, String), (GpuiPathKey, Path<Pixels>)>,
     detail_bounds: Option<Bounds<Pixels>>,
+    overview_bounds: Option<Bounds<Pixels>>,
 }
 
 struct PreparedChart {
@@ -42,20 +59,26 @@ struct PreparedChart {
 
 impl ChartAdapter {
     pub fn clear(&mut self) {
-        self.projection_cache.clear();
+        self.detail_projection_cache.clear();
+        self.overview_projection_cache.clear();
         self.gpui_paths.clear();
         self.detail_bounds = None;
+        self.overview_bounds = None;
     }
 
     fn prepare(
         &mut self,
         snapshot: &CurveSnapshot,
+        kind: ChartKind,
         revision: u64,
         viewport: Viewport,
         bounds: Bounds<Pixels>,
         appearance: WindowAppearance,
     ) -> PreparedChart {
-        self.detail_bounds = Some(bounds);
+        match kind {
+            ChartKind::Detail => self.detail_bounds = Some(bounds),
+            ChartKind::Overview => self.overview_bounds = Some(bounds),
+        }
         let Ok(canvas) =
             CanvasSize::new(f64::from(bounds.size.width), f64::from(bounds.size.height))
         else {
@@ -72,6 +95,7 @@ impl ChartAdapter {
             };
             let partial = curve.evidence.completeness == EvidenceCompleteness::Partial;
             let key = GpuiPathKey {
+                kind,
                 revision,
                 viewport: [
                     viewport.x.start().to_bits(),
@@ -88,14 +112,17 @@ impl ChartAdapter {
                 dark,
                 partial,
             };
-            let path = if let Some((cached_key, path)) = self.gpui_paths.get(series.id().as_str())
+            let cache_id = (kind, series.id().as_str().to_owned());
+            let path = if let Some((cached_key, path)) = self.gpui_paths.get(&cache_id)
                 && cached_key == &key
             {
                 path.clone()
             } else {
-                let Ok(points) = self
-                    .projection_cache
-                    .path_for(series, revision, viewport, canvas)
+                let projection_cache = match kind {
+                    ChartKind::Detail => &mut self.detail_projection_cache,
+                    ChartKind::Overview => &mut self.overview_projection_cache,
+                };
+                let Ok(points) = projection_cache.path_for(series, revision, viewport, canvas)
                 else {
                     continue;
                 };
@@ -117,8 +144,7 @@ impl ChartAdapter {
                 let Ok(path) = builder.build() else {
                     continue;
                 };
-                self.gpui_paths
-                    .insert(series.id().as_str().to_owned(), (key, path.clone()));
+                self.gpui_paths.insert(cache_id, (key, path.clone()));
                 path
             };
             paths.push((path, series_color(index)));
@@ -167,6 +193,82 @@ impl ChartAdapter {
         }
         nearest.map(|(_, point)| point)
     }
+
+    pub fn detail_axis_at(&self, range: AxisRange, cursor: Point<Pixels>) -> Option<f64> {
+        axis_at(self.detail_bounds?, range, cursor)
+    }
+
+    pub fn detail_pan_delta(
+        &self,
+        range: AxisRange,
+        previous_x: f64,
+        cursor: Point<Pixels>,
+    ) -> Option<f64> {
+        let bounds = self.detail_bounds?;
+        let current = axis_at(bounds, range, cursor)?;
+        let scale = LinearScale::new(
+            range,
+            f64::from(bounds.origin.x),
+            f64::from(bounds.origin.x + bounds.size.width),
+        )
+        .ok()?;
+        Some(scale.invert(previous_x) - current)
+    }
+
+    pub fn overview_axis_at(&self, brush: BrushState, cursor: Point<Pixels>) -> Option<f64> {
+        axis_at(self.overview_bounds?, brush.home(), cursor)
+    }
+
+    pub fn brush_target(
+        &self,
+        brush: BrushState,
+        cursor: Point<Pixels>,
+    ) -> Option<BrushDragTarget> {
+        let bounds = self.overview_bounds?;
+        let scale = LinearScale::new(
+            brush.home(),
+            f64::from(bounds.origin.x),
+            f64::from(bounds.origin.x + bounds.size.width),
+        )
+        .ok()?;
+        let x = f64::from(cursor.x);
+        let start = scale.map(brush.selected().start());
+        let end = scale.map(brush.selected().end());
+        if (x - start).abs() <= 8. {
+            Some(BrushDragTarget::Start)
+        } else if (x - end).abs() <= 8. {
+            Some(BrushDragTarget::End)
+        } else if x > start && x < end {
+            Some(BrushDragTarget::Window)
+        } else {
+            None
+        }
+    }
+
+    pub fn physical_widths(&self, scale_factor: f32) -> (Option<u32>, Option<u32>) {
+        (
+            physical_width(self.overview_bounds, scale_factor),
+            physical_width(self.detail_bounds, scale_factor),
+        )
+    }
+}
+
+fn axis_at(bounds: Bounds<Pixels>, range: AxisRange, cursor: Point<Pixels>) -> Option<f64> {
+    if cursor.x < bounds.origin.x || cursor.x > bounds.origin.x + bounds.size.width {
+        return None;
+    }
+    LinearScale::new(
+        range,
+        f64::from(bounds.origin.x),
+        f64::from(bounds.origin.x + bounds.size.width),
+    )
+    .ok()
+    .map(|scale| scale.invert(f64::from(cursor.x)))
+}
+
+fn physical_width(bounds: Option<Bounds<Pixels>>, scale_factor: f32) -> Option<u32> {
+    let width = f32::from(bounds?.size.width) * scale_factor;
+    (width.is_finite() && width >= 1.).then(|| width.round() as u32)
 }
 
 pub fn detail_viewport(snapshot: &CurveSnapshot, selected: Option<AxisRange>) -> Option<Viewport> {
@@ -192,6 +294,24 @@ pub fn detail_viewport(snapshot: &CurveSnapshot, selected: Option<AxisRange>) ->
     .map(|y| Viewport::new(x, y))
 }
 
+pub fn selection_covered(snapshot: &CurveSnapshot, selected: AxisRange) -> bool {
+    snapshot.viewport.start() as f64 <= selected.start()
+        && snapshot.viewport.end() as f64 >= selected.end()
+}
+
+pub fn overview_viewport(snapshot: &CurveSnapshot, brush: BrushState) -> Option<Viewport> {
+    visible_y_range_for(
+        snapshot
+            .series
+            .iter()
+            .filter_map(|curve| curve.chart_series.as_ref()),
+        brush.home(),
+    )
+    .ok()
+    .flatten()
+    .map(|y| Viewport::new(brush.home(), y))
+}
+
 pub fn detail_canvas(
     adapter: std::rc::Rc<std::cell::RefCell<ChartAdapter>>,
     snapshot: CurveSnapshot,
@@ -200,9 +320,19 @@ pub fn detail_canvas(
 ) -> impl gpui::Styled + gpui::IntoElement {
     canvas(
         move |bounds, window, _| {
-            adapter
-                .borrow_mut()
-                .prepare(&snapshot, revision, viewport, bounds, window.appearance())
+            let resized = adapter.borrow().detail_bounds != Some(bounds);
+            let prepared = adapter.borrow_mut().prepare(
+                &snapshot,
+                ChartKind::Detail,
+                revision,
+                viewport,
+                bounds,
+                window.appearance(),
+            );
+            if resized {
+                window.request_animation_frame();
+            }
+            prepared
         },
         move |bounds, prepared, window, _| {
             let grid = rgb(0xe5e7eb);
@@ -226,6 +356,59 @@ pub fn detail_canvas(
     )
 }
 
+pub fn overview_canvas(
+    adapter: std::rc::Rc<std::cell::RefCell<ChartAdapter>>,
+    snapshot: CurveSnapshot,
+    revision: u64,
+    viewport: Viewport,
+    brush: BrushState,
+) -> impl gpui::Styled + gpui::IntoElement {
+    canvas(
+        move |bounds, window, _| {
+            let resized = adapter.borrow().overview_bounds != Some(bounds);
+            let prepared = adapter.borrow_mut().prepare(
+                &snapshot,
+                ChartKind::Overview,
+                revision,
+                viewport,
+                bounds,
+                window.appearance(),
+            );
+            if resized {
+                window.request_animation_frame();
+            }
+            prepared
+        },
+        move |bounds, prepared, window, _| {
+            for (path, color) in prepared.paths {
+                window.paint_path(path, color);
+            }
+            let start_ratio =
+                ((brush.selected().start() - brush.home().start()) / brush.home().span()) as f32;
+            let end_ratio =
+                ((brush.selected().end() - brush.home().start()) / brush.home().span()) as f32;
+            let start = bounds.origin.x + bounds.size.width * start_ratio;
+            let end = bounds.origin.x + bounds.size.width * end_ratio;
+            window.paint_quad(fill(
+                Bounds::new(
+                    point(start, bounds.origin.y),
+                    size(end - start, bounds.size.height),
+                ),
+                rgba(0x2563eb24),
+            ));
+            for x in [start, end] {
+                window.paint_quad(fill(
+                    Bounds::new(
+                        point(x - px(4.), bounds.origin.y),
+                        size(px(8.), bounds.size.height),
+                    ),
+                    rgb(0x2563eb),
+                ));
+            }
+        },
+    )
+}
+
 pub fn series_color(index: usize) -> Rgba {
     const COLORS: [u32; 10] = [
         0x2563eb, 0xdc2626, 0x059669, 0x7c3aed, 0xea580c, 0x0891b2, 0xdb2777, 0x65a30d, 0x4f46e5,
@@ -238,5 +421,58 @@ pub const fn axis_value_label(axis: AlignmentAxis) -> &'static str {
     match axis {
         AlignmentAxis::Step => "step",
         AlignmentAxis::ElapsedTime => "elapsed_ms",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pulseon_model::alignment::AlignmentViewport;
+
+    use super::*;
+
+    fn range(start: f64, end: f64) -> AxisRange {
+        AxisRange::new(start, end).expect("test range should be valid")
+    }
+
+    #[test]
+    fn detail_snapshot_coverage_distinguishes_transient_ranges() {
+        let snapshot = CurveSnapshot {
+            viewport: AlignmentViewport::new(10, 20).expect("test viewport should be valid"),
+            point_budget: 2_000,
+            real_range: None,
+            series: Vec::new(),
+        };
+
+        assert!(selection_covered(&snapshot, range(12., 18.)));
+        assert!(!selection_covered(&snapshot, range(5., 15.)));
+    }
+
+    #[test]
+    fn brush_hit_testing_distinguishes_handles_and_window() {
+        let mut adapter = ChartAdapter {
+            overview_bounds: Some(Bounds::new(point(px(0.), px(0.)), size(px(100.), px(40.)))),
+            ..ChartAdapter::default()
+        };
+        let mut brush = BrushState::new(range(0., 100.)).expect("brush should be valid");
+        brush.resize_start(20.).expect("start should resize");
+        brush.resize_end(80.).expect("end should resize");
+
+        assert_eq!(
+            [20., 50., 80.].map(|x| adapter.brush_target(brush, point(px(x), px(10.)))),
+            [
+                Some(BrushDragTarget::Start),
+                Some(BrushDragTarget::Window),
+                Some(BrushDragTarget::End),
+            ]
+        );
+        adapter.overview_bounds = None;
+        assert_eq!(adapter.brush_target(brush, point(px(50.), px(10.))), None);
+    }
+
+    #[test]
+    fn physical_width_uses_display_scale() {
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(400.), px(40.)));
+
+        assert_eq!(physical_width(Some(bounds), 2.), Some(800));
     }
 }
