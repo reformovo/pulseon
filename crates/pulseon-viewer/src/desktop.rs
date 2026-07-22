@@ -228,18 +228,7 @@ impl ViewerApp {
 
     fn listen_for_events(&mut self, events: ReadEventReceiver, cx: &mut Context<Self>) {
         self.event_task = Some(cx.spawn(async move |this, cx| {
-            let mut events = events;
-            loop {
-                let (next_events, event) = cx
-                    .background_spawn(async move {
-                        let event = events.recv();
-                        (events, event)
-                    })
-                    .await;
-                events = next_events;
-                let Ok(event) = event else {
-                    break;
-                };
+            while let Some(event) = events.recv().await {
                 if this
                     .update(cx, |this, cx| {
                         this.apply_event(event);
