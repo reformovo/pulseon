@@ -501,16 +501,28 @@ impl ViewerApp {
 
     fn render_detail(&mut self, cx: &mut Context<Self>) -> gpui::Div {
         let Some(snapshot) = self.core.detail().cloned() else {
+            let overview = self.core.overview().cloned();
+            let message =
+                empty_detail_message(overview.is_some(), self.core.is_pending(ReadKind::Detail));
             return div()
                 .size_full()
                 .flex()
-                .items_center()
-                .justify_center()
-                .child(if self.core.is_pending(ReadKind::Detail) {
-                    "Loading curves…"
-                } else {
-                    "Select Runs and one metric to draw curves."
-                });
+                .flex_col()
+                .p_5()
+                .gap_3()
+                .children(
+                    overview
+                        .as_ref()
+                        .map(|snapshot| self.render_legend(snapshot)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(message),
+                );
         };
         let selected = self.core.brush().map(|brush| brush.selected());
         let Some(viewport) = renderer::detail_viewport(&snapshot, selected) else {
@@ -1041,6 +1053,16 @@ fn format_tick(value: f64) -> String {
     }
 }
 
+const fn empty_detail_message(has_overview: bool, pending: bool) -> &'static str {
+    if pending {
+        "Loading curves…"
+    } else if has_overview {
+        "No drawable evidence is available for the selected Runs."
+    } else {
+        "Select Runs and one metric to draw curves."
+    }
+}
+
 fn reasons_label(reasons: &[EvidenceReason]) -> String {
     if reasons.is_empty() {
         return String::new();
@@ -1071,5 +1093,18 @@ mod tests {
             picked_directory(Some(vec![PathBuf::from("project")])),
             Some(PathBuf::from("project"))
         );
+    }
+
+    #[test]
+    fn empty_detail_message_distinguishes_evidence_from_missing_selection() {
+        assert_eq!(
+            empty_detail_message(true, false),
+            "No drawable evidence is available for the selected Runs."
+        );
+        assert_eq!(
+            empty_detail_message(false, false),
+            "Select Runs and one metric to draw curves."
+        );
+        assert_eq!(empty_detail_message(true, true), "Loading curves…");
     }
 }
