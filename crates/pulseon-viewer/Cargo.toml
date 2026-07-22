@@ -9,6 +9,7 @@ repository = "https://github.com/reformovo/pulseon"
 [features]
 default = ["desktop"]
 desktop = ["dep:gpui"]
+test-support = ["desktop", "gpui/test-support"]
 
 [dependencies]
 pulseon-chart-core = { path = "../pulseon-chart-core" }

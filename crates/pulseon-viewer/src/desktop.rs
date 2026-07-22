@@ -7,8 +7,8 @@ use std::{cell::RefCell, rc::Rc};
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyBinding, KeyDownEvent, Menu, MenuItem,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathPromptOptions, Render,
-    ScrollWheelEvent, SharedString, SystemMenuType, Task, Timer, Window, WindowBounds,
-    WindowOptions, actions, div, prelude::*, px, rgb, size, uniform_list,
+    ScrollWheelEvent, SharedString, SystemMenuType, Task, Window, WindowBounds, WindowOptions,
+    actions, div, prelude::*, px, rgb, size, uniform_list,
 };
 use pulseon_model::alignment::AlignmentAxis;
 use pulseon_model::comparison::{EvidenceCompleteness, EvidenceReason};
@@ -468,6 +468,7 @@ impl ViewerApp {
                                             == Some(&project.project_id);
                                         div()
                                             .id(("project", index))
+                                            .debug_selector(move || format!("project-row-{index}"))
                                             .key_context(SELECTABLE_CONTEXT)
                                             .tab_index(0)
                                             .h(px(40.))
@@ -494,6 +495,7 @@ impl ViewerApp {
                                     .collect::<Vec<_>>()
                             }),
                         )
+                        .debug_selector(|| "projects-list".to_owned())
                         .h(px(120.)),
                     )
                     .when(has_project, |sidebar| {
@@ -511,6 +513,7 @@ impl ViewerApp {
                                     .rounded_md()
                                     .border_1()
                                     .border_color(rgb(0xc7cbd1))
+                                    .debug_selector(|| "run-filter".to_owned())
                                     .focus(|style| style.border_color(rgb(0x2563eb)))
                                     .on_key_down(cx.listener(Self::on_filter_key))
                                     .on_click(move |_, window, _| filter_focus.focus(window))
@@ -613,6 +616,9 @@ impl ViewerApp {
                                                 let action_metric = selected_metric.clone();
                                                 div()
                                                     .id(("metric", index))
+                                                    .debug_selector(move || {
+                                                        format!("metric-row-{index}")
+                                                    })
                                                     .key_context(SELECTABLE_CONTEXT)
                                                     .tab_index(0)
                                                     .h(px(40.))
@@ -645,6 +651,7 @@ impl ViewerApp {
                                             .collect::<Vec<_>>()
                                     }),
                                 )
+                                .debug_selector(|| "metrics-list".to_owned())
                                 .flex_1()
                                 .min_h(px(80.)),
                             )
@@ -725,6 +732,7 @@ impl ViewerApp {
                     .child(
                         div()
                             .id("detail-chart")
+                            .debug_selector(|| "detail-chart".to_owned())
                             .focusable()
                             .relative()
                             .flex_1()
@@ -1049,8 +1057,9 @@ impl ViewerApp {
         {
             return;
         }
+        let timer = cx.background_executor().timer(Duration::from_millis(100));
         self.zoom_task = Some(cx.spawn(async move |this, cx| {
-            Timer::after(Duration::from_millis(100)).await;
+            timer.await;
             let _ = this.update(cx, |this, cx| {
                 this.request_detail();
                 cx.notify();
@@ -1136,6 +1145,7 @@ impl Render for ViewerApp {
                     .child(
                         div()
                             .id("open-project")
+                            .debug_selector(|| "open-project".to_owned())
                             .key_context(SELECTABLE_CONTEXT)
                             .tab_index(0)
                             .cursor_pointer()
@@ -1267,5 +1277,233 @@ mod tests {
         let second = cache.shared();
 
         assert!(Rc::ptr_eq(&first, &second));
+    }
+
+    #[cfg(feature = "test-support")]
+    mod gpui_tests {
+        use gpui::{
+            Modifiers, ScrollDelta, TestAppContext, TouchPhase, VisualTestContext, WindowHandle,
+            point,
+        };
+        use pulseon_core::engine::client::NativeClient;
+
+        use super::*;
+
+        fn fixture(metric_count: usize) -> (tempfile::TempDir, ProjectId, RunId) {
+            let root = tempfile::tempdir().expect("test directory should be created");
+            let client = NativeClient::open(root.path()).expect("test client should open");
+            let project = client
+                .create_project("viewer", Some(ProjectId::from_string("project")))
+                .expect("test project should be created");
+            let run = client
+                .create_run(
+                    &project.project_id,
+                    "baseline",
+                    Some(RunId::from_string("run")),
+                )
+                .expect("test Run should be created");
+            let handle = client.run_handle(run.clone());
+            for index in 0..metric_count {
+                let metric_key = format!("metric-{index}");
+                handle
+                    .log_metric_at_step(&metric_key, 0, index as f64)
+                    .expect("test metric should be logged");
+            }
+            client
+                .finish_run(&run.run_id)
+                .expect("test Run should finish");
+            client.shutdown(None).expect("test client should shut down");
+            (root, project.project_id, run.run_id)
+        }
+
+        fn open_viewer(
+            cx: &mut TestAppContext,
+            project_path: Option<PathBuf>,
+        ) -> (WindowHandle<ViewerApp>, VisualTestContext) {
+            let window = cx.update(|cx| {
+                cx.open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                            point(px(0.), px(0.)),
+                            size(px(800.), px(600.)),
+                        ))),
+                        ..WindowOptions::default()
+                    },
+                    move |window, cx| cx.new(|cx| ViewerApp::new(project_path, window, cx)),
+                )
+                .expect("test viewer window should open")
+            });
+            let visual = VisualTestContext::from_window(window.into(), cx);
+            (window, visual)
+        }
+
+        fn wait_for_viewer(
+            window: WindowHandle<ViewerApp>,
+            cx: &VisualTestContext,
+            condition: impl Fn(&ViewerApp) -> bool,
+        ) {
+            for _ in 0..200 {
+                cx.run_until_parked();
+                let ready = window
+                    .read_with(cx, |viewer, _| condition(viewer))
+                    .expect("viewer should remain open");
+                if ready {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            panic!("viewer state did not arrive before the test deadline");
+        }
+
+        fn select_fixture_run(
+            window: WindowHandle<ViewerApp>,
+            cx: &mut VisualTestContext,
+            project_id: ProjectId,
+            run_id: RunId,
+            metric_count: usize,
+        ) {
+            window
+                .update(cx, |viewer, _, cx| viewer.select_project(project_id, cx))
+                .expect("viewer should remain open");
+            wait_for_viewer(window, cx, |viewer| {
+                viewer
+                    .core
+                    .catalog()
+                    .is_some_and(|catalog| !catalog.runs.is_empty())
+            });
+            window
+                .update(cx, |viewer, _, cx| viewer.toggle_run(run_id, cx))
+                .expect("viewer should remain open");
+            wait_for_viewer(window, cx, |viewer| {
+                viewer
+                    .core
+                    .catalog()
+                    .is_some_and(|catalog| catalog.metric_keys.len() == metric_count)
+            });
+        }
+
+        #[gpui::test]
+        fn view_actions_dispatch_through_the_focused_root(cx: &mut TestAppContext) {
+            let (window, mut cx) = open_viewer(cx, None);
+
+            cx.dispatch_action(UseElapsed);
+
+            assert_eq!(
+                window
+                    .read_with(&cx, |viewer, _| viewer.core.axis())
+                    .expect("viewer should remain open"),
+                AlignmentAxis::ElapsedTime
+            );
+        }
+
+        #[gpui::test]
+        fn worker_events_update_the_entity_without_render_polling(cx: &mut TestAppContext) {
+            let (root, _, _) = fixture(1);
+            cx.executor().allow_parking();
+            let (window, cx) = open_viewer(cx, Some(root.path().to_path_buf()));
+
+            wait_for_viewer(window, &cx, |viewer| viewer.core.catalog().is_some());
+        }
+
+        #[gpui::test]
+        fn focused_project_activates_from_the_keyboard(cx: &mut TestAppContext) {
+            let (root, _, _) = fixture(1);
+            cx.executor().allow_parking();
+            cx.update(|cx| {
+                cx.bind_keys([KeyBinding::new(
+                    "enter",
+                    ActivateSelection,
+                    Some(SELECTABLE_CONTEXT),
+                )]);
+            });
+            let (window, mut cx) = open_viewer(cx, Some(root.path().to_path_buf()));
+            wait_for_viewer(window, &cx, |viewer| viewer.core.catalog().is_some());
+            let project = cx
+                .debug_bounds("project-row-0")
+                .expect("first Project row should be rendered");
+            cx.simulate_click(project.center(), Modifiers::default());
+            cx.run_until_parked();
+            let before = window
+                .read_with(&cx, |viewer, _| viewer.next_generation)
+                .expect("viewer should remain open");
+
+            cx.simulate_keystrokes("enter");
+
+            assert!(
+                window
+                    .read_with(&cx, |viewer, _| viewer.next_generation)
+                    .expect("viewer should remain open")
+                    > before
+            );
+        }
+
+        #[gpui::test]
+        fn metric_list_scrolls_to_late_rows_in_a_small_window(cx: &mut TestAppContext) {
+            let (root, project_id, run_id) = fixture(20);
+            cx.executor().allow_parking();
+            let (window, mut cx) = open_viewer(cx, Some(root.path().to_path_buf()));
+            wait_for_viewer(window, &cx, |viewer| viewer.core.catalog().is_some());
+            select_fixture_run(window, &mut cx, project_id, run_id, 20);
+            cx.simulate_resize(size(px(600.), px(520.)));
+            cx.run_until_parked();
+            let metrics = cx
+                .debug_bounds("metrics-list")
+                .expect("Metric list should be rendered");
+            assert!(cx.debug_bounds("metric-row-19").is_none());
+
+            cx.simulate_event(ScrollWheelEvent {
+                position: metrics.center(),
+                delta: ScrollDelta::Pixels(point(px(0.), px(-1_000.))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+            });
+
+            assert!(cx.debug_bounds("metric-row-19").is_some());
+        }
+
+        #[gpui::test]
+        fn zoom_debounce_commits_only_the_latest_wheel_event(cx: &mut TestAppContext) {
+            let (root, project_id, run_id) = fixture(1);
+            cx.executor().allow_parking();
+            let (window, mut cx) = open_viewer(cx, Some(root.path().to_path_buf()));
+            wait_for_viewer(window, &cx, |viewer| viewer.core.catalog().is_some());
+            select_fixture_run(window, &mut cx, project_id, run_id, 1);
+            window
+                .update(&mut cx, |viewer, _, cx| {
+                    viewer.select_metric(MetricKey::from_string("metric-0"), cx);
+                })
+                .expect("viewer should remain open");
+            wait_for_viewer(window, &cx, |viewer| viewer.core.detail().is_some());
+            let chart = cx
+                .debug_bounds("detail-chart")
+                .expect("detail chart should be rendered");
+            window
+                .update(&mut cx, |_, _, cx| cx.notify())
+                .expect("viewer should remain open");
+            wait_for_viewer(window, &cx, |viewer| {
+                !viewer.core.is_pending(ReadKind::Detail)
+            });
+            let before = window
+                .read_with(&cx, |viewer, _| viewer.next_generation)
+                .expect("viewer should remain open");
+            let wheel = ScrollWheelEvent {
+                position: chart.center(),
+                delta: ScrollDelta::Pixels(point(px(0.), px(-24.))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+            };
+
+            cx.simulate_event(wheel.clone());
+            cx.simulate_event(wheel);
+            cx.executor().advance_clock(Duration::from_millis(101));
+            cx.run_until_parked();
+
+            assert_eq!(
+                window
+                    .read_with(&cx, |viewer, _| viewer.next_generation)
+                    .expect("viewer should remain open"),
+                before + 1
+            );
+        }
     }
 }
