@@ -47,6 +47,7 @@ pub struct CurveSeriesSnapshot {
 pub struct CurveSnapshot {
     pub viewport: AlignmentViewport,
     pub point_budget: u32,
+    /// Data-derived range, expanded to one rendered axis unit for one coordinate.
     pub real_range: Option<AlignmentViewport>,
     pub series: Vec<CurveSeriesSnapshot>,
 }
@@ -160,9 +161,7 @@ fn query_curves(
             chart_series,
         });
     }
-    let real_range = real_bounds
-        .map(|(start, end)| AlignmentViewport::new(start, end))
-        .transpose()?;
+    let real_range = real_bounds.map(brushable_range).transpose()?;
     Ok(CurveSnapshot {
         viewport,
         point_budget,
@@ -171,8 +170,32 @@ fn query_curves(
     })
 }
 
+fn brushable_range(
+    (mut start, mut end): (i64, i64),
+) -> Result<AlignmentViewport, AlignmentQueryError> {
+    let rendered_start = start as f64;
+    if (end as f64) - rendered_start < 1.0 {
+        if let Some(next) = end
+            .checked_add(1)
+            .filter(|next| (*next as f64) - rendered_start >= 1.0)
+        {
+            end = next;
+        } else {
+            let next = rendered_start.next_up() as i64;
+            if next > end {
+                end = next;
+            } else {
+                start = (end as f64).next_down() as i64;
+            }
+        }
+    }
+    AlignmentViewport::new(start, end)
+}
+
 #[cfg(test)]
 mod tests {
+    use pulseon_chart_core::{AxisRange, BrushState};
+
     use super::*;
 
     #[test]
@@ -188,5 +211,21 @@ mod tests {
             ],
             [500, 900, 2_000, 2_000, 5_000, 10_000]
         );
+    }
+
+    #[test]
+    fn data_ranges_have_a_brushable_rendered_span() {
+        let ordinary = brushable_range((7, 7)).expect("ordinary range should be valid");
+        let maximum = brushable_range((i64::MAX, i64::MAX))
+            .expect("maximum coordinate range should be valid");
+        let rounded_maximum = brushable_range((i64::MAX - 1, i64::MAX))
+            .expect("rounded maximum range should be valid");
+
+        assert_eq!((ordinary.start(), ordinary.end()), (7, 8));
+        for range in [ordinary, maximum, rounded_maximum] {
+            let axis = AxisRange::new(range.start() as f64, range.end() as f64)
+                .expect("real range should initialize a chart range");
+            BrushState::new(axis).expect("real range should initialize a brush");
+        }
     }
 }
