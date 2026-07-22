@@ -2,6 +2,9 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+#[cfg(target_os = "macos")]
+mod desktop;
+
 const USAGE: &str = "usage: pulseon-viewer [PROJECT_PATH]";
 
 fn project_path(args: impl IntoIterator<Item = OsString>) -> Result<Option<PathBuf>, ()> {
@@ -25,8 +28,8 @@ fn main() -> ExitCode {
 }
 
 #[cfg(target_os = "macos")]
-fn run(_project_path: Option<PathBuf>) -> ExitCode {
-    eprintln!("pulseon-viewer application shell is not available until Phase 3C");
+fn run(project_path: Option<PathBuf>) -> ExitCode {
+    desktop::run(project_path);
     ExitCode::SUCCESS
 }
 
