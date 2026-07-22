@@ -243,12 +243,11 @@ impl ViewerApp {
             let result = prompt.await;
             this.update(cx, |this, cx| {
                 match result {
-                    Ok(Ok(Some(paths))) => {
-                        if let Some(path) = paths.into_iter().next() {
+                    Ok(Ok(paths)) => {
+                        if let Some(path) = picked_directory(paths) {
                             this.open_source(path);
                         }
                     }
-                    Ok(Ok(None)) => {}
                     Ok(Err(error)) => this.local_error = Some(error.to_string()),
                     Err(error) => this.local_error = Some(error.to_string()),
                 }
@@ -965,6 +964,7 @@ impl Render for ViewerApp {
                     )
                     .child(div().text_sm().text_color(rgb(0x6b7280)).child(source)),
             )
+            .children(error.clone().map(error_banner))
             .child(if has_catalog {
                 self.render_workspace(cx)
             } else {
@@ -976,16 +976,6 @@ impl Render for ViewerApp {
                     .justify_center()
                     .gap_4()
                     .child(self.status())
-                    .children(error.map(|message| {
-                        div()
-                            .max_w(px(640.))
-                            .px_4()
-                            .py_3()
-                            .rounded_md()
-                            .bg(rgb(0xfee2e2))
-                            .text_color(rgb(0x991b1b))
-                            .child(message)
-                    }))
                     .child(
                         div()
                             .id("open-project")
@@ -1008,6 +998,22 @@ fn section_label(label: &str) -> gpui::Div {
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(rgb(0x6b7280))
         .child(label.to_owned())
+}
+
+fn error_banner(message: String) -> gpui::Div {
+    div()
+        .mx_5()
+        .mt_3()
+        .px_4()
+        .py_3()
+        .rounded_md()
+        .bg(rgb(0xfee2e2))
+        .text_color(rgb(0x991b1b))
+        .child(message)
+}
+
+fn picked_directory(paths: Option<Vec<PathBuf>>) -> Option<PathBuf> {
+    paths.and_then(|paths| paths.into_iter().next())
 }
 
 const fn run_status(status: RunStatus) -> &'static str {
@@ -1047,4 +1053,23 @@ fn reasons_label(reasons: &[EvidenceReason]) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picker_cancellation_has_no_source_effect() {
+        assert_eq!(picked_directory(None), None);
+        assert_eq!(picked_directory(Some(Vec::new())), None);
+    }
+
+    #[test]
+    fn picker_uses_the_single_selected_directory() {
+        assert_eq!(
+            picked_directory(Some(vec![PathBuf::from("project")])),
+            Some(PathBuf::from("project"))
+        );
+    }
 }

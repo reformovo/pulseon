@@ -426,7 +426,15 @@ pub const fn axis_value_label(axis: AlignmentAxis) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use pulseon_core::engine::client::NativeClient;
     use pulseon_model::alignment::AlignmentViewport;
+    use pulseon_model::metric::MetricKey;
+    use pulseon_model::run::RunId;
+    use pulseon_model::types::ProjectId;
+    use pulseon_viewer::query::{CurveSelection, DetailRequest};
+    use pulseon_viewer::worker::{Generation, ReadRequest, ReadSnapshot, ReadWorker};
 
     use super::*;
 
@@ -474,5 +482,70 @@ mod tests {
         let bounds = Bounds::new(point(px(0.), px(0.)), size(px(400.), px(40.)));
 
         assert_eq!(physical_width(Some(bounds), 2.), Some(800));
+    }
+
+    #[test]
+    fn first_ten_series_colors_are_distinct() {
+        for left in 0..10 {
+            for right in left + 1..10 {
+                assert_ne!(series_color(left), series_color(right));
+            }
+        }
+    }
+
+    #[test]
+    fn hover_maps_a_rendered_point_back_to_stored_evidence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let client = NativeClient::open(root.path())?;
+        let project = client.create_project("viewer", Some(ProjectId::from_string("project")))?;
+        let run = client.create_run(
+            &project.project_id,
+            "baseline",
+            Some(RunId::from_string("run")),
+        )?;
+        client
+            .run_handle(run.clone())
+            .log_metric_at_step("loss", 7, 1.25)?;
+        client.finish_run(&run.run_id)?;
+        client.shutdown(None)?;
+        let worker = ReadWorker::spawn(root.path())?;
+        worker.submit(
+            Generation(1),
+            ReadRequest::Detail(DetailRequest {
+                selection: CurveSelection {
+                    run_ids: vec![run.run_id],
+                    metric_key: MetricKey::from_string("loss"),
+                    axis: AlignmentAxis::Step,
+                },
+                viewport: AlignmentViewport::new(7, 8)?,
+                physical_width: 100,
+            }),
+        )?;
+        let event = worker.recv_timeout(Duration::from_secs(10))?;
+        let ReadSnapshot::Detail(snapshot) = event.result? else {
+            return Err("worker returned the wrong snapshot kind".into());
+        };
+        let viewport = detail_viewport(&snapshot, None).ok_or("detail should be drawable")?;
+        let adapter = ChartAdapter {
+            detail_bounds: Some(Bounds::new(point(px(0.), px(0.)), size(px(100.), px(100.)))),
+            ..ChartAdapter::default()
+        };
+
+        let hover = adapter
+            .hit_test(&snapshot, viewport, point(px(0.), px(50.)))
+            .ok_or("stored point should be hit")?;
+
+        assert_eq!(
+            (
+                hover.run_name.as_str(),
+                hover.metric_key.as_str(),
+                hover.axis_value,
+                hover.step,
+                hover.value,
+            ),
+            ("baseline", "loss", 7, 7, 1.25)
+        );
+        Ok(())
     }
 }

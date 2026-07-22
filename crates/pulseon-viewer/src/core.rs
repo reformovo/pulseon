@@ -282,6 +282,10 @@ impl ViewerCore {
             }
             Some(brush)
         });
+        if self.brush.is_none() {
+            self.detail = None;
+            self.expected[kind_index(ReadKind::Detail)] = None;
+        }
         self.overview = Some(snapshot);
     }
 
@@ -421,5 +425,49 @@ mod tests {
             "failed",
             "running"
         ));
+    }
+
+    #[test]
+    fn overview_without_a_real_range_removes_stale_detail() {
+        let mut core = ViewerCore {
+            detail: Some(curves()),
+            ..ViewerCore::default()
+        };
+
+        core.apply_overview(curves());
+
+        assert!(core.brush().is_none());
+        assert!(core.detail().is_none());
+    }
+
+    #[test]
+    fn view_commands_switch_axis_and_reset_the_brush() {
+        let mut core = ViewerCore::default();
+        let mut overview = curves();
+        overview.real_range =
+            Some(AlignmentViewport::new(0, 10).expect("test overview range should be valid"));
+        core.apply_overview(overview);
+        core.brush_mut()
+            .expect("overview should initialize brush")
+            .resize_start(4.)
+            .expect("test brush should resize");
+
+        core.select_axis(AlignmentAxis::ElapsedTime);
+        assert_eq!(core.axis(), AlignmentAxis::ElapsedTime);
+        assert!(core.brush().is_none());
+
+        core.apply_overview({
+            let mut snapshot = curves();
+            snapshot.real_range =
+                Some(AlignmentViewport::new(0, 10).expect("test overview range should be valid"));
+            snapshot
+        });
+        core.brush_mut()
+            .expect("overview should initialize brush")
+            .resize_start(4.)
+            .expect("test brush should resize");
+        assert!(core.reset_view());
+        let brush = core.brush().expect("reset should retain brush");
+        assert_eq!(brush.selected(), brush.home());
     }
 }

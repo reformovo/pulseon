@@ -188,20 +188,20 @@ detail reductions selected through a brush.
 
 #### Phase 3C: GPUI Curve Comparison Experience
 
-- [ ] Add the macOS application shell, zero-or-one-path command-line contract,
+- [x] Add the macOS application shell, zero-or-one-path command-line contract,
   native directory picker, Open/Refresh/Reset/Step/Elapsed commands, and clear
   empty, loading, pending, and error states.
-- [ ] Add one-Project selection, a virtualized newest-first Run browser with
+- [x] Add one-Project selection, a virtualized newest-first Run browser with
   name/id/status filtering and a 10-Run hard limit, plus a one-metric selector
   over the selected Runs' metric union.
-- [ ] Add the detail chart renderer with axes, grid, evidence-aware legend,
+- [x] Add the detail chart renderer with axes, grid, evidence-aware legend,
   fixed series colors, path caching, automatic visible y range, and nearest
   real-point tooltip. Draw partial evidence explicitly; do not draw invalid or
   unavailable evidence.
-- [ ] Add the fixed-height overview renderer, selection shade, two handles,
+- [x] Add the fixed-height overview renderer, selection shade, two handles,
   selected-window drag, main-chart pan/zoom synchronization, and reset. Commit
   drag queries on release and wheel/pinch queries after 100 ms idle.
-- [ ] Verify GPUI types stay inside the adapter and test selection transitions,
+- [x] Verify GPUI types stay inside the adapter and test selection transitions,
   picker cancellation, command behavior, resize budgets, brush synchronization,
   pending results, hover, and stale-result rejection.
 
