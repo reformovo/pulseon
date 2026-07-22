@@ -114,6 +114,7 @@ impl CatalogAdapter {
         format!(
             "ATTACH {catalog_uri} AS {} (
 {attach_type_clause}                 DATA_PATH {data_path},
+                 OVERRIDE_DATA_PATH true,
                  METADATA_CATALOG '{}'
              );",
             self.ducklake_alias, self.catalog_application_database
@@ -483,7 +484,41 @@ mod tests {
         assert!(statement.contains("ATTACH 'catalog.ducklake' AS dl"));
         assert!(statement.contains("TYPE ducklake"));
         assert!(statement.contains("DATA_PATH 'data'"));
+        assert!(statement.contains("OVERRIDE_DATA_PATH true"));
         assert!(statement.contains("METADATA_CATALOG 'pulseon_catalog'"));
+    }
+
+    #[test]
+    fn absolute_root_reopens_catalog_created_from_relative_root()
+    -> Result<(), Box<dyn std::error::Error>> {
+        struct RemoveTestDir(PathBuf);
+
+        impl Drop for RemoveTestDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let relative_root =
+            PathBuf::from("target").join(format!("pulseon-relative-root-{}", uuid::Uuid::new_v4()));
+        let _cleanup = RemoveTestDir(relative_root.clone());
+        let connection = open_native_connection(&relative_root)?;
+        drop(connection);
+        let absolute_root = std::fs::canonicalize(&relative_root)?;
+
+        let connection = open_existing_native_connection_with_config(NativeStorageConfig::duckdb(
+            &absolute_root,
+            None,
+            None,
+        ))?;
+        let project_count: i64 = connection.query_row(
+            "SELECT count(*) FROM pulseon_catalog.pulseon_projects",
+            [],
+            |row| row.get(0),
+        )?;
+
+        assert_eq!(project_count, 0);
+        Ok(())
     }
 
     #[test]
