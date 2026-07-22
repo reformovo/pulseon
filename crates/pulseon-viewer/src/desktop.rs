@@ -428,6 +428,9 @@ impl ViewerApp {
         let runs = self.run_list.shared();
         let metrics = catalog.metric_keys.clone();
         let selection = self.core.selection().clone();
+        let selected_project_id = selection.project_id.clone();
+        let selected_metric_key = selection.metric_key.clone();
+        let has_project = selected_project_id.is_some();
         let filter_focus = self.filter_focus.clone();
         let selected_count = selection.run_ids.len();
         let main = self.render_detail(cx);
@@ -447,22 +450,39 @@ impl ViewerApp {
                     .border_r_1()
                     .border_color(rgb(0xd8dadd))
                     .child(section_label("Project"))
-                    .children(projects.into_iter().enumerate().map(|(index, project)| {
-                        let project_id = project.project_id.clone();
-                        let selected = selection.project_id.as_ref() == Some(&project.project_id);
-                        div()
-                            .id(("project", index))
-                            .cursor_pointer()
-                            .px_3()
-                            .py_2()
-                            .rounded_md()
-                            .when(selected, |row| row.bg(rgb(0xdbeafe)))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.select_project(project_id.clone(), cx);
-                            }))
-                            .child(project.name)
-                    }))
-                    .when(selection.project_id.is_some(), |sidebar| {
+                    .child(
+                        uniform_list(
+                            "projects",
+                            projects.len(),
+                            cx.processor(move |_this, range: Range<usize>, _, cx| {
+                                range
+                                    .filter_map(|index| {
+                                        projects.get(index).map(|project| (index, project))
+                                    })
+                                    .map(|(index, project)| {
+                                        let project_id = project.project_id.clone();
+                                        let selected = selected_project_id.as_ref()
+                                            == Some(&project.project_id);
+                                        div()
+                                            .id(("project", index))
+                                            .h(px(40.))
+                                            .cursor_pointer()
+                                            .px_3()
+                                            .rounded_md()
+                                            .flex()
+                                            .items_center()
+                                            .when(selected, |row| row.bg(rgb(0xdbeafe)))
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.select_project(project_id.clone(), cx);
+                                            }))
+                                            .child(project.name.clone())
+                                    })
+                                    .collect::<Vec<_>>()
+                            }),
+                        )
+                        .h(px(120.)),
+                    )
+                    .when(has_project, |sidebar| {
                         sidebar
                             .child(section_label(&format!(
                                 "Runs ({selected_count}/{MAX_SELECTED_RUNS})"
@@ -541,21 +561,42 @@ impl ViewerApp {
                                 .h(px(300.)),
                             )
                             .child(section_label("Metric"))
-                            .children(metrics.into_iter().enumerate().map(|(index, metric)| {
-                                let selected = selection.metric_key.as_ref() == Some(&metric);
-                                let selected_metric = metric.clone();
-                                div()
-                                    .id(("metric", index))
-                                    .cursor_pointer()
-                                    .px_3()
-                                    .py_2()
-                                    .rounded_md()
-                                    .when(selected, |row| row.bg(rgb(0xdbeafe)))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.select_metric(selected_metric.clone(), cx);
-                                    }))
-                                    .child(metric.as_str().to_owned())
-                            }))
+                            .child(
+                                uniform_list(
+                                    "metrics",
+                                    metrics.len(),
+                                    cx.processor(move |_this, range: Range<usize>, _, cx| {
+                                        range
+                                            .filter_map(|index| {
+                                                metrics.get(index).map(|metric| (index, metric))
+                                            })
+                                            .map(|(index, metric)| {
+                                                let selected =
+                                                    selected_metric_key.as_ref() == Some(metric);
+                                                let selected_metric = metric.clone();
+                                                div()
+                                                    .id(("metric", index))
+                                                    .h(px(40.))
+                                                    .cursor_pointer()
+                                                    .px_3()
+                                                    .rounded_md()
+                                                    .flex()
+                                                    .items_center()
+                                                    .when(selected, |row| row.bg(rgb(0xdbeafe)))
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.select_metric(
+                                                            selected_metric.clone(),
+                                                            cx,
+                                                        );
+                                                    }))
+                                                    .child(metric.as_str().to_owned())
+                                            })
+                                            .collect::<Vec<_>>()
+                                    }),
+                                )
+                                .flex_1()
+                                .min_h(px(80.)),
+                            )
                     }),
             )
             .child(div().flex_1().h_full().overflow_hidden().child(main))
