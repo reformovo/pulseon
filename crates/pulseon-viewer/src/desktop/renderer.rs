@@ -24,7 +24,6 @@ pub struct HoverPoint {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct GpuiPathKey {
-    kind: ChartKind,
     revision: u64,
     viewport: [u64; 4],
     bounds: [u32; 4],
@@ -49,7 +48,8 @@ pub enum BrushDragTarget {
 pub struct ChartAdapter {
     detail_projection_cache: PathCache,
     overview_projection_cache: PathCache,
-    gpui_paths: HashMap<(ChartKind, String), (GpuiPathKey, Path<Pixels>)>,
+    detail_gpui_paths: HashMap<String, (GpuiPathKey, Path<Pixels>)>,
+    overview_gpui_paths: HashMap<String, (GpuiPathKey, Path<Pixels>)>,
     detail_bounds: Option<Bounds<Pixels>>,
     overview_bounds: Option<Bounds<Pixels>>,
 }
@@ -62,7 +62,8 @@ impl ChartAdapter {
     pub fn clear(&mut self) {
         self.detail_projection_cache.clear();
         self.overview_projection_cache.clear();
-        self.gpui_paths.clear();
+        self.detail_gpui_paths.clear();
+        self.overview_gpui_paths.clear();
         self.detail_bounds = None;
         self.overview_bounds = None;
     }
@@ -96,7 +97,6 @@ impl ChartAdapter {
             };
             let partial = curve.evidence.completeness == EvidenceCompleteness::Partial;
             let key = GpuiPathKey {
-                kind,
                 revision,
                 viewport: [
                     viewport.x.start().to_bits(),
@@ -113,16 +113,24 @@ impl ChartAdapter {
                 dark,
                 partial,
             };
-            let cache_id = (kind, series.id().as_str().to_owned());
-            let path = if let Some((cached_key, path)) = self.gpui_paths.get(&cache_id)
+            let (projection_cache, gpui_paths) = match kind {
+                ChartKind::Detail => (
+                    &mut self.detail_projection_cache,
+                    &mut self.detail_gpui_paths,
+                ),
+                ChartKind::Overview => (
+                    &mut self.overview_projection_cache,
+                    &mut self.overview_gpui_paths,
+                ),
+            };
+            let cache_id = series.id().as_str();
+            let path = if let Some((cached_key, path)) = gpui_paths.get(cache_id)
                 && cached_key == &key
             {
+                // PERF: GPUI consumes Path during paint, so retaining cached commands
+                // requires a clone but still avoids projection and PathBuilder work.
                 path.clone()
             } else {
-                let projection_cache = match kind {
-                    ChartKind::Detail => &mut self.detail_projection_cache,
-                    ChartKind::Overview => &mut self.overview_projection_cache,
-                };
                 let Ok(points) = projection_cache.path_for(series, revision, viewport, canvas)
                 else {
                     continue;
@@ -145,7 +153,7 @@ impl ChartAdapter {
                 let Ok(path) = builder.build() else {
                     continue;
                 };
-                self.gpui_paths.insert(cache_id, (key, path.clone()));
+                gpui_paths.insert(cache_id.to_owned(), (key, path.clone()));
                 path
             };
             paths.push((path, series_color(index)));
