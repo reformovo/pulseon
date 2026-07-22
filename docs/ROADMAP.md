@@ -155,34 +155,34 @@ detail reductions selected through a brush.
 
 #### Phase 3A: Renderer-Independent Brush Contract
 
-- [ ] Add a chart-core brush state with home and selected x ranges, one-axis-unit
+- [x] Add a chart-core brush state with home and selected x ranges, one-axis-unit
   minimum width, handle resize, selected-window pan, cursor-anchored zoom,
   home clamping, and reset. Keep the existing zoom API intact.
-- [ ] Add nearest-rendered-real-point hit testing with stable point indexes and
+- [x] Add nearest-rendered-real-point hit testing with stable point indexes and
   screen-distance ties; keep the existing segment interpolation API intact.
-- [ ] Add visible finite y-range calculation with 5% padding and a defined
+- [x] Add visible finite y-range calculation with 5% padding and a defined
   constant-value fallback. Do not add query, reduction, or renderer policy to
   chart-core.
-- [ ] Cover brush transforms, invalid inputs, range boundaries, repeated x
+- [x] Cover brush transforms, invalid inputs, range boundaries, repeated x
   values, hit-test ties, empty inputs, and constant y values with windowless
   chart-core tests.
 
 #### Phase 3B: Native Read Session and Query Pipeline
 
-- [ ] Add `pulseon-viewer` as a workspace binary with model, storage, Core, and
+- [x] Add `pulseon-viewer` as a workspace binary with model, storage, Core, and
   chart-core dependencies. Pin GPUI 0.2.2 only for macOS; keep a non-macOS
   unsupported entrypoint so Linux workspace checks continue to compile.
-- [ ] Open existing local native Projects through the shared configuration and
+- [x] Open existing local native Projects through the shared configuration and
   storage bootstrap. Support DuckDB/SQLite and custom local paths; reject S3
   before credential resolution and do not construct a writable `NativeClient`.
-- [ ] Add one background worker that owns `ProjectConnection`, discovers
+- [x] Add one background worker that owns `ProjectConnection`, discovers
   Projects/Runs/metrics, coalesces pending requests, and returns immutable
   generation-tagged snapshots. The GPUI thread must never execute storage work.
-- [ ] Add separate overview and detail query requests. Overview uses the full
+- [x] Add separate overview and detail query requests. Overview uses the full
   non-negative axis and a 500-2,000 point budget; detail uses the brush's closed
   viewport and a 2,000-10,000 point budget. Both reuse Phase 2 aligned evidence
   and storage-side extrema reduction without retaining raw full series.
-- [ ] Reconcile manual Refresh results, discard stale generations, retain the
+- [x] Reconcile manual Refresh results, discard stale generations, retain the
   current detail snapshot while a replacement is pending, and cover source
   errors, both catalog backends, fixed budgets, neighbors, and evidence states.
 

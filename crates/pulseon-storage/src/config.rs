@@ -16,6 +16,13 @@ pub struct ResolvedInitConfig {
     pub s3_connection: Option<S3ConnectionConfig>,
 }
 
+/// Storage paths and catalog backend resolved without object-store credentials.
+pub struct ResolvedStorageConfig {
+    pub catalog_backend: CatalogBackend,
+    pub catalog_path: Option<PathBuf>,
+    pub data_path: Option<PathBuf>,
+}
+
 #[derive(Default)]
 pub struct S3ConnectionOverrides {
     pub endpoint: Option<String>,
@@ -53,25 +60,46 @@ pub fn resolve_init_config(
     metric_queue_capacity: i64,
     s3_overrides: S3ConnectionOverrides,
 ) -> Result<ResolvedInitConfig, InitConfigError> {
-    let config = load_project_config(root_path)?;
-    let data_path = resolve_data_path(root_path, data_path, config.as_ref())?;
-    let catalog_backend = resolve_catalog_backend(catalog_backend, config.as_ref())?;
-    let catalog_path = resolve_catalog_path(root_path, catalog_path, config.as_ref())?;
-    validate_path_configuration(data_path.as_deref(), catalog_path.as_deref())?;
-
+    let storage = resolve_storage_config(root_path, data_path, catalog_backend, catalog_path)?;
     let metric_queue_capacity = validate_metric_queue_capacity(metric_queue_capacity)?;
-    let s3_connection = if data_path.as_deref().is_some_and(is_s3_data_path) {
+    let s3_connection = if storage.data_path.as_deref().is_some_and(is_s3_data_path) {
+        let config = load_project_config(root_path)?;
         Some(resolve_s3_connection(config.as_ref(), s3_overrides)?)
     } else {
         None
     };
 
     Ok(ResolvedInitConfig {
+        catalog_backend: storage.catalog_backend,
+        catalog_path: storage.catalog_path,
+        data_path: storage.data_path,
+        metric_queue_capacity,
+        s3_connection,
+    })
+}
+
+/// Resolves native catalog and data paths without reading S3 credentials.
+///
+/// # Errors
+///
+/// Returns [`InitConfigError`] when the project configuration cannot be read or
+/// contains an invalid catalog backend or path.
+pub fn resolve_storage_config(
+    root_path: &Path,
+    data_path: Option<PathBuf>,
+    catalog_backend: Option<&str>,
+    catalog_path: Option<PathBuf>,
+) -> Result<ResolvedStorageConfig, InitConfigError> {
+    let config = load_project_config(root_path)?;
+    let data_path = resolve_data_path(root_path, data_path, config.as_ref())?;
+    let catalog_backend = resolve_catalog_backend(catalog_backend, config.as_ref())?;
+    let catalog_path = resolve_catalog_path(root_path, catalog_path, config.as_ref())?;
+    validate_path_configuration(data_path.as_deref(), catalog_path.as_deref())?;
+
+    Ok(ResolvedStorageConfig {
         catalog_backend,
         catalog_path,
         data_path,
-        metric_queue_capacity,
-        s3_connection,
     })
 }
 
