@@ -243,10 +243,14 @@ impl ChartAdapter {
         let x = f64::from(cursor.x);
         let start = scale.map(brush.selected().start());
         let end = scale.map(brush.selected().end());
-        if (x - start).abs() <= 8. {
-            Some(BrushDragTarget::Start)
-        } else if (x - end).abs() <= 8. {
-            Some(BrushDragTarget::End)
+        let start_distance = (x - start).abs();
+        let end_distance = (x - end).abs();
+        if start_distance <= 8. || end_distance <= 8. {
+            Some(if start_distance <= end_distance {
+                BrushDragTarget::Start
+            } else {
+                BrushDragTarget::End
+            })
         } else if x > start && x < end {
             Some(BrushDragTarget::Window)
         } else {
@@ -291,16 +295,20 @@ pub fn detail_viewport(snapshot: &CurveSnapshot, selected: Option<AxisRange>) ->
             snapshot_x.start() <= selected.start() && snapshot_x.end() >= selected.end()
         })
         .unwrap_or(snapshot_x);
-    visible_y_range_for(
-        snapshot
-            .series
-            .iter()
-            .filter_map(|curve| curve.chart_series.as_ref()),
-        x,
-    )
-    .ok()
-    .flatten()
-    .map(|y| Viewport::new(x, y))
+    let y_range = |range| {
+        visible_y_range_for(
+            snapshot
+                .series
+                .iter()
+                .filter_map(|curve| curve.chart_series.as_ref()),
+            range,
+        )
+        .ok()
+        .flatten()
+    };
+    y_range(x)
+        .or_else(|| (x != snapshot_x).then(|| y_range(snapshot_x)).flatten())
+        .map(|y| Viewport::new(x, y))
 }
 
 pub fn selection_covered(snapshot: &CurveSnapshot, selected: AxisRange) -> bool {
@@ -439,14 +447,19 @@ pub const fn axis_value_label(axis: AlignmentAxis) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::hint::black_box;
     use std::time::Duration;
 
+    use pulseon_chart_core::{DataPoint, Series, SeriesId};
     use pulseon_core::engine::client::NativeClient;
-    use pulseon_model::alignment::AlignmentViewport;
-    use pulseon_model::metric::MetricKey;
-    use pulseon_model::run::RunId;
+    use pulseon_model::alignment::{AlignedMetricPoint, AlignedMetricResult, AlignmentViewport};
+    use pulseon_model::comparison::EvidenceCompleteness;
+    use pulseon_model::metric::{MetricKey, MetricPoint, Step};
+    use pulseon_model::run::{Run, RunId, RunStatus};
     use pulseon_model::types::ProjectId;
-    use pulseon_viewer::query::{CurveSelection, DetailRequest};
+    use pulseon_viewer::query::{
+        CurveSelection, CurveSeriesSnapshot, CurveSnapshot, DetailRequest,
+    };
     use pulseon_viewer::worker::{Generation, ReadRequest, ReadSnapshot, ReadWorker};
 
     use super::*;
@@ -485,6 +498,12 @@ mod tests {
                 Some(BrushDragTarget::Window),
                 Some(BrushDragTarget::End),
             ]
+        );
+        brush.resize_start(48.).expect("start should resize");
+        brush.resize_end(52.).expect("end should resize");
+        assert_eq!(
+            [48., 52.].map(|x| adapter.brush_target(brush, point(px(x), px(10.)))),
+            [Some(BrushDragTarget::Start), Some(BrushDragTarget::End),]
         );
         adapter.overview_bounds = None;
         assert_eq!(adapter.brush_target(brush, point(px(50.), px(10.))), None);
@@ -560,5 +579,180 @@ mod tests {
             ("baseline", "loss", 7, 7, 1.25)
         );
         Ok(())
+    }
+
+    fn synthetic_snapshot(series_count: usize, point_count: i64) -> CurveSnapshot {
+        let timestamp = "2026-01-01T00:00:00Z"
+            .parse()
+            .expect("fixed timestamp should parse");
+        let project_id = ProjectId::from_string("viewer-scale");
+        let metric_key = MetricKey::from_string("loss");
+        let series = (0..series_count)
+            .map(|run_index| {
+                let run_id = RunId::from_string(format!("run-{run_index}"));
+                let points = (0..point_count)
+                    .map(|index| AlignedMetricPoint {
+                        point: MetricPoint {
+                            run_id: run_id.clone(),
+                            metric_key: metric_key.clone(),
+                            step: Step::new(index),
+                            timestamp,
+                            value_f64: run_index as f64 + (index % 1_000) as f64 / 1_000.,
+                            ingested_at: timestamp,
+                        },
+                        axis_value: index,
+                    })
+                    .collect::<Vec<_>>();
+                let chart_series = Series::new(
+                    SeriesId::new(run_id.as_str()).expect("Run id should make a series id"),
+                    points
+                        .iter()
+                        .map(|point| DataPoint::new(point.axis_value as f64, point.point.value_f64))
+                        .collect(),
+                )
+                .expect("generated series should be valid");
+                CurveSeriesSnapshot {
+                    run: Run {
+                        run_id,
+                        project_id: project_id.clone(),
+                        name: format!("Run {run_index}"),
+                        status: RunStatus::Finished,
+                        created_at: timestamp,
+                        started_at: timestamp,
+                        finished_at: Some(timestamp),
+                    },
+                    evidence: AlignedMetricResult {
+                        source_row_count: points.len() as u64,
+                        points,
+                        completeness: EvidenceCompleteness::Complete,
+                        reasons: Vec::new(),
+                    },
+                    chart_series: Some(chart_series),
+                }
+            })
+            .collect();
+        CurveSnapshot {
+            viewport: AlignmentViewport::new(0, point_count - 1)
+                .expect("generated viewport should be valid"),
+            point_budget: 10_000,
+            real_range: Some(
+                AlignmentViewport::new(0, point_count - 1)
+                    .expect("generated range should be valid"),
+            ),
+            series,
+        }
+    }
+
+    #[test]
+    fn detail_viewport_reuses_snapshot_y_range_between_reduced_points() {
+        let snapshot = synthetic_snapshot(1, 2);
+        let selected = range(0.25, 0.75);
+
+        let viewport = detail_viewport(&snapshot, Some(selected))
+            .expect("neighbor points should keep transient zoom drawable");
+
+        assert_eq!(viewport.x, selected);
+    }
+
+    fn measure_cpu_budget(
+        label: &str,
+        warmups: usize,
+        samples: usize,
+        mut operation: impl FnMut(),
+    ) {
+        for _ in 0..warmups {
+            operation();
+        }
+        let mut elapsed = Vec::with_capacity(samples);
+        for _ in 0..samples {
+            let started = std::time::Instant::now();
+            operation();
+            elapsed.push(started.elapsed());
+        }
+        elapsed.sort_unstable();
+        let percentile = |percent: usize| elapsed[(samples * percent).div_ceil(100) - 1];
+        let p50 = percentile(50);
+        let p95 = percentile(95);
+        let maximum = elapsed[samples - 1];
+        println!(
+            "{label}: samples={samples}, p50={:.3} ms, p95={:.3} ms, max={:.3} ms",
+            p50.as_secs_f64() * 1_000.,
+            p95.as_secs_f64() * 1_000.,
+            maximum.as_secs_f64() * 1_000.,
+        );
+        assert!(
+            p95 <= Duration::from_micros(8_330),
+            "{label} p95 was {p95:?}"
+        );
+        assert!(
+            maximum <= Duration::from_micros(16_700),
+            "{label} maximum was {maximum:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "hardware-sensitive release performance validation"]
+    fn interactive_chart_cpu_budget() {
+        assert!(
+            black_box(!cfg!(debug_assertions)),
+            "CPU validation requires --release"
+        );
+        let home = range(0., 10_001.);
+        let mut brush = BrushState::new(home).expect("brush should initialize");
+        brush.resize_start(2_000.).expect("brush should resize");
+        brush.resize_end(8_000.).expect("brush should resize");
+        measure_cpu_budget("brush resize", 100, 1_000, || {
+            brush.resize_start(2_001.).expect("brush should resize");
+            brush.resize_start(2_000.).expect("brush should resize");
+            black_box(brush);
+        });
+        measure_cpu_budget("brush pan", 100, 1_000, || {
+            brush.pan_by(1.).expect("brush should pan");
+            brush.pan_by(-1.).expect("brush should pan");
+            black_box(brush);
+        });
+        measure_cpu_budget("brush zoom", 100, 1_000, || {
+            brush.zoom_at(5_000., 1.01).expect("brush should zoom");
+            brush.zoom_at(5_000., 1. / 1.01).expect("brush should zoom");
+            black_box(brush);
+        });
+
+        let snapshot = synthetic_snapshot(10, 10_002);
+        let viewport = Viewport::new(home, range(0., 11.));
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(2_500.), px(800.)));
+        let mut adapter = ChartAdapter::default();
+        black_box(adapter.prepare(
+            &snapshot,
+            ChartKind::Detail,
+            1,
+            viewport,
+            bounds,
+            WindowAppearance::Light,
+        ));
+        measure_cpu_budget("cached path preparation", 20, 200, || {
+            black_box(adapter.prepare(
+                &snapshot,
+                ChartKind::Detail,
+                1,
+                viewport,
+                bounds,
+                WindowAppearance::Light,
+            ));
+        });
+        let mut revision = 2;
+        measure_cpu_budget("uncached path preparation", 20, 200, || {
+            black_box(adapter.prepare(
+                &snapshot,
+                ChartKind::Detail,
+                revision,
+                viewport,
+                bounds,
+                WindowAppearance::Light,
+            ));
+            revision += 1;
+        });
+        measure_cpu_budget("hit testing", 20, 200, || {
+            black_box(adapter.hit_test(&snapshot, viewport, point(px(1_250.), px(400.))));
+        });
     }
 }

@@ -10,6 +10,7 @@ use gpui::{
     MouseUpEvent, PathPromptOptions, Render, ScrollWheelEvent, SharedString, SystemMenuType, Task,
     Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, rgb, size, uniform_list,
 };
+use pulseon_chart_core::BrushState;
 use pulseon_model::alignment::AlignmentAxis;
 use pulseon_model::comparison::{EvidenceCompleteness, EvidenceReason};
 use pulseon_model::metric::MetricKey;
@@ -32,6 +33,23 @@ enum DragGesture {
     BrushEnd,
     BrushWindow { last_axis: f64 },
     Detail { last_x: f64 },
+}
+
+fn update_brush_drag(brush: &mut BrushState, gesture: &mut DragGesture, axis: f64) {
+    let selected = brush.selected();
+    match gesture {
+        DragGesture::BrushStart if axis < selected.end() => {
+            let _ = brush.resize_start(axis);
+        }
+        DragGesture::BrushEnd if axis > selected.start() => {
+            let _ = brush.resize_end(axis);
+        }
+        DragGesture::BrushWindow { last_axis } => {
+            let _ = brush.pan_by(axis - *last_axis);
+            *last_axis = axis;
+        }
+        DragGesture::BrushStart | DragGesture::BrushEnd | DragGesture::Detail { .. } => {}
+    }
 }
 
 #[derive(Default)]
@@ -851,13 +869,7 @@ impl ViewerApp {
                     .text_color(rgb(0xffffff))
                     .text_sm()
                     .child(format!("{} · {}", hover.run_name, hover.metric_key))
-                    .child(format!(
-                        "{}={} · step={} · value={}",
-                        renderer::axis_value_label(axis),
-                        hover.axis_value,
-                        hover.step,
-                        hover.value
-                    ))
+                    .child(hover_value_line(axis, hover))
             }))
     }
 
@@ -991,19 +1003,7 @@ impl ViewerApp {
             return;
         };
         if let Some(brush) = self.core.brush_mut() {
-            match &mut gesture {
-                DragGesture::BrushStart => {
-                    let _ = brush.resize_start(axis);
-                }
-                DragGesture::BrushEnd => {
-                    let _ = brush.resize_end(axis);
-                }
-                DragGesture::BrushWindow { last_axis } => {
-                    let _ = brush.pan_by(axis - *last_axis);
-                    *last_axis = axis;
-                }
-                DragGesture::Detail { .. } => return,
-            }
+            update_brush_drag(brush, &mut gesture, axis);
         }
         self.drag = Some(gesture);
         cx.notify();
@@ -1230,6 +1230,19 @@ fn format_tick(value: f64) -> String {
     }
 }
 
+fn hover_value_line(axis: AlignmentAxis, hover: &HoverPoint) -> String {
+    match axis {
+        AlignmentAxis::Step => format!("step={} · value={}", hover.axis_value, hover.value),
+        AlignmentAxis::ElapsedTime => format!(
+            "{}={} · step={} · value={}",
+            renderer::axis_value_label(axis),
+            hover.axis_value,
+            hover.step,
+            hover.value
+        ),
+    }
+}
+
 const fn empty_detail_message(has_overview: bool, pending: bool) -> &'static str {
     if pending {
         "Loading curves…"
@@ -1283,6 +1296,41 @@ mod tests {
             "Select Runs and one metric to draw curves."
         );
         assert_eq!(empty_detail_message(true, true), "Loading curves…");
+    }
+
+    #[test]
+    fn hover_value_line_avoids_duplicate_step_but_retains_step_for_elapsed_axis() {
+        let hover = HoverPoint {
+            run_name: "run".to_owned(),
+            metric_key: "loss".to_owned(),
+            axis_value: 2_904,
+            step: 497,
+            value: 0.506,
+        };
+
+        assert_eq!(
+            hover_value_line(AlignmentAxis::Step, &hover),
+            "step=2904 · value=0.506"
+        );
+        assert_eq!(
+            hover_value_line(AlignmentAxis::ElapsedTime, &hover),
+            "elapsed_ms=2904 · step=497 · value=0.506"
+        );
+    }
+
+    #[test]
+    fn brush_handle_drag_stops_before_crossing_the_opposite_handle() {
+        let home =
+            pulseon_chart_core::AxisRange::new(0., 100.).expect("test brush range should be valid");
+        let mut brush = BrushState::new(home).expect("test brush should initialize");
+        brush.resize_start(20.).expect("start should resize");
+        brush.resize_end(80.).expect("end should resize");
+
+        let selected = brush.selected();
+        update_brush_drag(&mut brush, &mut DragGesture::BrushStart, 90.);
+        assert_eq!(brush.selected(), selected);
+        update_brush_drag(&mut brush, &mut DragGesture::BrushEnd, 10.);
+        assert_eq!(brush.selected(), selected);
     }
 
     #[test]

@@ -207,18 +207,21 @@ detail reductions selected through a brush.
 
 #### Phase 3D: Performance and Product Validation
 
-- [ ] Build a deterministic fixture with 10 Runs and 1,000,000 effective source
+- [x] Build a deterministic fixture with 10 Runs and 1,000,000 effective source
   points per series. Assert that the viewer receives only the requested
   overview/detail budgets plus contract-defined neighbors.
-- [ ] Validate that narrowing the brush keeps the detail budget fixed, narrows
+- [x] Validate that narrowing the brush keeps the detail budget fixed, narrows
   the storage viewport, and never crops or resamples viewer-owned points.
 - [ ] Measure storage query latency separately from rendering. In a macOS ARM64
   release build, verify cached brush, pan, zoom, path preparation, and hit
   testing at p95 <= 8.33 ms with no sample above 16.7 ms; separately validate
   stable 120 FPS on a 120 Hz ProMotion display after initial load.
-- [ ] Pass formatting, workspace Clippy, Rust tests, viewer release build,
+- [x] Pass formatting, workspace Clippy, Rust tests, viewer release build,
   maturin develop/build, Pyright, and pytest; document any exact environmental
   blocker, including a missing Xcode Metal Toolchain.
+
+Automated measurements and the remaining 120 Hz trace procedure are recorded
+in [`viewer-performance-validation.md`](viewer-performance-validation.md).
 
 #### Phase 3E: macOS ARM64 Release
 
