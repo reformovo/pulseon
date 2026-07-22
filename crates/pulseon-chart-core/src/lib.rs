@@ -161,6 +161,19 @@ pub fn visible_y_range(
     series: &[Series],
     x_range: AxisRange,
 ) -> Result<Option<AxisRange>, ChartError> {
+    visible_y_range_for(series, x_range)
+}
+
+/// Calculates a padded y range without requiring ownership of the series list.
+///
+/// # Errors
+///
+/// Returns [`ChartError::InvalidRange`] when padding would produce a
+/// non-finite range.
+pub fn visible_y_range_for<'a>(
+    series: impl IntoIterator<Item = &'a Series>,
+    x_range: AxisRange,
+) -> Result<Option<AxisRange>, ChartError> {
     let mut bounds: Option<(f64, f64)> = None;
     for series in series {
         let points = series.points();

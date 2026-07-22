@@ -1,12 +1,14 @@
 use std::ops::Range;
 use std::path::PathBuf;
+use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyBinding, KeyDownEvent, Menu, MenuItem,
-    PathPromptOptions, Render, SharedString, SystemMenuType, Window, WindowBounds, WindowOptions,
-    actions, div, prelude::*, px, rgb, size, uniform_list,
+    MouseMoveEvent, PathPromptOptions, Render, SharedString, SystemMenuType, Window, WindowBounds,
+    WindowOptions, actions, div, prelude::*, px, rgb, size, uniform_list,
 };
 use pulseon_model::alignment::AlignmentAxis;
+use pulseon_model::comparison::{EvidenceCompleteness, EvidenceReason};
 use pulseon_model::metric::MetricKey;
 use pulseon_model::run::{Run, RunId, RunStatus};
 use pulseon_model::types::ProjectId;
@@ -14,6 +16,10 @@ use pulseon_viewer::core::{ApplyOutcome, MAX_SELECTED_RUNS, ViewerCore, run_matc
 use pulseon_viewer::model::DiscoveryRequest;
 use pulseon_viewer::query::{CurveSelection, DetailRequest, OverviewRequest};
 use pulseon_viewer::worker::{Generation, ReadKind, ReadRequest, ReadWorker};
+
+mod renderer;
+
+use renderer::{ChartAdapter, HoverPoint};
 
 actions!(
     pulseon_viewer,
@@ -85,6 +91,9 @@ struct ViewerApp {
     core: ViewerCore,
     next_generation: u64,
     local_error: Option<String>,
+    chart_adapter: Rc<RefCell<ChartAdapter>>,
+    detail_revision: u64,
+    hover: Option<HoverPoint>,
 }
 
 impl ViewerApp {
@@ -100,6 +109,9 @@ impl ViewerApp {
             core: ViewerCore::default(),
             next_generation: 1,
             local_error: None,
+            chart_adapter: Rc::new(RefCell::new(ChartAdapter::default())),
+            detail_revision: 0,
+            hover: None,
         };
         if let Some(path) = project_path {
             app.open_source(path);
@@ -110,6 +122,8 @@ impl ViewerApp {
     fn open_source(&mut self, path: PathBuf) {
         self.worker = None;
         self.core.reset_source();
+        self.chart_adapter.borrow_mut().clear();
+        self.hover = None;
         self.local_error = None;
         self.source_path = Some(path.clone());
         match ReadWorker::spawn(&path) {
@@ -144,6 +158,7 @@ impl ViewerApp {
     fn drain_events(&mut self) {
         while let Some(event) = self.worker.as_ref().and_then(ReadWorker::try_event) {
             let kind = event.kind;
+            let revision = event.generation.0;
             let succeeded = event.result.is_ok();
             if self.core.apply(event) != ApplyOutcome::Applied || !succeeded {
                 continue;
@@ -151,7 +166,8 @@ impl ViewerApp {
             match kind {
                 ReadKind::Catalog if self.curve_selection().is_some() => self.request_overview(),
                 ReadKind::Overview => self.request_detail(),
-                ReadKind::Catalog | ReadKind::Detail => {}
+                ReadKind::Detail => self.detail_revision = revision,
+                ReadKind::Catalog => {}
             }
         }
     }
@@ -329,17 +345,7 @@ impl ViewerApp {
         let selection = self.core.selection().clone();
         let filter_focus = self.filter_focus.clone();
         let selected_count = selection.run_ids.len();
-        let main_status = selection.metric_key.as_ref().map_or_else(
-            || "Select Runs and one metric to draw curves.".to_owned(),
-            |metric| {
-                format!(
-                    "Preparing {} Run(s) · {} · {}",
-                    selected_count,
-                    metric.as_str(),
-                    axis_label(self.core.axis())
-                )
-            },
-        );
+        let main = self.render_detail(cx);
 
         div()
             .flex()
@@ -467,15 +473,177 @@ impl ViewerApp {
                             }))
                     }),
             )
+            .child(div().flex_1().h_full().overflow_hidden().child(main))
+    }
+
+    fn render_detail(&mut self, cx: &mut Context<Self>) -> gpui::Div {
+        let Some(snapshot) = self.core.detail().cloned() else {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(if self.core.is_pending(ReadKind::Detail) {
+                    "Loading curves…"
+                } else {
+                    "Select Runs and one metric to draw curves."
+                });
+        };
+        let selected = self.core.brush().map(|brush| brush.selected());
+        let Some(viewport) = renderer::detail_viewport(&snapshot, selected) else {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child("No drawable evidence is available in this viewport.");
+        };
+        let x_ticks = pulseon_chart_core::linear_ticks(viewport.x, 6);
+        let y_ticks = pulseon_chart_core::linear_ticks(viewport.y, 6);
+        let adapter = Rc::clone(&self.chart_adapter);
+        let hit_snapshot = snapshot.clone();
+        let hit_adapter = Rc::clone(&self.chart_adapter);
+        let axis = self.core.axis();
+        let pending = self.core.is_pending(ReadKind::Detail);
+
+        div()
+            .relative()
+            .size_full()
+            .flex()
+            .flex_col()
+            .p_5()
+            .gap_3()
+            .child(self.render_legend(&snapshot))
             .child(
                 div()
                     .flex_1()
-                    .h_full()
+                    .min_h(px(240.))
+                    .flex()
+                    .child(
+                        div()
+                            .w(px(72.))
+                            .h_full()
+                            .flex()
+                            .flex_col()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(rgb(0x6b7280))
+                            .children(y_ticks.iter().rev().map(|value| format_tick(*value))),
+                    )
+                    .child(
+                        div()
+                            .id("detail-chart")
+                            .relative()
+                            .flex_1()
+                            .h_full()
+                            .border_1()
+                            .border_color(rgb(0xd1d5db))
+                            .bg(rgb(0xffffff))
+                            .child(
+                                renderer::detail_canvas(
+                                    adapter,
+                                    snapshot.clone(),
+                                    self.detail_revision,
+                                    viewport,
+                                )
+                                .size_full(),
+                            )
+                            .on_mouse_move(cx.listener(
+                                move |this, event: &MouseMoveEvent, _, cx| {
+                                    this.hover = hit_adapter.borrow().hit_test(
+                                        &hit_snapshot,
+                                        viewport,
+                                        event.position,
+                                    );
+                                    cx.notify();
+                                },
+                            ))
+                            .on_hover(cx.listener(|this, hovered, _, cx| {
+                                if !hovered {
+                                    this.hover = None;
+                                    cx.notify();
+                                }
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .ml(px(72.))
+                    .flex()
+                    .justify_between()
+                    .text_xs()
+                    .text_color(rgb(0x6b7280))
+                    .children(x_ticks.into_iter().map(format_tick)),
+            )
+            .child(
+                div()
+                    .ml(px(72.))
+                    .text_center()
+                    .text_sm()
+                    .child(axis_label(axis)),
+            )
+            .children(pending.then(|| {
+                div()
+                    .absolute()
+                    .top(px(84.))
+                    .right(px(28.))
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(rgb(0xfef3c7))
+                    .text_sm()
+                    .child("Updating viewport…")
+            }))
+            .children(self.hover.as_ref().map(|hover| {
+                div()
+                    .absolute()
+                    .top(px(84.))
+                    .left(px(100.))
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(rgb(0x111827))
+                    .text_color(rgb(0xffffff))
+                    .text_sm()
+                    .child(format!("{} · {}", hover.run_name, hover.metric_key))
+                    .child(format!(
+                        "{}={} · step={} · value={}",
+                        renderer::axis_value_label(axis),
+                        hover.axis_value,
+                        hover.step,
+                        hover.value
+                    ))
+            }))
+    }
+
+    fn render_legend(&self, snapshot: &pulseon_viewer::query::CurveSnapshot) -> gpui::Div {
+        div()
+            .flex()
+            .flex_wrap()
+            .gap_3()
+            .children(snapshot.series.iter().enumerate().map(|(index, curve)| {
+                let drawable = matches!(
+                    curve.evidence.completeness,
+                    EvidenceCompleteness::Complete | EvidenceCompleteness::Partial
+                );
+                let color = if drawable {
+                    renderer::series_color(index)
+                } else {
+                    rgb(0x9ca3af)
+                };
+                let evidence = format!(
+                    "{:?}{}",
+                    curve.evidence.completeness,
+                    reasons_label(&curve.evidence.reasons)
+                );
+                div()
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .child(main_status),
-            )
+                    .gap_2()
+                    .child(div().size(px(10.)).rounded_full().bg(color))
+                    .child(curve.run.name.clone())
+                    .child(div().text_xs().text_color(rgb(0x6b7280)).child(evidence))
+            }))
     }
 }
 
@@ -582,6 +750,30 @@ const fn run_status(status: RunStatus) -> &'static str {
 const fn axis_label(axis: AlignmentAxis) -> &'static str {
     match axis {
         AlignmentAxis::Step => "Step",
-        AlignmentAxis::ElapsedTime => "Elapsed",
+        AlignmentAxis::ElapsedTime => "Elapsed (ms)",
     }
+}
+
+fn format_tick(value: f64) -> String {
+    if value.abs() >= 1_000_000. || (value != 0. && value.abs() < 0.001) {
+        format!("{value:.2e}")
+    } else if value.fract() == 0. {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.3}")
+    }
+}
+
+fn reasons_label(reasons: &[EvidenceReason]) -> String {
+    if reasons.is_empty() {
+        return String::new();
+    }
+    format!(
+        " · {}",
+        reasons
+            .iter()
+            .map(|reason| format!("{reason:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
