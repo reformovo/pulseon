@@ -7,8 +7,8 @@ use std::{cell::RefCell, rc::Rc};
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyBinding, KeyDownEvent, Menu, MenuItem,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathPromptOptions, Render,
-    ScrollWheelEvent, SharedString, SystemMenuType, Timer, Window, WindowBounds, WindowOptions,
-    actions, div, prelude::*, px, rgb, size, uniform_list,
+    ScrollWheelEvent, SharedString, SystemMenuType, Task, Timer, Window, WindowBounds,
+    WindowOptions, actions, div, prelude::*, px, rgb, size, uniform_list,
 };
 use pulseon_model::alignment::AlignmentAxis;
 use pulseon_model::comparison::{EvidenceCompleteness, EvidenceReason};
@@ -18,7 +18,9 @@ use pulseon_model::types::ProjectId;
 use pulseon_viewer::core::{ApplyOutcome, MAX_SELECTED_RUNS, ViewerCore, run_matches_filter};
 use pulseon_viewer::model::{CatalogSnapshot, DiscoveryRequest};
 use pulseon_viewer::query::{CurveSelection, DetailRequest, OverviewRequest};
-use pulseon_viewer::worker::{Generation, ReadKind, ReadRequest, ReadWorker};
+use pulseon_viewer::worker::{
+    Generation, ReadEvent, ReadEventReceiver, ReadKind, ReadRequest, ReadWorker,
+};
 
 mod renderer;
 
@@ -123,6 +125,7 @@ struct ViewerApp {
     run_list: RunListCache,
     source_path: Option<PathBuf>,
     worker: Option<ReadWorker>,
+    event_task: Option<Task<()>>,
     core: ViewerCore,
     next_generation: u64,
     local_error: Option<String>,
@@ -147,6 +150,7 @@ impl ViewerApp {
             run_list: RunListCache::default(),
             source_path: None,
             worker: None,
+            event_task: None,
             core: ViewerCore::default(),
             next_generation: 1,
             local_error: None,
@@ -160,12 +164,13 @@ impl ViewerApp {
             zoom_token: 0,
         };
         if let Some(path) = project_path {
-            app.open_source(path);
+            app.open_source(path, cx);
         }
         app
     }
 
-    fn open_source(&mut self, path: PathBuf) {
+    fn open_source(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.event_task = None;
         self.worker = None;
         self.core.reset_source();
         self.run_list = RunListCache::default();
@@ -175,8 +180,13 @@ impl ViewerApp {
         self.local_error = None;
         self.source_path = Some(path.clone());
         match ReadWorker::spawn(&path) {
-            Ok(worker) => {
+            Ok(mut worker) => {
+                let Some(events) = worker.take_event_receiver() else {
+                    self.local_error = Some("native read worker has no event stream".to_owned());
+                    return;
+                };
                 self.worker = Some(worker);
+                self.listen_for_events(events, cx);
                 self.refresh_catalog();
             }
             Err(error) => self.local_error = Some(error.to_string()),
@@ -203,26 +213,51 @@ impl ViewerApp {
         }
     }
 
-    fn drain_events(&mut self) {
-        while let Some(event) = self.worker.as_ref().and_then(ReadWorker::try_event) {
-            let kind = event.kind;
-            let revision = event.generation.0;
-            let succeeded = event.result.is_ok();
-            if self.core.apply(event) != ApplyOutcome::Applied || !succeeded {
-                continue;
-            }
-            if kind == ReadKind::Catalog {
-                self.run_list.rebuild(self.core.catalog(), &self.run_filter);
-            }
-            match kind {
-                ReadKind::Catalog if self.curve_selection().is_some() => self.request_overview(),
-                ReadKind::Overview => {
-                    self.overview_revision = revision;
-                    self.request_detail();
+    fn listen_for_events(&mut self, events: ReadEventReceiver, cx: &mut Context<Self>) {
+        self.event_task = Some(cx.spawn(async move |this, cx| {
+            let mut events = events;
+            loop {
+                let (next_events, event) = cx
+                    .background_spawn(async move {
+                        let event = events.recv();
+                        (events, event)
+                    })
+                    .await;
+                events = next_events;
+                let Ok(event) = event else {
+                    break;
+                };
+                if this
+                    .update(cx, |this, cx| {
+                        this.apply_event(event);
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
                 }
-                ReadKind::Detail => self.detail_revision = revision,
-                ReadKind::Catalog => {}
             }
+        }));
+    }
+
+    fn apply_event(&mut self, event: ReadEvent) {
+        let kind = event.kind;
+        let revision = event.generation.0;
+        let succeeded = event.result.is_ok();
+        if self.core.apply(event) != ApplyOutcome::Applied || !succeeded {
+            return;
+        }
+        if kind == ReadKind::Catalog {
+            self.run_list.rebuild(self.core.catalog(), &self.run_filter);
+        }
+        match kind {
+            ReadKind::Catalog if self.curve_selection().is_some() => self.request_overview(),
+            ReadKind::Overview => {
+                self.overview_revision = revision;
+                self.request_detail();
+            }
+            ReadKind::Detail => self.detail_revision = revision,
+            ReadKind::Catalog => {}
         }
     }
 
@@ -275,7 +310,7 @@ impl ViewerApp {
                 match result {
                     Ok(Ok(paths)) => {
                         if let Some(path) = picked_directory(paths) {
-                            this.open_source(path);
+                            this.open_source(path, cx);
                         }
                     }
                     Ok(Err(error)) => this.local_error = Some(error.to_string()),
@@ -957,14 +992,7 @@ impl ViewerApp {
 
 impl Render for ViewerApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.drain_events();
         self.reconcile_canvas_widths(window.scale_factor());
-        if [ReadKind::Catalog, ReadKind::Overview, ReadKind::Detail]
-            .into_iter()
-            .any(|kind| self.core.is_pending(kind))
-        {
-            window.request_animation_frame();
-        }
         let source = self.source_path.as_ref().map_or_else(
             || "No project open".to_owned(),
             |path| path.display().to_string(),

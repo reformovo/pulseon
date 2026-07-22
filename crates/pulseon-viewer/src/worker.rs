@@ -85,6 +85,23 @@ pub struct ReadEvent {
 #[error("native read worker is closed")]
 pub struct WorkerClosed;
 
+/// Movable event stream for event-driven viewer integrations.
+pub struct ReadEventReceiver(Receiver<ReadEvent>);
+
+impl ReadEventReceiver {
+    pub fn recv(&self) -> Result<ReadEvent, mpsc::RecvError> {
+        self.0.recv()
+    }
+
+    pub fn try_event(&self) -> Option<ReadEvent> {
+        self.0.try_recv().ok()
+    }
+
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<ReadEvent, mpsc::RecvTimeoutError> {
+        self.0.recv_timeout(timeout)
+    }
+}
+
 struct TaggedRequest {
     generation: Generation,
     request: ReadRequest,
@@ -93,7 +110,7 @@ struct TaggedRequest {
 /// Handle for one background thread that exclusively owns its read session.
 pub struct ReadWorker {
     requests: Option<Sender<TaggedRequest>>,
-    events: Receiver<ReadEvent>,
+    events: Option<ReadEventReceiver>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -112,7 +129,7 @@ impl ReadWorker {
             .spawn(move || worker_loop(root_path, request_rx, event_tx))?;
         Ok(Self {
             requests: Some(request_tx),
-            events: event_rx,
+            events: Some(ReadEventReceiver(event_rx)),
             thread: Some(thread),
         })
     }
@@ -134,7 +151,7 @@ impl ReadWorker {
     }
 
     pub fn try_event(&self) -> Option<ReadEvent> {
-        self.events.try_recv().ok()
+        self.events.as_ref().and_then(ReadEventReceiver::try_event)
     }
 
     /// Waits for an event from background coordination or test code.
@@ -143,7 +160,15 @@ impl ReadWorker {
     ///
     /// Returns a receive error if the timeout expires or the worker stops.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<ReadEvent, mpsc::RecvTimeoutError> {
-        self.events.recv_timeout(timeout)
+        self.events
+            .as_ref()
+            .ok_or(mpsc::RecvTimeoutError::Disconnected)?
+            .recv_timeout(timeout)
+    }
+
+    /// Transfers the event stream to an event-driven integration.
+    pub fn take_event_receiver(&mut self) -> Option<ReadEventReceiver> {
+        self.events.take()
     }
 }
 
@@ -248,7 +273,7 @@ mod tests {
         });
         let worker = ReadWorker {
             requests: Some(request_tx),
-            events: event_rx,
+            events: Some(ReadEventReceiver(event_rx)),
             thread: Some(thread),
         };
         let (dropped_tx, dropped_rx) = mpsc::channel();
@@ -281,5 +306,19 @@ mod tests {
             pending.take_next().map(|request| request.generation),
             Some(Generation(2))
         );
+    }
+
+    #[test]
+    fn event_receiver_can_only_be_taken_once() {
+        let (request_tx, _request_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let mut worker = ReadWorker {
+            requests: Some(request_tx),
+            events: Some(ReadEventReceiver(event_rx)),
+            thread: None,
+        };
+
+        assert!(worker.take_event_receiver().is_some());
+        assert!(worker.take_event_receiver().is_none());
     }
 }
