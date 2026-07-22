@@ -5,10 +5,10 @@ use std::time::Duration;
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, KeyBinding, KeyDownEvent, Menu, MenuItem,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathPromptOptions, Render,
-    ScrollWheelEvent, SharedString, SystemMenuType, Task, Window, WindowBounds, WindowOptions,
-    actions, div, prelude::*, px, rgb, size, uniform_list,
+    App, Application, Bounds, Context, FocusHandle, KeyBinding, KeyDownEvent,
+    ListHorizontalSizingBehavior, Menu, MenuItem, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PathPromptOptions, Render, ScrollWheelEvent, SharedString, SystemMenuType, Task,
+    Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, rgb, size, uniform_list,
 };
 use pulseon_model::alignment::AlignmentAxis;
 use pulseon_model::comparison::{EvidenceCompleteness, EvidenceReason};
@@ -544,12 +544,16 @@ impl ViewerApp {
                                                         < MAX_SELECTED_RUNS;
                                                 div()
                                                     .id(("run", index))
-                                                    .h(px(52.))
-                                                    .w_full()
+                                                    .debug_selector(move || {
+                                                        format!("run-row-{index}")
+                                                    })
+                                                    .h(px(40.))
                                                     .flex()
-                                                    .flex_col()
-                                                    .justify_center()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .gap_2()
                                                     .px_3()
+                                                    .whitespace_nowrap()
                                                     .border_b_1()
                                                     .border_color(rgb(0xe5e7eb))
                                                     .when(selected, |row| row.bg(rgb(0xecfdf5)))
@@ -582,9 +586,17 @@ impl ViewerApp {
                                                                 },
                                                             ))
                                                     })
-                                                    .child(run.name.clone())
                                                     .child(
                                                         div()
+                                                            .flex_shrink_0()
+                                                            .child(run.name.clone()),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .debug_selector(move || {
+                                                                format!("run-meta-{index}")
+                                                            })
+                                                            .flex_shrink_0()
                                                             .text_xs()
                                                             .text_color(rgb(0x6b7280))
                                                             .child(format!(
@@ -597,6 +609,10 @@ impl ViewerApp {
                                             .collect::<Vec<_>>()
                                     }),
                                 )
+                                .with_horizontal_sizing_behavior(
+                                    ListHorizontalSizingBehavior::Unconstrained,
+                                )
+                                .debug_selector(|| "runs-list".to_owned())
                                 .h(px(300.)),
                             )
                             .child(section_label("Metric"))
@@ -1290,30 +1306,50 @@ mod tests {
         use super::*;
 
         fn fixture(metric_count: usize) -> (tempfile::TempDir, ProjectId, RunId) {
+            fixture_with_runs(metric_count, 1)
+        }
+
+        fn fixture_with_runs(
+            metric_count: usize,
+            run_count: usize,
+        ) -> (tempfile::TempDir, ProjectId, RunId) {
             let root = tempfile::tempdir().expect("test directory should be created");
             let client = NativeClient::open(root.path()).expect("test client should open");
             let project = client
                 .create_project("viewer", Some(ProjectId::from_string("project")))
                 .expect("test project should be created");
-            let run = client
-                .create_run(
-                    &project.project_id,
-                    "baseline",
-                    Some(RunId::from_string("run")),
-                )
-                .expect("test Run should be created");
-            let handle = client.run_handle(run.clone());
-            for index in 0..metric_count {
-                let metric_key = format!("metric-{index}");
-                handle
-                    .log_metric_at_step(&metric_key, 0, index as f64)
-                    .expect("test metric should be logged");
+            let mut first_run_id = None;
+            for run_index in 0..run_count {
+                let run_name = format!("baseline {run_index}");
+                let run = client
+                    .create_run(
+                        &project.project_id,
+                        &run_name,
+                        Some(RunId::from_string(format!(
+                            "run-{run_index}-with-a-very-long-identifier-that-requires-horizontal-scrolling"
+                        ))),
+                    )
+                    .expect("test Run should be created");
+                if run_index == 0 {
+                    let handle = client.run_handle(run.clone());
+                    for index in 0..metric_count {
+                        let metric_key = format!("metric-{index}");
+                        handle
+                            .log_metric_at_step(&metric_key, 0, index as f64)
+                            .expect("test metric should be logged");
+                    }
+                }
+                client
+                    .finish_run(&run.run_id)
+                    .expect("test Run should finish");
+                first_run_id.get_or_insert(run.run_id);
             }
-            client
-                .finish_run(&run.run_id)
-                .expect("test Run should finish");
             client.shutdown(None).expect("test client should shut down");
-            (root, project.project_id, run.run_id)
+            (
+                root,
+                project.project_id,
+                first_run_id.expect("fixture should contain at least one Run"),
+            )
         }
 
         fn open_viewer(
@@ -1403,6 +1439,71 @@ mod tests {
             let (window, cx) = open_viewer(cx, Some(root.path().to_path_buf()));
 
             wait_for_viewer(window, &cx, |viewer| viewer.core.catalog().is_some());
+        }
+
+        #[gpui::test]
+        fn run_list_shares_horizontal_scroll_without_conflicting_with_vertical_scroll(
+            cx: &mut TestAppContext,
+        ) {
+            let (root, project_id, _) = fixture_with_runs(0, 12);
+            cx.executor().allow_parking();
+            let (window, mut cx) = open_viewer(cx, Some(root.path().to_path_buf()));
+            wait_for_viewer(window, &cx, |viewer| viewer.core.catalog().is_some());
+            window
+                .update(&mut cx, |viewer, _, cx| {
+                    viewer.select_project(project_id, cx);
+                })
+                .expect("viewer should remain open");
+            wait_for_viewer(window, &cx, |viewer| {
+                viewer
+                    .core
+                    .catalog()
+                    .is_some_and(|catalog| !catalog.runs.is_empty())
+            });
+            let list = cx
+                .debug_bounds("runs-list")
+                .expect("Run list should be rendered");
+            let first_row_before = cx
+                .debug_bounds("run-row-0")
+                .expect("first Run row should be rendered");
+            let second_row_before = cx
+                .debug_bounds("run-row-1")
+                .expect("second Run row should be rendered");
+            assert_eq!(first_row_before.size.height, px(40.));
+            assert!(first_row_before.size.width > list.size.width);
+            assert!(cx.debug_bounds("run-row-11").is_none());
+
+            cx.simulate_event(ScrollWheelEvent {
+                position: list.center(),
+                delta: ScrollDelta::Pixels(point(px(-200.), px(0.))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+            });
+
+            let first_row_after = cx
+                .debug_bounds("run-row-0")
+                .expect("first Run row should remain rendered");
+            let second_row_after = cx
+                .debug_bounds("run-row-1")
+                .expect("second Run row should remain rendered");
+            let horizontal_delta = first_row_after.origin.x - first_row_before.origin.x;
+            assert!(horizontal_delta < px(0.));
+            assert_eq!(
+                second_row_after.origin.x - second_row_before.origin.x,
+                horizontal_delta
+            );
+
+            cx.simulate_event(ScrollWheelEvent {
+                position: list.center(),
+                delta: ScrollDelta::Pixels(point(px(0.), px(-1_000.))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+            });
+
+            let last_row = cx
+                .debug_bounds("run-row-11")
+                .expect("last Run row should be rendered after vertical scrolling");
+            assert_eq!(last_row.origin.x, first_row_after.origin.x);
         }
 
         #[gpui::test]

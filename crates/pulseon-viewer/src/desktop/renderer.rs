@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui::{
-    Bounds, Path, PathBuilder, Pixels, Point, Rgba, WindowAppearance, canvas, fill, point, px, rgb,
-    rgba, size,
+    Bounds, ContentMask, Path, PathBuilder, Pixels, Point, Rgba, WindowAppearance, canvas, fill,
+    point, px, rgb, rgba, size,
 };
 use pulseon_chart_core::{
     AxisRange, BrushState, CanvasSize, LinearScale, PathCache, ScreenPoint, Viewport,
@@ -344,23 +344,25 @@ pub fn detail_canvas(
             prepared
         },
         move |bounds, prepared, window, _| {
-            let grid = rgb(0xe5e7eb);
-            for index in 0..=5 {
-                let ratio = index as f32 / 5.;
-                let x = bounds.origin.x + bounds.size.width * ratio;
-                let y = bounds.origin.y + bounds.size.height * ratio;
-                window.paint_quad(fill(
-                    Bounds::new(point(x, bounds.origin.y), size(px(1.), bounds.size.height)),
-                    grid,
-                ));
-                window.paint_quad(fill(
-                    Bounds::new(point(bounds.origin.x, y), size(bounds.size.width, px(1.))),
-                    grid,
-                ));
-            }
-            for (path, color) in prepared.paths {
-                window.paint_path(path, color);
-            }
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                let grid = rgb(0xe5e7eb);
+                for index in 0..=5 {
+                    let ratio = index as f32 / 5.;
+                    let x = bounds.origin.x + bounds.size.width * ratio;
+                    let y = bounds.origin.y + bounds.size.height * ratio;
+                    window.paint_quad(fill(
+                        Bounds::new(point(x, bounds.origin.y), size(px(1.), bounds.size.height)),
+                        grid,
+                    ));
+                    window.paint_quad(fill(
+                        Bounds::new(point(bounds.origin.x, y), size(bounds.size.width, px(1.))),
+                        grid,
+                    ));
+                }
+                for (path, color) in prepared.paths {
+                    window.paint_path(path, color);
+                }
+            });
         },
     )
 }
@@ -389,31 +391,33 @@ pub fn overview_canvas(
             prepared
         },
         move |bounds, prepared, window, _| {
-            for (path, color) in prepared.paths {
-                window.paint_path(path, color);
-            }
-            let start_ratio =
-                ((brush.selected().start() - brush.home().start()) / brush.home().span()) as f32;
-            let end_ratio =
-                ((brush.selected().end() - brush.home().start()) / brush.home().span()) as f32;
-            let start = bounds.origin.x + bounds.size.width * start_ratio;
-            let end = bounds.origin.x + bounds.size.width * end_ratio;
-            window.paint_quad(fill(
-                Bounds::new(
-                    point(start, bounds.origin.y),
-                    size(end - start, bounds.size.height),
-                ),
-                rgba(0x2563eb24),
-            ));
-            for x in [start, end] {
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                for (path, color) in prepared.paths {
+                    window.paint_path(path, color);
+                }
+                let start_ratio = ((brush.selected().start() - brush.home().start())
+                    / brush.home().span()) as f32;
+                let end_ratio =
+                    ((brush.selected().end() - brush.home().start()) / brush.home().span()) as f32;
+                let start = bounds.origin.x + bounds.size.width * start_ratio;
+                let end = bounds.origin.x + bounds.size.width * end_ratio;
                 window.paint_quad(fill(
                     Bounds::new(
-                        point(x - px(4.), bounds.origin.y),
-                        size(px(8.), bounds.size.height),
+                        point(start, bounds.origin.y),
+                        size(end - start, bounds.size.height),
                     ),
-                    rgb(0x2563eb),
+                    rgba(0x2563eb24),
                 ));
-            }
+                for x in [start, end] {
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            point(x - px(4.), bounds.origin.y),
+                            size(px(8.), bounds.size.height),
+                        ),
+                        rgb(0x2563eb),
+                    ));
+                }
+            });
         },
     )
 }
